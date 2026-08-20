@@ -1,0 +1,27 @@
+{
+  "techniques": {
+    "T1110": {
+      "name": "Brute Force",
+      "tactic": "Credential Access",
+      "tactic_id": "TA0006",
+      "sub_techniques": {
+        "T1110.001": {
+          "name": "Password Guessing",
+          "description": "Adversaries may guess passwords to access accounts without authorization.",
+          "mitigations": [
+            "M1036: Account Use Policies",
+            "M1032: Multi-factor Authentication"
+          ]
+        },
+        "T1110.002": {
+          "name": "Password Cracking",
+          "description": "Adversaries may crack password hashes offline or via brute force.",
+          "mitigations": [
+            "M1036: Account Use Policies",
+            "M1032: Multi-factor Authentication"
+          ]
+        }
+      }
+    }
+  }
+}

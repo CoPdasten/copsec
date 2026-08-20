@@ -1,0 +1,36 @@
+[Unit]
+Description=CoPSeC Enterprise Threat Prevention Engine
+Documentation=https://github.com/CoPSeC/copsec
+After=network.target network-online.target local-fs.target syslog.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+
+# Binary ve Çalışma Alanı
+ExecStart=/usr/local/bin/copsec --config /etc/copsec/copsec.yaml
+WorkingDirectory=/var/log/copsec
+Restart=always
+RestartSec=3s
+
+# Ağ ve Kernel İzinleri (Capabilities)
+CapabilityBoundingSet=CAP_NET_RAW CAP_NET_ADMIN CAP_SYS_NICE
+AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN
+
+# Güvenlik ve İzolasyon Sıkılaştırması (Hardening)
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true
+LimitNOFILE=65535
+LimitMEMLOCK=infinity
+
+# Standart Log Yönlendirmeleri
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=copsec
+
+[Install]
+WantedBy=multi-user.target

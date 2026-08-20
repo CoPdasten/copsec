@@ -1,0 +1,21 @@
+{
+  "configurations": [
+    {
+      "name": "Linux",
+      "compilerPath": "/usr/bin/c++",
+      "cStandard": "c17",
+      "cppStandard": "c++20",
+      "includePath": [
+        "${workspaceFolder}/include",
+        "${workspaceFolder}/build",
+        "/usr/include",
+        "/usr/include/x86_64-linux-gnu"
+      ],
+      "defines": [
+        "COPSEC_HAS_PCAP"
+      ],
+      "intelliSenseMode": "linux-gcc-x64"
+    }
+  ],
+  "version": 4
+}

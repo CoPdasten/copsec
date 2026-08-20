@@ -1,0 +1,12 @@
+
+build/
+
+bin/
+
+*.o
+
+*.a
+
+*.so
+
+__pycache__/
