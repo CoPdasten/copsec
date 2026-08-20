@@ -133,7 +133,7 @@ foreach(target copsec copsec-cli)
 endforeach()
 
 # link libraries
-target_link_libraries(copsec PRIVATE
+target_link_libraries(copsec PRIVATE maxminddb
     ${NFTABLES_LIBRARIES}
     ${COPSEC_MAXMINDDB_LIBS}
     ${COPSEC_PCAP_LIBS}
