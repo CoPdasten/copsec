@@ -17,6 +17,7 @@ public:
     nlohmann::json enrich_event(const nlohmann::json& event) const;
 
     bool load_stix_json(const std::string& provided_path);
+    bool refresh_from_taxii(const std::string& endpoint, const std::string& cache_path);
     MitreTechniqueInfo lookup_technique(const std::string& technique_id) const;
 
 private:

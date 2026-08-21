@@ -55,12 +55,12 @@ ThreatScoreResult DetectionEngine::score_hit(const std::string& ip, int points) 
 }
 
 bool DetectionEngine::record_hit(const std::string& ip, int points, int ban_duration_seconds,
-                                 const std::string& rule_id) {
+                                 const std::string& rule_id, const std::string& raw_log_payload) {
     const auto result = score_hit(ip, points);
     if (!result.threshold_crossed || ip.empty() || DbManager::get_instance().is_whitelisted(ip)) {
         return false;
     }
-    return bouncer_.ban_ip(ip, ban_duration_seconds, rule_id);
+    return bouncer_.ban_ip(ip, ban_duration_seconds, rule_id, raw_log_payload);
 }
 
 } // namespace copsec

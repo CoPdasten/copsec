@@ -3,18 +3,25 @@
 #include <csignal>
 #include <cstring>
 #include <filesystem>
+#include <chrono>
+#include <ctime>
 #include <fstream>
 #include <iostream>
 #include <limits>
 #include <sstream>
 #include <string>
 #include <vector>
+#include <regex>
+#include <thread>
+#include <iomanip>
+#include <nlohmann/json.hpp>
 #include <unistd.h>
 
 #include "fail2ban_engine.hpp"
 #include "db_manager.hpp"
 #include "mitre_fetcher.hpp"
 #include "mitre_engine.hpp"
+#include "mitre.hpp"
 #include "pcap_capture.hpp"
 #include "pcap_manager.hpp"
 #include "shm_ipc.hpp"
@@ -58,6 +65,89 @@ bool run_nft_command(const std::string& command, std::string& output, bool use_s
     return false;
 }
 
+std::size_t count_ipv4_entries(const std::string& output) {
+    const std::regex address(R"(\b(?:\d{1,3}\.){3}\d{1,3}\b)");
+    return static_cast<std::size_t>(std::distance(
+        std::sregex_iterator(output.begin(), output.end(), address), std::sregex_iterator()));
+}
+
+std::size_t count_suricata_alerts(const std::filesystem::path& path, bool eve_json) {
+    std::ifstream input(path);
+    if (!input.is_open()) return 0;
+    std::size_t count = 0;
+    std::string line;
+    while (std::getline(input, line)) {
+        if (eve_json) {
+            try {
+                if (nlohmann::json::parse(line).value("event_type", "") == "alert") ++count;
+            } catch (const nlohmann::json::exception&) {
+            }
+        } else if (line.find("[**]") != std::string::npos) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+std::string fit_cell(const std::string& value, std::size_t width) {
+    if (value.size() <= width) return value + std::string(width - value.size(), ' ');
+    return value.substr(0, width - 3) + "...";
+}
+
+void print_ban_table(const std::string& nft_output) {
+    struct BanRow { std::string ip, duration, reason, mitre; };
+    std::vector<BanRow> rows;
+    const std::regex address(R"(\b(?:\d{1,3}\.){3}\d{1,3}\b)");
+    for (std::sregex_iterator iterator(nft_output.begin(), nft_output.end(), address), end; iterator != end; ++iterator) {
+        const std::string ip = iterator->str();
+        std::string duration = "active";
+        const auto line_start = nft_output.rfind('\n', iterator->position());
+        const auto line_end = nft_output.find('\n', iterator->position());
+        const std::string line = nft_output.substr(line_start == std::string::npos ? 0 : line_start + 1,
+            line_end == std::string::npos ? std::string::npos : line_end - line_start - 1);
+        const auto timeout = line.find("timeout ");
+        if (timeout != std::string::npos) duration = line.substr(timeout + 8);
+        std::string reason = "nftables ban";
+        std::string mitre = "Unknown";
+        if (copsec::DbManager::get_instance().initialized()) {
+            for (const auto& incident : copsec::DbManager::get_instance().recent_incidents(500)) {
+                if (incident.src_ip == ip) {
+                    reason = incident.rule_id.empty() ? reason : incident.rule_id;
+                    mitre = incident.mitre_technique_id.empty() ? mitre :
+                        incident.mitre_technique_id + " (" + incident.mitre_technique_name + ")";
+                    break;
+                }
+            }
+        }
+        rows.push_back({ip, duration, reason, mitre});
+    }
+    constexpr std::size_t ip_width = 15, duration_width = 11, reason_width = 30, mitre_width = 25;
+    const std::string top = "┌─────────────────┬─────────────┬────────────────────────────────┬───────────────────────────┐\n";
+    const std::string middle = "├─────────────────┼─────────────┼────────────────────────────────┼───────────────────────────┤\n";
+    const std::string bottom = "└─────────────────┴─────────────┴────────────────────────────────┴───────────────────────────┘\n";
+    std::cout << '\n' << top << "│ " << fit_cell("IP ADDRESS", ip_width) << " │ " << fit_cell("DURATION", duration_width)
+              << " │ " << fit_cell("REASON / TECHNIQUE", reason_width) << " │ " << fit_cell("MITRE ATT&CK", mitre_width) << " │\n" << middle;
+    for (const auto& row : rows) {
+        std::cout << "│ " << fit_cell(row.ip, ip_width) << " │ " << fit_cell(row.duration, duration_width)
+                  << " │ " << fit_cell(row.reason, reason_width) << " │ " << fit_cell(row.mitre, mitre_width) << " │\n";
+    }
+    std::cout << bottom;
+}
+
+std::string tail_file(const std::filesystem::path& path, std::size_t max_lines = 8) {
+    std::ifstream input(path);
+    if (!input.is_open()) return "(not available)";
+    std::vector<std::string> lines;
+    std::string line;
+    while (std::getline(input, line)) {
+        lines.push_back(std::move(line));
+        if (lines.size() > max_lines) lines.erase(lines.begin());
+    }
+    std::ostringstream output;
+    for (const auto& entry : lines) output << entry << '\n';
+    return output.str().empty() ? "(no events)\n" : output.str();
+}
+
 pid_t find_daemon_pid() {
     std::ifstream pid_file("/var/run/copsec.pid");
     pid_t pid = 0;
@@ -90,17 +180,20 @@ Management:
     status                         Show nftables enforcement status
     start | stop | restart         Control the copsec system service
     version                        Show CLI version
+    update                         Pull, build, install, and restart the agent
 
 Whitelist:
     whitelist add <ip> "<reason>" Add a trusted IP or CIDR
     whitelist remove <ip>          Remove a trusted IP or CIDR
     whitelist list                 List trusted networks
 
-Bans & Inspection:
-    ban <ip> <seconds>              Add a timed nftables ban
-    ban list                        List active bans
-    unban <ip>                      Remove an IP from the ban set
-    flush                           Flush all active bans
+Bans / Threat Mitigation:
+    ban list                        List all actively banned IP addresses
+    ban add <ip> "<reason>"          Manually ban an IP address
+    ban remove <ip>                 Unban a specific IP address
+    ban clear-list                  Flush active nftables ban set (preserves internal history/scores)
+
+Inspection:
     lookup <ip>                     Query host intelligence
     shm                             Show shared-memory telemetry
 
@@ -110,10 +203,13 @@ Storage & Maintenance:
     pcap list                       List forensic captures
 
 Detection & Intelligence:
+    scores                         List active adaptive threat scores
     fail2ban status                 Show escalation state
     suricata status                 Show Suricata watcher state
     xdp status                      Show XDP status
+    monitor                        Live threat and security event monitor
     mitre <technique> [--offline]   Query MITRE ATT&CK
+    mitre <technique> --taxii <url> Refresh and query a TAXII STIX bundle
 
 Configuration:
     config-reload                   Request a configuration reload
@@ -230,6 +326,53 @@ void print_stix_profile(const copsec::TechniqueProfile& profile, const std::vect
     }
 }
 
+void print_mitre_rule_context(const std::string& technique_id) {
+    std::vector<std::string> candidates = {"config/rules.json", "../config/rules.json", "/etc/copsec/rules.json"};
+    nlohmann::json root;
+    for (const auto& candidate : candidates) {
+        std::ifstream input(candidate);
+        if (input.is_open()) {
+            try { input >> root; } catch (...) { root = {}; }
+            if (!root.empty()) break;
+        }
+    }
+
+    std::cout << "Rules:       ";
+    bool found_rule = false;
+    if (root.contains("rules") && root["rules"].is_array()) {
+        for (const auto& rule : root["rules"]) {
+            const auto mapping = rule.value("mitre", nlohmann::json::object());
+            bool matches = false;
+            if (mapping.is_array()) {
+                for (const auto& item : mapping) matches = matches || item.value("technique_id", "") == technique_id;
+            } else {
+                matches = mapping.value("technique_id", "") == technique_id;
+            }
+            if (matches) {
+                if (found_rule) std::cout << ", ";
+                std::cout << rule.value("id", rule.value("name", "unknown"));
+                found_rule = true;
+            }
+        }
+    }
+    if (!found_rule) std::cout << "none";
+    std::cout << "\nTriggers (24h): ";
+    std::size_t recent = 0;
+    const auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    auto& database = copsec::DbManager::get_instance();
+    if (database.initialize()) {
+        for (const auto& incident : database.recent_incidents(10000)) {
+            if (incident.mitre_technique_id != technique_id) continue;
+            try {
+                if (now_ms - std::stoll(incident.timestamp) <= 86400000) ++recent;
+            } catch (...) {
+            }
+        }
+    }
+    std::cout << recent << "\n";
+}
+
 void print_shm_snapshot(const copsec::ShmSnapshot& snapshot) {
     std::cout << "=== CoPSeC Shared Memory IPC ===\n";
     std::cout << "Active bans:           " << snapshot.active_bans << "\n";
@@ -256,6 +399,7 @@ void print_shm_snapshot(const copsec::ShmSnapshot& snapshot) {
                   << " | rule=" << event.rule_id
                   << " | mitre_tactic=" << event.mitre_tactic
                   << " | mitre_technique=" << event.mitre_technique
+                  << " - " << event.mitre_technique_name
                   << " | ban=" << event.ban_duration
                   << "s | ts=" << event.timestamp_ms << "\n";
     }
@@ -276,13 +420,103 @@ int main(int argc, char** argv) {
         return 0;
     }
 
+    if (command == "scores") {
+        auto& database = copsec::DbManager::get_instance();
+        if (!database.initialize()) {
+            std::cerr << "Unable to open score database.\n";
+            return 1;
+        }
+        const auto now = std::chrono::system_clock::now();
+        std::cout << "IP\tSCORE\tRISK\tTIME_TO_DECAY\n";
+        for (const auto& entry : database.list_threat_scores()) {
+            const auto updated = std::chrono::system_clock::time_point(std::chrono::seconds(entry.updated_at));
+            const auto elapsed_seconds = std::max<int64_t>(0, std::chrono::duration_cast<std::chrono::seconds>(now - updated).count());
+            const int effective_score = std::min(100, std::max(0, entry.points - static_cast<int>(elapsed_seconds / 3600) * 10));
+            if (effective_score == 0) continue;
+            const char* risk = effective_score >= 100 ? "CRITICAL" : effective_score >= 60 ? "HIGH" : effective_score >= 30 ? "SUSPICIOUS" : "LOW";
+            const auto remaining_minutes = 60 - ((elapsed_seconds % 3600) / 60);
+            std::cout << entry.ip << '\t' << effective_score << '\t' << risk << '\t'
+                      << remaining_minutes << "m\n";
+        }
+        return 0;
+    }
+
+    if (command == "monitor") {
+        auto& database = copsec::DbManager::get_instance();
+        database.initialize();
+        while (true) {
+            std::cout << "\033[2J\033[H";
+            std::string nft_output;
+            const bool nft_ok = run_nft_command("list set inet copsec_filter ban_list", nft_output);
+            const bool eve_active = std::filesystem::is_regular_file("/var/log/suricata/eve.json");
+            std::cout << "CoPSeC LIVE MONITOR  " << std::chrono::system_clock::to_time_t(std::chrono::system_clock::now()) << "\n\n";
+            std::cout << "SYSTEM & ENFORCEMENT STATUS\n"
+                      << "  nftables: " << (nft_ok ? "active" : "unavailable")
+                      << " | active bans: " << (nft_ok ? count_ipv4_entries(nft_output) : 0) << "\n";
+            auto& xdp = copsec::XdpBouncer::get_instance();
+            xdp.refresh_kernel_stats();
+            std::cout << "  eBPF/XDP: " << (xdp.get_stats().packets_processed > 0 ? "active" : "inactive")
+                      << " | Suricata: " << (eve_active ? "active" : "inactive") << "\n\n";
+            std::cout << "ACTIVE THREAT SCORES\n";
+            for (const auto& entry : database.list_threat_scores()) {
+                if (entry.points <= 0) continue;
+                std::cout << "  " << entry.ip << " score=" << std::min(100, entry.points)
+                          << " risk=" << (entry.points >= 100 ? "CRITICAL" : entry.points >= 60 ? "HIGH" : entry.points >= 30 ? "SUSPICIOUS" : "LOW") << "\n";
+            }
+            std::cout << "\nLIVE SECURITY STREAM\n" << tail_file("/var/log/copsec/siem_cef.log")
+                      << tail_file("/var/log/copsec/agent.log");
+            std::cout.flush();
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+    }
+
     if (command == "ban" && argc >= 3 && std::string(argv[2]) == "list") {
         std::string output;
         if (!run_nft_command("list set inet copsec_filter ban_list", output)) {
             std::cerr << "Unable to query ban list.\n";
             return 1;
         }
-        std::cout << (output.empty() ? "No active bans present.\n" : output);
+        if (output.empty() || count_ipv4_entries(output) == 0) {
+            std::cout << "No active bans present.\n";
+            return 0;
+        }
+        copsec::DbManager::get_instance().initialize();
+        print_ban_table(output);
+        return 0;
+    }
+
+    if (command == "ban" && argc >= 3 && std::string(argv[2]) == "clear-list") {
+        std::string before;
+        if (!run_nft_command("list set inet copsec_filter ban_list", before)) {
+            std::cerr << nlohmann::json{{"command", "ban clear-list"}, {"success", false},
+                {"error", "Unable to query ban list."}}.dump() << '\n';
+            return 1;
+        }
+        const std::size_t flushed = count_ipv4_entries(before);
+        std::string output;
+        if (!run_nft_command("flush set inet copsec_filter ban_list", output)) {
+            std::cerr << nlohmann::json{{"command", "ban clear-list"}, {"success", false},
+                {"error", output}}.dump() << '\n';
+            return 1;
+        }
+        std::cout << nlohmann::json{{"command", "ban clear-list"}, {"success", true},
+            {"flushed", flushed}, {"history_preserved", true}}.dump() << '\n';
+        return 0;
+    }
+
+    if (command == "update") {
+        const auto executable = std::filesystem::read_symlink("/proc/self/exe");
+        const auto project_root = executable.parent_path().parent_path();
+        const auto quote = [](const std::filesystem::path& path) { return "'" + path.string() + "'"; };
+        const std::string root = quote(project_root);
+        if (std::system(("git -C " + root + " pull --ff-only origin main").c_str()) != 0 ||
+            std::system(("cmake --build " + quote(project_root / "build") + " --parallel").c_str()) != 0 ||
+            std::system(("install -m 0755 " + quote(project_root / "build/copsec") + " /usr/local/bin/copsec && install -m 0755 " + quote(project_root / "build/copsec-cli") + " /usr/local/bin/copsec-cli").c_str()) != 0 ||
+            std::system("systemctl restart copsec") != 0) {
+            std::cerr << "Update failed.\n";
+            return 1;
+        }
+        std::cout << "CoPSeC updated and restarted.\n";
         return 0;
     }
 
@@ -436,9 +670,12 @@ int main(int argc, char** argv) {
         }
 
         bool offline = false;
+        std::string taxii_endpoint;
         for (int i = 3; i < argc; ++i) {
             if (std::string(argv[i]) == "--offline") {
                 offline = true;
+            } else if (std::string(argv[i]) == "--taxii" && i + 1 < argc) {
+                taxii_endpoint = argv[++i];
             }
         }
 
@@ -455,11 +692,18 @@ int main(int argc, char** argv) {
             }
             auto actors = parser.actors_for(profile.id);
             print_stix_profile(profile, actors);
+            print_mitre_rule_context(argv[2]);
             return 0;
         }
 
         copsec::MitreEngine engine;
-        if (!engine.load_stix_json("")) {
+        bool loaded = false;
+        if (!taxii_endpoint.empty()) {
+            loaded = engine.refresh_from_taxii(taxii_endpoint, "/var/lib/copsec/mitre_attack.json");
+        } else {
+            loaded = engine.load_stix_json("");
+        }
+        if (!loaded) {
             std::cerr << "MITRE ATT&CK STIX dataset is unavailable.\n";
             return 1;
         }
@@ -469,6 +713,7 @@ int main(int argc, char** argv) {
             return 1;
         }
         print_mitre_info(info);
+        print_mitre_rule_context(argv[2]);
         return 0;
     }
 
@@ -488,9 +733,17 @@ int main(int argc, char** argv) {
             print_usage();
             return 1;
         }
+        const std::filesystem::path eve_path = "/var/log/suricata/eve.json";
+        const std::filesystem::path fast_path = "/var/log/suricata/fast.log";
+        const bool eve_active = std::filesystem::is_regular_file(eve_path);
+        const bool fast_active = std::filesystem::is_regular_file(fast_path);
+        const std::size_t eve_alerts = count_suricata_alerts(eve_path, true);
+        const std::size_t fast_alerts = count_suricata_alerts(fast_path, false);
         std::cout << "=== Suricata NIDS Status ===\n";
-        std::cout << "EVE Stream: /var/log/suricata/eve.json\n";
-        std::cout << "Status: monitoring alerts in real-time\n";
+        std::cout << "EVE Stream: " << eve_path << " [" << (eve_active ? "active" : "inactive/not found") << "]\n";
+        std::cout << "Fast Log:   " << fast_path << " [" << (fast_active ? "active" : "inactive/not found") << "]\n";
+        std::cout << "Total parsed alerts: " << eve_alerts + fast_alerts << "\n";
+        std::cout << "Status: " << ((eve_active || fast_active) ? "monitoring available Suricata streams" : "Suricata logs unavailable") << "\n";
         return 0;
     }
 
@@ -500,6 +753,7 @@ int main(int argc, char** argv) {
             return 1;
         }
         auto& xdp = copsec::XdpBouncer::get_instance();
+        xdp.refresh_kernel_stats();
         std::cout << xdp.status_report();
         return 0;
     }

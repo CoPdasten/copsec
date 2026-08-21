@@ -7,6 +7,8 @@
 #include <cstring>
 #include <filesystem>
 #include <net/if.h>
+#include <ctime>
+#include <chrono>
 
 #ifdef COPSEC_HAS_LIBBPF
 #include <bpf/bpf.h>
@@ -63,7 +65,8 @@ bool XdpBouncer::initialize(const std::vector<std::string>& interfaces) {
 
     bpf_program* program = bpf_object__find_program_by_name(bpf_object_, "copsec_xdp");
     bpf_map* ban_map = bpf_object__find_map_by_name(bpf_object_, "ban_map");
-    if (!program || !ban_map) {
+    bpf_map* counters_map = bpf_object__find_map_by_name(bpf_object_, "xdp_counters");
+    if (!program || !ban_map || !counters_map) {
         Logger::get_instance().log(LogLevel::INFO, "XDP_INIT",
             "eBPF object is missing copsec_xdp or ban_map; retaining nftables enforcement.");
         bpf_object__close(bpf_object_);
@@ -71,6 +74,7 @@ bool XdpBouncer::initialize(const std::vector<std::string>& interfaces) {
         return true;
     }
     ban_map_fd_ = bpf_map__fd(ban_map);
+    counters_map_fd_ = bpf_map__fd(counters_map);
 
     for (const auto& interface : interfaces_) {
         const unsigned int ifindex = if_nametoindex(interface.c_str());
@@ -97,6 +101,7 @@ bool XdpBouncer::initialize(const std::vector<std::string>& interfaces) {
         bpf_object__close(bpf_object_);
         bpf_object_ = nullptr;
         ban_map_fd_ = -1;
+        counters_map_fd_ = -1;
     } else {
         Logger::get_instance().log(LogLevel::INFO, "XDP_INIT", "XDP attached in " + xdp_mode_ + " mode.");
     }
@@ -105,6 +110,31 @@ bool XdpBouncer::initialize(const std::vector<std::string>& interfaces) {
         "libbpf is unavailable; retaining nftables enforcement.");
 #endif
     return true;
+}
+
+XdpStats XdpBouncer::refresh_kernel_stats() {
+    std::lock_guard<std::mutex> lock(mutex_);
+#ifdef COPSEC_HAS_LIBBPF
+    if (counters_map_fd_ >= 0) {
+        uint32_t processed_key = 0;
+        uint32_t dropped_key = 1;
+        uint64_t processed = 0;
+        uint64_t dropped = 0;
+        if (bpf_map_lookup_elem(counters_map_fd_, &processed_key, &processed) == 0 &&
+            bpf_map_lookup_elem(counters_map_fd_, &dropped_key, &dropped) == 0) {
+            const auto now = std::chrono::steady_clock::now();
+            static auto previous_time = now;
+            static uint64_t previous_dropped = 0;
+            const double seconds = std::chrono::duration<double>(now - previous_time).count();
+            stats_.drop_pps = seconds > 0.0 ? (dropped - previous_dropped) / seconds : 0.0;
+            stats_.packets_processed = processed;
+            stats_.packets_dropped = dropped;
+            previous_time = now;
+            previous_dropped = dropped;
+        }
+    }
+#endif
+    return stats_;
 }
 
 bool XdpBouncer::update_kernel_map(const std::string& ip, bool add) {
@@ -134,6 +164,7 @@ void XdpBouncer::detach_all() {
     if (bpf_object_) bpf_object__close(bpf_object_);
     bpf_object_ = nullptr;
     ban_map_fd_ = -1;
+    counters_map_fd_ = -1;
 #endif
 }
 

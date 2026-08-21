@@ -95,7 +95,15 @@ void SoarWorker::process_ban(const BanRequest& request) {
 
 void SoarWorker::refresh_lists() {
     std::vector<std::string> indicators;
-    for (const auto& url : {settings_.tor_exit_url, settings_.c2_url}) {
+    std::vector<std::string> urls;
+    if (settings_.enable_tor_blocklist) {
+        urls.push_back(settings_.tor_exit_url);
+    } else {
+        Logger::get_instance().log(LogLevel::INFO, "THREAT_INTEL_REFRESH",
+            "Tor exit-node blocklist is disabled by configuration; skipping Tor download and ban injection.");
+    }
+    urls.push_back(settings_.c2_url);
+    for (const auto& url : urls) {
         const auto body = fetch(url);
         const auto parsed = parse_ip_list(body);
         indicators.insert(indicators.end(), parsed.begin(), parsed.end());

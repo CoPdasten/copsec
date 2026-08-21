@@ -22,6 +22,7 @@ struct ThreatEvent {
     char rule_id[64] = {};
     char mitre_tactic[64] = {};
     char mitre_technique[32] = {};
+    char mitre_technique_name[96] = {};
     int32_t ban_duration = 0;
     int64_t timestamp_ms = 0;
 };
@@ -146,7 +147,8 @@ public:
                       int32_t ban_duration,
                       int64_t timestamp_ms,
                       const std::string& mitre_tactic = {},
-                      const std::string& mitre_technique = {}) {
+                      const std::string& mitre_technique = {},
+                      const std::string& mitre_technique_name = {}) {
         if (!region_) {
             return;
         }
@@ -158,6 +160,7 @@ public:
         std::snprintf(event.rule_id, sizeof(event.rule_id), "%s", rule_id.substr(0, sizeof(event.rule_id) - 1).c_str());
         std::snprintf(event.mitre_tactic, sizeof(event.mitre_tactic), "%s", mitre_tactic.substr(0, sizeof(event.mitre_tactic) - 1).c_str());
         std::snprintf(event.mitre_technique, sizeof(event.mitre_technique), "%s", mitre_technique.substr(0, sizeof(event.mitre_technique) - 1).c_str());
+        std::snprintf(event.mitre_technique_name, sizeof(event.mitre_technique_name), "%s", mitre_technique_name.substr(0, sizeof(event.mitre_technique_name) - 1).c_str());
         event.ban_duration = ban_duration;
         event.timestamp_ms = timestamp_ms;
         std::snprintf(region_->recent_event, sizeof(region_->recent_event),
@@ -175,10 +178,11 @@ public:
     }
 
     void push_event(const std::string& ip, const std::string& rule_id, int32_t ban_duration,
-                    const std::string& mitre_tactic = {}, const std::string& mitre_technique = {}) {
+                    const std::string& mitre_tactic = {}, const std::string& mitre_technique = {},
+                    const std::string& mitre_technique_name = {}) {
         const auto now = std::chrono::system_clock::now();
         const auto ts_ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
-        record_event(ip, rule_id, ban_duration, ts_ms, mitre_tactic, mitre_technique);
+        record_event(ip, rule_id, ban_duration, ts_ms, mitre_tactic, mitre_technique, mitre_technique_name);
     }
 
     void increment_processed_lines(uint64_t delta = 1) {

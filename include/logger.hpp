@@ -7,6 +7,8 @@
 #include <thread>
 #include <atomic>
 #include <fstream>
+#include <chrono>
+#include <unordered_map>
 
 namespace copsec {
 
@@ -35,6 +37,7 @@ struct LogEvent {
     std::string mitre_url;
     std::string log_source;
     std::string raw_sample;
+    int ban_duration;
     std::string message; // for general system logs
 };
 
@@ -62,7 +65,8 @@ public:
              const std::string& mitre_tactic = "", const std::string& mitre_tactic_id = "",
              const std::string& mitre_technique_id = "", const std::string& mitre_technique_name = "",
              const std::string& mitre_url = "", const std::string& log_source = "",
-             const std::string& raw_sample = "", const std::string& event_category = "system");
+             const std::string& raw_sample = "", const std::string& event_category = "system",
+             int ban_duration = 0);
 
 private:
     Logger();
@@ -82,6 +86,7 @@ private:
     std::string m_hostname;
 
     std::queue<LogEvent> m_queue;
+    std::unordered_map<std::string, std::pair<std::chrono::steady_clock::time_point, uint64_t>> m_throttle;
     std::mutex m_mutex;
     std::condition_variable m_cv;
     std::atomic<bool> m_running;

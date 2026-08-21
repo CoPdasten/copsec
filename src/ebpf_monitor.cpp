@@ -17,9 +17,11 @@ struct ExecEvent {
     char filename[256];
 };
 
-int handle_exec_event(void*, void* data, size_t size) {
+int handle_exec_event(void* user_data, void* data, size_t size) {
     if (size < sizeof(ExecEvent)) return 0;
     const auto* event = static_cast<const ExecEvent*>(data);
+    auto* monitor = static_cast<copsec::EbpfMonitor*>(user_data);
+    if (monitor) monitor->dispatch_exec_event({event->pid, event->uid, event->filename});
     copsec::Logger::get_instance().log(
         copsec::LogLevel::WARN,
         "SUSPICIOUS_EXEC",
@@ -102,7 +104,7 @@ bool EbpfMonitor::start() {
         return true;
     }
 
-    ring_buffer* ring = ring_buffer__new(bpf_map__fd(events), handle_exec_event, nullptr, nullptr);
+    ring_buffer* ring = ring_buffer__new(bpf_map__fd(events), handle_exec_event, this, nullptr);
     if (!ring || libbpf_get_error(ring)) {
         Logger::get_instance().log(LogLevel::INFO, "EBPF_INIT",
             "eBPF ring buffer unavailable; nftables enforcement remains active.");
@@ -118,6 +120,14 @@ bool EbpfMonitor::start() {
     Logger::get_instance().log(LogLevel::INFO, "EBPF_INIT", "sys_enter_execve process monitor attached.");
     return true;
 #endif
+}
+
+void EbpfMonitor::set_exec_callback(ExecCallback callback) {
+    callback_ = std::move(callback);
+}
+
+void EbpfMonitor::dispatch_exec_event(const ExecEvent& event) {
+    if (callback_) callback_(event);
 }
 
 void EbpfMonitor::stop() {

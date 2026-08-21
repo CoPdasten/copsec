@@ -16,6 +16,8 @@ public:
     struct BanInfo {
         std::string ip;
         std::string rule_id;
+        std::string raw_log_payload;
+        std::string mitre_technique;
         int64_t expires_at = 0;
     };
 
@@ -24,6 +26,8 @@ public:
 
     bool init_nftables();
     bool ban_ip(const std::string& ip, int duration_sec, const std::string& rule_id = "");
+    bool ban_ip(const std::string& ip, int duration_sec, const std::string& rule_id,
+                const std::string& raw_log_payload);
     bool bulk_ban_ips(const std::vector<std::string>& ips, int duration_sec, const std::string& rule_id = "");
     void set_ban_observer(std::function<void(const std::string&, int, const std::string&)> observer);
     bool unban_ip(const std::string& ip);

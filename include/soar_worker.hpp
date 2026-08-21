@@ -18,6 +18,7 @@ class Bouncer;
 class SoarWorker {
 public:
     struct Settings {
+        bool enable_tor_blocklist = false;
         std::string abuse_api_url = "https://api.abuseipdb.com/api/v2/check";
         std::string tor_exit_url = "https://check.torproject.org/torbulkexitlist";
         std::string c2_url = "https://feodotracker.abuse.ch/downloads/ipblocklist.txt";

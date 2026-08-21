@@ -9,15 +9,20 @@ MitreMapper& MitreMapper::get_instance() {
 }
 
 void MitreMapper::register_metadata(const std::string& rule_id, const MitreMetadata& meta) {
-    m_mappings[rule_id] = meta;
+    m_mappings[rule_id].mappings.push_back(meta);
 }
 
 MitreMetadata MitreMapper::get_metadata(const std::string& rule_id) const {
     auto it = m_mappings.find(rule_id);
-    if (it != m_mappings.end()) {
-        return it->second;
+    if (it != m_mappings.end() && !it->second.mappings.empty()) {
+        return it->second.mappings.front();
     }
     return MitreMetadata{ "Unknown Tactic", "Unknown Tactic ID", "Unknown Technique ID", "Unknown Technique Name", "" };
+}
+
+std::vector<MitreMetadata> MitreMapper::get_metadata_all(const std::string& rule_id) const {
+    const auto it = m_mappings.find(rule_id);
+    return it == m_mappings.end() ? std::vector<MitreMetadata>{} : it->second.mappings;
 }
 
 bool MitreMapper::load_from_rules_json(const nlohmann::json& rules_json) {
@@ -30,6 +35,16 @@ bool MitreMapper::load_from_rules_json(const nlohmann::json& rules_json) {
         for (const auto& rule : rules_json["rules"]) {
             std::string rule_id = rule.value("id", "");
             if (rule_id.empty()) continue;
+
+            if (rule.contains("mitre") && rule["mitre"].is_array()) {
+                for (const auto& item : rule["mitre"]) {
+                    register_metadata(rule_id, MitreMetadata{
+                        item.value("tactic", ""), item.value("tactic_id", ""),
+                        item.value("technique_id", ""), item.value("technique_name", ""),
+                        item.value("url", "")});
+                }
+                continue;
+            }
 
             if (rule.contains("mitre_tactic") || rule.contains("mitre_technique")) {
                 MitreMetadata meta;

@@ -26,12 +26,7 @@ int tracepoint__syscalls__sys_enter_execve(struct trace_event_raw_sys_enter* ctx
     event->pid = bpf_get_current_pid_tgid() >> 32;
     event->uid = bpf_get_current_uid_gid();
     bpf_probe_read_user_str(event->filename, sizeof(event->filename), (const char*)ctx->args[0]);
-    if (event->filename[0] == '/' &&
-        (event->filename[1] == 't' || event->filename[1] == 'd' || event->filename[1] == 'v')) {
-        bpf_ringbuf_submit(event, 0);
-    } else {
-        bpf_ringbuf_discard(event, 0);
-    }
+    bpf_ringbuf_submit(event, 0);
     return 0;
 }
 

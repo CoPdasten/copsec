@@ -1,0 +1,19 @@
+{
+  "enable_tor_blocklist": false,
+  "siem_export_enabled": true,
+  "siem_host": "127.0.0.1",
+  "siem_port": 514,
+  "siem_format": "cef",
+  "decoy_engine_enabled": true,
+  "decoy_paths": [
+    "/.env",
+    "/.git/config",
+    "/admin_v2",
+    "/config.json.bak",
+    "/wp-config.php.bak",
+    "/backup.sql",
+    "/phpmyadmin",
+    "/db_backup.sql",
+    "/hidden_admin_decoy"
+  ]
+}

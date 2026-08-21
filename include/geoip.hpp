@@ -2,7 +2,10 @@
 #define COPSEC_GEOIP_HPP
 
 #include <string>
+#if __has_include(<maxminddb.h>)
 #include <maxminddb.h>
+#define COPSEC_HAS_MAXMINDDB 1
+#endif
 
 namespace copsec {
 
@@ -17,6 +20,7 @@ class GeoIPLookup {
 public:
     GeoIPResult lookup(const std::string& ip_address) const {
         GeoIPResult result;
+#if defined(COPSEC_HAS_MAXMINDDB)
         MMDB_s city_db;
         int status = MMDB_open("/var/lib/GeoIP/GeoLite2-City.mmdb", MMDB_MODE_MMAP, &city_db);
         if (status == MMDB_SUCCESS) {
@@ -53,6 +57,9 @@ public:
             MMDB_close(&asn_db);
         }
 
+    #else
+        (void)ip_address;
+    #endif
         return result;
     }
 };

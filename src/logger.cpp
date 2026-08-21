@@ -9,6 +9,29 @@
 
 namespace copsec {
 
+static void write_forensic_event(const LogEvent& event) {
+    if (event.event_category != "threat_prevention" || event.ip.empty()) return;
+    try {
+        std::filesystem::create_directories("/var/log/copsec");
+        std::ofstream output("/var/log/copsec/events.log", std::ios::out | std::ios::app);
+        if (!output.is_open()) return;
+        nlohmann::json forensic = {
+            {"timestamp", event.timestamp},
+            {"src_ip", event.ip},
+            {"rule_name", event.rule_name.empty() ? event.rule_id : event.rule_name},
+            {"mitre_tactic", event.mitre_tactic},
+            {"mitre_technique_id", event.mitre_technique_id},
+            {"mitre_technique_name", event.mitre_technique_name},
+            {"raw_log_payload", event.raw_sample},
+            {"action_taken", event.action_taken == "whitelist_guard" ? "WHITELISTED_IGNORE" :
+                (event.action_taken == "nftables_drop" ? "BAN" : event.action_taken)},
+            {"ban_duration", event.ban_duration}
+        };
+        output << forensic.dump() << '\n';
+    } catch (const std::exception&) {
+    }
+}
+
 Logger::Logger() : m_hostname("unknown-host"), m_running(false) {}
 
 Logger::~Logger() {
@@ -74,7 +97,7 @@ void Logger::log(LogLevel level, const std::string& event_type, const std::strin
                  const std::string& mitre_tactic, const std::string& mitre_tactic_id,
                  const std::string& mitre_technique_id, const std::string& mitre_technique_name,
                  const std::string& mitre_url, const std::string& log_source,
-                 const std::string& raw_sample, const std::string& event_category) {
+                 const std::string& raw_sample, const std::string& event_category, int ban_duration) {
     LogEvent log_event{
         get_iso8601_timestamp(),
         level,
@@ -94,11 +117,38 @@ void Logger::log(LogLevel level, const std::string& event_type, const std::strin
         mitre_url,
         log_source,
         raw_sample,
+        ban_duration,
         message
     };
 
+    write_forensic_event(log_event);
+
     {
         std::lock_guard<std::mutex> lock(m_mutex);
+        const std::string throttle_key = event_type + "|" + ip + "|" + rule_id + "|" + message;
+        const auto now = std::chrono::steady_clock::now();
+        auto throttle = m_throttle.find(throttle_key);
+        if (throttle != m_throttle.end()) {
+            if (std::chrono::duration_cast<std::chrono::milliseconds>(now - throttle->second.first).count() < 1000) {
+                ++throttle->second.second;
+                return;
+            }
+            if (throttle->second.second > 0) {
+                log_event.message += " [coalesced_repeats=" + std::to_string(throttle->second.second) + "]";
+            }
+            throttle->second = {now, 0};
+        } else {
+            m_throttle.emplace(throttle_key, std::make_pair(now, 0));
+        }
+        if (m_throttle.size() > 4096) {
+            for (auto it = m_throttle.begin(); it != m_throttle.end();) {
+                if (std::chrono::duration_cast<std::chrono::seconds>(now - it->second.first).count() > 60) {
+                    it = m_throttle.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+        }
         if (!m_running) {
             // Process-direct output if log queue not running or stopped
             nlohmann::json j;
@@ -147,6 +197,11 @@ void Logger::log(LogLevel level, const std::string& event_type, const std::strin
             }
             std::cout << j.dump() << std::endl;
             return;
+        }
+        constexpr std::size_t kMaximumQueueEntries = 8192;
+        if (m_queue.size() >= kMaximumQueueEntries) {
+            if (level == LogLevel::INFO) return;
+            m_queue.pop();
         }
         m_queue.push(std::move(log_event));
     }

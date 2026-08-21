@@ -65,6 +65,7 @@ if (LIBBPF_FOUND AND CLANG_EXECUTABLE)
                 -c ${CMAKE_CURRENT_SOURCE_DIR}/bpf/copsec_xdp.bpf.c
                 -o ${CMAKE_CURRENT_BINARY_DIR}/bpf/copsec_xdp.bpf.o
         DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/bpf/copsec_xdp.bpf.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/bpf/xdp_copsec_filter.c
     )
     add_custom_command(
         OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/bpf/copsec_kprobe.bpf.o
@@ -96,6 +97,11 @@ add_executable(copsec
     src/logger.cpp
     src/parser.cpp
     src/detection_engine.cpp
+    src/penalty_engine.cpp
+    src/anomaly_engine.cpp
+    src/decoy_engine.cpp
+    src/siem_exporter.cpp
+    src/process_monitor.cpp
     src/mitre.cpp
     src/xdp_bouncer.cpp
     src/ebpf_monitor.cpp
@@ -133,7 +139,7 @@ foreach(target copsec copsec-cli)
 endforeach()
 
 # link libraries
-target_link_libraries(copsec PRIVATE maxminddb
+target_link_libraries(copsec PRIVATE
     ${NFTABLES_LIBRARIES}
     ${COPSEC_MAXMINDDB_LIBS}
     ${COPSEC_PCAP_LIBS}

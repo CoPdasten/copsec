@@ -25,6 +25,14 @@ struct RecentIncident {
     std::string mitre_technique_id;
     std::string mitre_technique_name;
     std::string action_taken;
+    std::string raw_log_payload;
+    int64_t ban_duration = 0;
+};
+
+struct ThreatScoreEntry {
+    std::string ip;
+    int points = 0;
+    int64_t updated_at = 0;
 };
 
 class DbManager {
@@ -44,7 +52,13 @@ public:
                          const std::string& mitre_tactics,
                          const std::string& mitre_technique,
                          int64_t timestamp,
-                         const std::string& pcap_path);
+                         const std::string& pcap_path,
+                         const std::string& mitre_technique_name = {},
+                         const std::string& raw_log_payload = {},
+                         const std::string& action_taken = {},
+                         int64_t ban_duration = 0);
+    bool record_threat_score(const std::string& ip, int points);
+    std::vector<ThreatScoreEntry> list_threat_scores() const;
     std::vector<RecentIncident> recent_incidents(std::size_t limit = 50) const;
     std::string get_recent_events(int limit = 50) const;
     bool vacuum();

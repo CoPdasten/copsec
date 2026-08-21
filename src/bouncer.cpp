@@ -10,6 +10,7 @@
 #include "mitre.hpp"
 #include "shm_ipc.hpp"
 #include <nftables/libnftables.h>
+#include "xdp_bouncer.hpp"
 #include <cstdlib>
 #include <iostream>
 #include <sstream>
@@ -60,11 +61,21 @@ bool Bouncer::init_nftables() {
         return false;
     }
 
+    execute_command("add rule inet copsec_filter input tcp flags syn limit rate 100/second burst 100 packets accept");
+    execute_command("add rule inet copsec_filter input tcp flags syn drop");
+    execute_command("add rule inet copsec_filter input udp dport { 53, 123, 1900 } limit rate 200/second burst 200 packets accept");
+    execute_command("add rule inet copsec_filter input udp dport { 53, 123, 1900 } drop");
+
     Logger::get_instance().log(LogLevel::INFO, "BOUNCER_CONFIG", "nftables configuration applied successfully.");
     return true;
 }
 
 bool Bouncer::ban_ip(const std::string& ip, int duration_sec, const std::string& rule_id) {
+    return ban_ip(ip, duration_sec, rule_id, {});
+}
+
+bool Bouncer::ban_ip(const std::string& ip, int duration_sec, const std::string& rule_id,
+                     const std::string& raw_log_payload) {
     // -------------------------------------------------------------
     // WHITELIST CHECK
     // -------------------------------------------------------------
@@ -73,11 +84,12 @@ bool Bouncer::ban_ip(const std::string& ip, int duration_sec, const std::string&
         const auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::system_clock::now().time_since_epoch()).count();
         DbManager::get_instance().record_incident(ip, rule_id, mitre.tactic, mitre.technique_id,
-            timestamp, "");
-        ShmServer::get_instance().push_event(ip, rule_id, 0, mitre.tactic, mitre.technique_id);
+            timestamp, "", mitre.technique_name, raw_log_payload, "WHITELISTED_IGNORE", 0);
+        ShmServer::get_instance().push_event(ip, rule_id, 0, mitre.tactic, mitre.technique_id, mitre.technique_name);
         Logger::get_instance().log(LogLevel::INFO, "FALSE_POSITIVE_PREVENTED",
             "[FALSE_POSITIVE_PREVENTED] Suppressed ban for IP: " + ip, "INFO", "whitelist_guard", ip, rule_id,
-            "", 0, 0, mitre.tactic, mitre.tactic_id, mitre.technique_id, mitre.technique_name, mitre.url);
+            "", 0, 0, mitre.tactic, mitre.tactic_id, mitre.technique_id, mitre.technique_name, mitre.url,
+            "", raw_log_payload, "threat_prevention");
         return false;
     }
 
@@ -90,6 +102,7 @@ bool Bouncer::ban_ip(const std::string& ip, int duration_sec, const std::string&
 
     std::string cmd = "add element inet copsec_filter ban_list { " + ip + " timeout " + std::to_string(escalated_duration) + "s }";
     bool success = execute_command(cmd);
+    const auto mitre = MitreMapper::get_instance().get_metadata(rule_id);
 
     if (success) {
         const auto expiry = std::chrono::system_clock::now() + std::chrono::seconds(escalated_duration);
@@ -97,15 +110,19 @@ bool Bouncer::ban_ip(const std::string& ip, int duration_sec, const std::string&
         std::lock_guard<std::mutex> lock(m_mutex);
         auto existing = std::find_if(m_bans.begin(), m_bans.end(), [&ip](const BanInfo& ban) { return ban.ip == ip; });
         if (existing == m_bans.end()) {
-            m_bans.push_back({ip, rule_id, expiry_seconds});
+            m_bans.push_back(BanInfo{ip, rule_id, raw_log_payload, mitre.technique_id, expiry_seconds});
         } else {
+            existing->raw_log_payload = raw_log_payload;
+            existing->mitre_technique = mitre.technique_id;
             existing->expires_at = expiry_seconds;
         }
         ShmServer::get_instance().set_active_bans(m_bans.size());
     }
-    if (success) ShmServer::get_instance().increment_total_bans();
 
-    const auto mitre = MitreMapper::get_instance().get_metadata(rule_id);
+    if (success) {
+        ShmServer::get_instance().increment_total_bans();
+        XdpBouncer::get_instance().add_ip_to_blocklist(ip);
+    }
     nlohmann::json ban_event = {
         {"ip", ip}, {"duration", escalated_duration}, {"rule_id", rule_id}, {"success", success},
         {"mitre_tactic", mitre.tactic}, {"mitre_tactic_id", mitre.tactic_id},
@@ -113,7 +130,7 @@ bool Bouncer::ban_ip(const std::string& ip, int duration_sec, const std::string&
         {"mitre_url", mitre.url}
     };
     ShmServer::get_instance().push_event(ip, rule_id, escalated_duration,
-        mitre.tactic, mitre.technique_id);
+        mitre.tactic, mitre.technique_id, mitre.technique_name);
 
     // Always generate a forensic artifact for the ban decision itself. The kernel
     // enforcement may fail in constrained/containerized environments, but the
@@ -124,7 +141,8 @@ bool Bouncer::ban_ip(const std::string& ip, int duration_sec, const std::string&
     const auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::system_clock::now().time_since_epoch()).count();
     DbManager::get_instance().record_incident(ip, rule_id, mitre.tactic, mitre.technique_id,
-        timestamp, "/var/log/copsec/pcaps");
+        timestamp, "/var/log/copsec/pcaps", mitre.technique_name, raw_log_payload,
+        success ? "BAN" : "BAN_FAILED", escalated_duration);
 
     if (!subnet.empty()) {
         const std::string subnet_cmd = "add element inet copsec_filter ban_list { " + subnet + " timeout " + std::to_string(escalated_duration) + "s }";
@@ -204,7 +222,7 @@ bool Bouncer::bulk_ban_ips(const std::vector<std::string>& ips, int duration_sec
         in_addr address{};
         if (inet_pton(AF_INET, ip.c_str(), &address) != 1) continue;
         auto existing = std::find_if(m_bans.begin(), m_bans.end(), [&ip](const BanInfo& ban) { return ban.ip == ip; });
-        if (existing == m_bans.end()) m_bans.push_back({ip, rule_id, expiry});
+        if (existing == m_bans.end()) m_bans.push_back(BanInfo{ip, rule_id, {}, {}, expiry});
         else existing->expires_at = expiry;
     }
     ShmServer::get_instance().set_active_bans(m_bans.size());
@@ -226,6 +244,7 @@ bool Bouncer::unban_ip(const std::string& ip) {
             return ban.ip == ip;
         }), m_bans.end());
         ShmServer::get_instance().set_active_bans(m_bans.size());
+        XdpBouncer::get_instance().remove_ip_from_blocklist(ip);
     }
     return success;
 }

@@ -4,11 +4,14 @@
 #include <cstdint>
 #include <string>
 #include <thread>
+#include <functional>
 
 namespace copsec {
 
 class EbpfMonitor {
 public:
+    struct ExecEvent { std::uint32_t pid; std::uint32_t uid; std::string filename; };
+    using ExecCallback = std::function<void(const ExecEvent&)>;
     EbpfMonitor() = default;
     ~EbpfMonitor();
 
@@ -17,6 +20,8 @@ public:
 
     bool start();
     void stop();
+    void set_exec_callback(ExecCallback callback);
+    void dispatch_exec_event(const ExecEvent& event);
 
 private:
     void run();
@@ -25,6 +30,7 @@ private:
     std::thread thread_;
     void* object_ = nullptr;
     void* ring_buffer_ = nullptr;
+    ExecCallback callback_;
 };
 
 } // namespace copsec

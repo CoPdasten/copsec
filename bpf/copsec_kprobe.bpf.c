@@ -28,14 +28,7 @@ int tracepoint__syscalls__sys_enter_execve(struct trace_event_raw_sys_enter* ctx
     event->uid = bpf_get_current_uid_gid();
     bpf_probe_read_user_str(event->filename, sizeof(event->filename), filename);
 
-    if (event->filename[0] == '/' &&
-        ((event->filename[1] == 't' && event->filename[2] == 'm' && event->filename[3] == '/') ||
-         (event->filename[1] == 'd' && event->filename[2] == 'e' && event->filename[3] == 'v' && event->filename[4] == '/' && event->filename[5] == 's' && event->filename[6] == 'h' && event->filename[7] == 'm' && event->filename[8] == '/') ||
-         (event->filename[1] == 'v' && event->filename[2] == 'a' && event->filename[3] == 'r' && event->filename[4] == '/' && event->filename[5] == 't' && event->filename[6] == 'm' && event->filename[7] == 'p' && event->filename[8] == '/'))) {
-        bpf_ringbuf_submit(event, 0);
-    } else {
-        bpf_ringbuf_discard(event, 0);
-    }
+    bpf_ringbuf_submit(event, 0);
     return 0;
 }
 

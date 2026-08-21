@@ -14,6 +14,9 @@
 #include "db_manager.hpp"
 #include "anti_evasion.hpp"
 #include "ebpf_monitor.hpp"
+#include "process_monitor.hpp"
+#include "siem_exporter.hpp"
+#include "decoy_engine.hpp"
 #include "logger.hpp"
 #include "mitre.hpp"
 #include "mitre_engine.hpp"
@@ -70,6 +73,38 @@ std::string find_rules_config() {
     return "";
 }
 
+bool load_agent_config(copsec::SoarWorker::Settings& settings, copsec::DecoyEngine::Settings& decoy_settings) {
+    const std::vector<std::string> paths = {
+        "config/config.json", "../config/config.json", "/etc/copsec/config.json"
+    };
+    for (const auto& path : paths) {
+        std::ifstream input(path);
+        if (!input.is_open()) continue;
+        try {
+            nlohmann::json document;
+            input >> document;
+            settings.enable_tor_blocklist = document.value("enable_tor_blocklist", false);
+            decoy_settings.enabled = document.value("decoy_engine_enabled", true);
+            if (document.contains("decoy_paths") && document["decoy_paths"].is_array()) {
+                for (const auto& path : document["decoy_paths"]) {
+                    if (path.is_string()) decoy_settings.paths.push_back(path.get<std::string>());
+                }
+            }
+            copsec::SiemExporter::Settings siem;
+            siem.enabled = document.value("siem_export_enabled", false);
+            siem.host = document.value("siem_host", "127.0.0.1");
+            siem.port = document.value("siem_port", static_cast<std::uint16_t>(514));
+            siem.format = document.value("siem_format", "cef");
+            copsec::SiemExporter::instance().configure(std::move(siem));
+            return true;
+        } catch (const std::exception& exception) {
+            std::cerr << "Warning: unable to parse agent config " << path << ": " << exception.what() << "\n";
+            return false;
+        }
+    }
+    return false;
+}
+
 bool load_rules_source(const std::string& source, nlohmann::json& output) {
     output = nlohmann::json{{"rules", nlohmann::json::array()}};
     try {
@@ -87,6 +122,9 @@ bool load_rules_source(const std::string& source, nlohmann::json& output) {
             input >> document;
             if (!document.contains("rules") || !document["rules"].is_array()) return false;
             output["rules"] = document["rules"];
+            if (document.contains("monitored_paths") && document["monitored_paths"].is_array()) {
+                output["monitored_paths"] = document["monitored_paths"];
+            }
             return true;
         }
 
@@ -217,7 +255,14 @@ int main(int argc, char** argv) {
 
     shm_server->update_active_bans(bouncer.active_bans().size());
 
-    copsec::SoarWorker soar_worker(bouncer);
+    copsec::SoarWorker::Settings soar_settings;
+    copsec::DecoyEngine::Settings decoy_settings;
+    const bool agent_config_loaded = load_agent_config(soar_settings, decoy_settings);
+    copsec::Logger::get_instance().log(copsec::LogLevel::INFO, "CONFIG_LOAD",
+        std::string("Agent config ") + (agent_config_loaded ? "loaded" :
+            "not found; using secure defaults") + ". Tor blocklist=" +
+        (soar_settings.enable_tor_blocklist ? "enabled" : "disabled"));
+    copsec::SoarWorker soar_worker(bouncer, std::move(soar_settings));
     bouncer.set_ban_observer([&soar_worker](const std::string& ip, int duration, const std::string& rule_id) {
         soar_worker.on_ban_decision(ip, duration, rule_id);
     });
@@ -233,6 +278,8 @@ int main(int argc, char** argv) {
         "eBPF/XDP packet bouncer initialized (nftables fallback active).");
 
     copsec::EbpfMonitor ebpf_monitor;
+    copsec::ProcessMonitor process_monitor(ebpf_monitor);
+    process_monitor.start();
     ebpf_monitor.start();
 
     auto& pcap_forensics = copsec::PcapForensics::get_instance();
@@ -245,13 +292,7 @@ int main(int argc, char** argv) {
             "Forensic PCAP capture ready.");
     }
 
-    copsec::RateLimiter rate_limiter(bouncer, *shm_server);
-    copsec::SuricataWatcher suricata_watcher(bouncer, *shm_server, rate_limiter);
-    suricata_watcher.start();
-    copsec::Logger::get_instance().log(copsec::LogLevel::INFO, "SURICATA_INIT",
-        "Suricata EVE stream watcher initialized.");
-
-    copsec::LogWatcher watcher(bouncer, *shm_server);
+    copsec::LogWatcher watcher(bouncer, *shm_server, decoy_settings);
     if (!watcher.load_rules(config_json)) {
         copsec::Logger::get_instance().log(copsec::LogLevel::ERR, "PARSER_ERROR",
             "Failed to load rules into LogWatcher parser.");
@@ -322,8 +363,8 @@ int main(int argc, char** argv) {
         "Shutdown signal intercepted. Stopping watch threads...");
 
     watcher.stop();
+    process_monitor.stop();
     ebpf_monitor.stop();
-    suricata_watcher.stop();
     pcap_forensics.stop();
     pcap_manager.shutdown();
     soar_worker.stop();

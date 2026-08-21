@@ -14,6 +14,10 @@
 #include <nlohmann/json.hpp>
 #include "bouncer.hpp"
 #include "threat_score.hpp"
+#include "rate_limiter.hpp"
+#include "penalty_engine.hpp"
+#include "anomaly_engine.hpp"
+#include "decoy_engine.hpp"
 
 namespace copsec {
 
@@ -23,6 +27,8 @@ struct Rule {
     std::string id;
     std::string name;
     std::string log_file;
+    std::vector<std::string> log_files;
+    std::string category;
     std::regex regex;
     std::vector<int> ip_group_indices;
     int max_retry;
@@ -33,11 +39,14 @@ struct Rule {
     std::string mitre_technique_id;
     std::string mitre_technique_name;
     std::string mitre_url;
+    std::vector<std::string> mitre_tactics;
+    std::vector<std::string> mitre_technique_ids;
+    std::vector<std::string> mitre_technique_names;
 };
 
 class LogWatcher {
 public:
-    LogWatcher(Bouncer& bouncer, ShmServer& shm_server);
+    LogWatcher(Bouncer& bouncer, ShmServer& shm_server, DecoyEngine::Settings decoy_settings = {});
     ~LogWatcher();
 
     // Disable copy/move operations
@@ -79,13 +88,24 @@ private:
     void add_file_watch(const std::string& path);
     void add_directory_watch(const std::filesystem::path& directory);
     void recover_file_watch(const std::string& path);
+    void refresh_dynamic_watches();
+
+    bool rule_matches_file(const Rule& rule, const std::string& file_path) const;
+    bool handle_suricata_line(const std::string& file_path, const std::string& line);
+    void record_suricata_alert(const std::string& ip, const std::string& signature,
+                               std::uint32_t sid, std::uint32_t severity,
+                               const std::string& raw_line);
 
     // Rate Limiter with trigger count output parameter
     bool check_rate_limit(const std::string& rule_id, const std::string& ip, int max_retry, int find_time, int& current_count);
 
     Bouncer& m_bouncer;
     ShmServer& m_shm_server;
-    DetectionEngine m_detection_engine;
+    PenaltyEngine m_penalty_engine;
+    AnomalyEngine m_anomaly_engine;
+    DecoyEngine::Settings m_decoy_settings;
+    DecoyEngine m_decoy_engine;
+    RateLimiter m_http_rate_limiter;
     std::vector<Rule> m_rules;
 
     // Inotify & watch state mappings
@@ -96,12 +116,18 @@ private:
     std::unordered_map<int, FileState> m_watched_files;
     std::unordered_map<std::string, int> m_path_to_wd;
     std::unordered_map<int, std::filesystem::path> m_directory_wds;
+    std::vector<std::filesystem::path> m_monitored_paths;
+    std::chrono::steady_clock::time_point m_next_discovery{};
 
     mutable std::mutex m_watch_mutex;
 
     // Sliding Window Rate Limiter
     std::unordered_map<std::string, std::vector<std::chrono::system_clock::time_point>> m_rate_limiter;
     std::mutex m_limiter_mutex;
+
+    mutable std::mutex m_suricata_mutex;
+    std::unordered_map<std::string, std::chrono::system_clock::time_point> m_suricata_recent;
+    std::atomic<std::uint64_t> m_suricata_alerts{0};
 };
 
 } // namespace copsec

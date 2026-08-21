@@ -2,6 +2,7 @@
 
 #include <string>
 #include <unordered_map>
+#include <vector>
 #include <nlohmann/json.hpp>
 
 namespace copsec {
@@ -12,6 +13,10 @@ struct MitreMetadata {
     std::string technique_id;
     std::string technique_name;
     std::string url;
+};
+
+struct MitreRuleMetadata {
+    std::vector<MitreMetadata> mappings;
 };
 
 class MitreMapper {
@@ -29,6 +34,7 @@ public:
 
     // Retrieves MITRE ATT&CK metadata for a given rule ID
     MitreMetadata get_metadata(const std::string& rule_id) const;
+    std::vector<MitreMetadata> get_metadata_all(const std::string& rule_id) const;
 
     // Loads mappings from rules.json
     bool load_from_rules_json(const nlohmann::json& rules_json);
@@ -37,7 +43,7 @@ private:
     MitreMapper() = default;
     ~MitreMapper() = default;
 
-    std::unordered_map<std::string, MitreMetadata> m_mappings;
+    std::unordered_map<std::string, MitreRuleMetadata> m_mappings;
 };
 
 } // namespace copsec

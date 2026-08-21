@@ -17,6 +17,7 @@ struct XdpStats {
     uint64_t packets_processed = 0;
     uint64_t packets_dropped = 0;
     uint64_t ips_blocked = 0;
+    double drop_pps = 0.0;
 };
 
 class XdpBouncer {
@@ -38,6 +39,8 @@ public:
         stats_.ips_blocked++;
         return update_kernel_map(ip, true);
     }
+
+    XdpStats refresh_kernel_stats();
 
     bool remove_ip_from_blocklist(const std::string& ip) {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -81,6 +84,7 @@ public:
         }
         out << "Packets Processed: " << stats_.packets_processed << "\n";
         out << "Packets Dropped: " << stats_.packets_dropped << "\n";
+        out << "Drop PPS: " << stats_.drop_pps << "\n";
         out << "IPs Blocked: " << stats_.ips_blocked << "\n";
         return out.str();
     }
@@ -97,6 +101,7 @@ private:
     std::string xdp_mode_ = "nftables";
     std::unordered_map<std::string, bool> ip_blocklist_;
     int ban_map_fd_ = -1;
+    int counters_map_fd_ = -1;
     std::vector<int> attached_ifindices_;
     std::vector<bpf_link*> links_;
     bpf_object* bpf_object_ = nullptr;

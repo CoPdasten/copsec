@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cctype>
 #include <unordered_map>
+#include <curl/curl.h>
 
 namespace copsec {
 
@@ -187,6 +188,36 @@ bool MitreEngine::load_stix_json(const std::string& provided_path) {
     } catch (const std::exception& exception) {
         Logger::get_instance().log(LogLevel::ERR, "MITRE_STIX",
             "Failed to parse MITRE STIX file " + selected_path.string() + ": " + exception.what());
+        return false;
+    }
+}
+
+bool MitreEngine::refresh_from_taxii(const std::string& endpoint, const std::string& cache_path) {
+    CURL* curl = curl_easy_init();
+    if (!curl) return false;
+    std::string response;
+    curl_easy_setopt(curl, CURLOPT_URL, endpoint.c_str());
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 20L);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 5L);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, MitreFetcher::WriteCallback);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+    curl_slist* headers = curl_slist_append(nullptr, "Accept: application/stix+json;version=2.1");
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    const CURLcode result = curl_easy_perform(curl);
+    curl_slist_free_all(headers);
+    curl_easy_cleanup(curl);
+    if (result != CURLE_OK || response.empty()) return false;
+
+    try {
+        const auto document = nlohmann::json::parse(response);
+        if (!document.contains("objects") || !document["objects"].is_array()) return false;
+        std::ofstream output(cache_path, std::ios::out | std::ios::trunc);
+        if (!output.is_open()) return false;
+        output << document.dump();
+        output.close();
+        return load_stix_json(cache_path);
+    } catch (const std::exception&) {
         return false;
     }
 }

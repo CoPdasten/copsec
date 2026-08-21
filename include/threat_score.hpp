@@ -47,7 +47,7 @@ public:
     explicit DetectionEngine(Bouncer& bouncer);
 
     bool record_hit(const std::string& ip, int points, int ban_duration_seconds,
-                    const std::string& rule_id);
+                    const std::string& rule_id, const std::string& raw_log_payload = {});
     ThreatScoreResult score_hit(const std::string& ip, int points);
 
 private:

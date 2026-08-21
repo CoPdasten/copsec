@@ -5,6 +5,8 @@
 #include "geoip.hpp"
 #include "fail2ban_engine.hpp"
 #include "shm_ipc.hpp"
+#include "db_manager.hpp"
+#include "siem_exporter.hpp"
 #include <sys/inotify.h>
 #include <fcntl.h>
 #include <poll.h>
@@ -15,10 +17,112 @@
 #include <algorithm>
 #include <iostream>
 #include <regex>
+#include <iomanip>
+#include <locale.h>
+#include <set>
 
 namespace copsec {
 
 static Fail2banEngine g_fail2ban_engine;
+
+namespace {
+
+bool wildcard_match(const std::string& pattern, const std::string& value) {
+    std::string expression = "^";
+    for (const char character : pattern) {
+        if (character == '*') expression += ".*";
+        else if (character == '?') expression += '.';
+        else if (std::string(".^$|()[]{}+\\").find(character) != std::string::npos) expression += '\\' + std::string(1, character);
+        else expression += character;
+    }
+    expression += '$';
+    try { return std::regex_match(value, std::regex(expression)); }
+    catch (const std::regex_error&) { return false; }
+}
+
+bool is_web_log_path(const std::string& path) {
+    const auto lower = [&path]() {
+        std::string value = path;
+        std::transform(value.begin(), value.end(), value.begin(), [](unsigned char character) {
+            return static_cast<char>(std::tolower(character));
+        });
+        return value;
+    }();
+    return lower.find("nginx") != std::string::npos || lower.find("apache") != std::string::npos ||
+        lower.find("access.log") != std::string::npos;
+}
+
+bool is_dynamic_log_candidate(const std::filesystem::path& path) {
+    const std::string name = path.filename().string();
+    const std::string lower = [&name]() {
+        std::string value = name;
+        std::transform(value.begin(), value.end(), value.begin(), [](unsigned char character) {
+            return static_cast<char>(std::tolower(character));
+        });
+        return value;
+    }();
+    for (const auto& suffix : {std::string(".gz"), std::string(".xz"), std::string(".bz2"),
+                               std::string(".zip"), std::string(".tar"), std::string(".1"),
+                               std::string(".2")}) {
+        if (lower.size() >= suffix.size() && lower.ends_with(suffix)) return false;
+    }
+    const auto extension = lower.ends_with(".log") || lower.ends_with(".json");
+    const auto well_known = lower == "eve.json" || lower == "access.log" || lower == "error.log" ||
+        lower == "audit.log" || lower == "messages" || lower == "syslog";
+    return extension || well_known;
+}
+
+std::vector<std::string> watch_paths_for_rule(const Rule& rule) {
+    std::vector<std::string> paths;
+    for (const auto& target : rule.log_files) {
+        if (target.find_first_of("*?") == std::string::npos) paths.push_back(target);
+    }
+    if (rule.category == "web" || rule.category == "sqli" || rule.category == "xss" ||
+        rule.category == "rce" || rule.category == "lfi" || rule.category == "ssrf" ||
+        std::any_of(rule.log_files.begin(), rule.log_files.end(), [](const std::string& path) {
+            return path.find("*") != std::string::npos || path.find("?") != std::string::npos;
+        })) {
+        paths.insert(paths.end(), {
+            "/var/log/nginx/access.log", "/var/log/apache2/access.log"
+        });
+    }
+    std::sort(paths.begin(), paths.end());
+    paths.erase(std::unique(paths.begin(), paths.end()), paths.end());
+    return paths;
+}
+
+const std::vector<std::string>& default_suricata_paths() {
+    static const std::vector<std::string> paths = {
+        "/var/log/suricata/eve.json", "/var/log/suricata/fast.log"
+    };
+    return paths;
+}
+
+std::string url_decode(const std::string& input) {
+    std::string decoded;
+    decoded.reserve(input.size());
+    for (std::size_t index = 0; index < input.size(); ++index) {
+        if (input[index] == '%' && index + 2 < input.size()) {
+            const auto hex = [](char character) -> int {
+                if (character >= '0' && character <= '9') return character - '0';
+                if (character >= 'a' && character <= 'f') return character - 'a' + 10;
+                if (character >= 'A' && character <= 'F') return character - 'A' + 10;
+                return -1;
+            };
+            const int high = hex(input[index + 1]);
+            const int low = hex(input[index + 2]);
+            if (high >= 0 && low >= 0) {
+                decoded.push_back(static_cast<char>((high << 4) | low));
+                index += 2;
+                continue;
+            }
+        }
+        decoded.push_back(input[index] == '+' ? ' ' : input[index]);
+    }
+    return decoded;
+}
+
+}
 
 // Convert named captures used by fail2ban-style rules to ECMAScript captures.
 std::string transform_pattern(const std::string& pattern, std::vector<int>& ip_group_indices) {
@@ -47,8 +151,12 @@ std::string transform_pattern(const std::string& pattern, std::vector<int>& ip_g
     return result;
 }
 
-LogWatcher::LogWatcher(Bouncer& bouncer, ShmServer& shm_server)
-        : m_bouncer(bouncer), m_shm_server(shm_server), m_detection_engine(bouncer),
+LogWatcher::LogWatcher(Bouncer& bouncer, ShmServer& shm_server, DecoyEngine::Settings decoy_settings)
+        : m_bouncer(bouncer), m_shm_server(shm_server), m_penalty_engine(bouncer, shm_server),
+            m_anomaly_engine(m_penalty_engine, shm_server),
+            m_decoy_settings(decoy_settings),
+            m_decoy_engine(m_penalty_engine, shm_server, decoy_settings),
+            m_http_rate_limiter(bouncer, shm_server),
             m_inotify_fd(-1), m_running(false) {}
 
 LogWatcher::~LogWatcher() {
@@ -62,17 +170,32 @@ bool LogWatcher::load_rules(const nlohmann::json& rules_json) {
             return false;
         }
 
+        m_monitored_paths.clear();
+        if (rules_json.contains("monitored_paths") && rules_json["monitored_paths"].is_array()) {
+            for (const auto& path : rules_json["monitored_paths"]) {
+                if (path.is_string()) m_monitored_paths.emplace_back(path.get<std::string>());
+            }
+        }
+        if (m_monitored_paths.empty()) m_monitored_paths.emplace_back("/var/log/");
+
         for (const auto& rule_data : rules_json["rules"]) {
             Rule rule;
             rule.id = rule_data.value("id", "");
             rule.name = rule_data.value("name", "");
             rule.log_file = rule_data.value("log_file", "");
+            rule.category = rule_data.value("category", "");
+            if (rule_data.contains("log_files") && rule_data["log_files"].is_array()) {
+                for (const auto& path : rule_data["log_files"]) {
+                    if (path.is_string()) rule.log_files.push_back(path.get<std::string>());
+                }
+            }
+            if (rule.log_files.empty() && !rule.log_file.empty()) rule.log_files.push_back(rule.log_file);
             std::string raw_pattern = rule_data.value("regex", rule_data.value("pattern", ""));
-            rule.max_retry = rule_data.value("max_retry", 5);
+            rule.max_retry = rule_data.value("max_attempts", rule_data.value("max_retry", 5));
             rule.find_time = rule_data.value("find_time", 60);
             rule.ban_time = rule_data.value("ban_duration", rule_data.value("ban_time", 3600));
 
-            if (rule.id.empty() || rule.log_file.empty() || raw_pattern.empty()) {
+            if (rule.id.empty() || rule.log_files.empty() || raw_pattern.empty()) {
                 Logger::get_instance().log(LogLevel::ERR, "CONFIG_ERROR", "Invalid rule: missing id, log_file, or pattern");
                 continue;
             }
@@ -96,11 +219,28 @@ bool LogWatcher::load_rules(const nlohmann::json& rules_json) {
                 rule.mitre_technique_id = rule_data.value("mitre_technique", "");
             } else if (rule_data.contains("mitre")) {
                 auto mitre = rule_data["mitre"];
-                rule.mitre_tactic = mitre.value("tactic", "");
-                rule.mitre_tactic_id = mitre.value("tactic_id", "");
-                rule.mitre_technique_id = mitre.value("technique_id", "");
-                rule.mitre_technique_name = mitre.value("technique_name", "");
-                rule.mitre_url = mitre.value("url", "");
+                const auto add_mitre = [&rule](const nlohmann::json& item) {
+                    rule.mitre_tactics.push_back(item.value("tactic", ""));
+                    rule.mitre_technique_ids.push_back(item.value("technique_id", ""));
+                    rule.mitre_technique_names.push_back(item.value("technique_name", ""));
+                };
+                if (mitre.is_array()) {
+                    for (const auto& item : mitre) add_mitre(item);
+                    if (!mitre.empty()) {
+                        rule.mitre_tactic = mitre[0].value("tactic", "");
+                        rule.mitre_tactic_id = mitre[0].value("tactic_id", "");
+                        rule.mitre_technique_id = mitre[0].value("technique_id", "");
+                        rule.mitre_technique_name = mitre[0].value("technique_name", "");
+                        rule.mitre_url = mitre[0].value("url", "");
+                    }
+                } else {
+                    add_mitre(mitre);
+                    rule.mitre_tactic = mitre.value("tactic", "");
+                    rule.mitre_tactic_id = mitre.value("tactic_id", "");
+                    rule.mitre_technique_id = mitre.value("technique_id", "");
+                    rule.mitre_technique_name = mitre.value("technique_name", "");
+                    rule.mitre_url = mitre.value("url", "");
+                }
             }
 
             m_rules.push_back(rule);
@@ -114,7 +254,7 @@ bool LogWatcher::load_rules(const nlohmann::json& rules_json) {
 }
 
 bool LogWatcher::reload_rules(const nlohmann::json& rules_json) {
-    LogWatcher candidate(m_bouncer, m_shm_server);
+    LogWatcher candidate(m_bouncer, m_shm_server, m_decoy_settings);
     if (!candidate.load_rules(rules_json)) {
         return false;
     }
@@ -130,13 +270,14 @@ bool LogWatcher::reload_rules(const nlohmann::json& rules_json) {
     m_rules = std::move(candidate.m_rules);
 
     for (const auto& rule : m_rules) {
-        add_directory_watch(std::filesystem::path(rule.log_file).parent_path());
-        add_file_watch(rule.log_file);
-        if (rule.log_file == "/var/log/nginx/access.log") {
-            const std::string apache_log = "/var/log/apache2/access.log";
-            add_directory_watch(std::filesystem::path(apache_log).parent_path());
-            add_file_watch(apache_log);
+        for (const auto& path : watch_paths_for_rule(rule)) {
+            add_directory_watch(std::filesystem::path(path).parent_path());
+            add_file_watch(path);
         }
+    }
+    for (const auto& path : default_suricata_paths()) {
+        add_directory_watch(std::filesystem::path(path).parent_path());
+        add_file_watch(path);
     }
     return true;
 }
@@ -155,20 +296,22 @@ bool LogWatcher::start() {
         return false;
     }
 
+    std::setlocale(LC_TIME, "C");
+    m_next_discovery = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+    refresh_dynamic_watches();
+
     std::lock_guard<std::mutex> lock(m_watch_mutex);
-
     for (const auto& rule : m_rules) {
-        if (m_path_to_wd.find(rule.log_file) != m_path_to_wd.end()) {
-            continue;
+        for (const auto& path : watch_paths_for_rule(rule)) {
+            if (m_path_to_wd.find(path) != m_path_to_wd.end()) continue;
+            add_directory_watch(std::filesystem::path(path).parent_path());
+            add_file_watch(path);
         }
-
-        add_directory_watch(std::filesystem::path(rule.log_file).parent_path());
-        add_file_watch(rule.log_file);
-
-        if (rule.log_file == "/var/log/nginx/access.log") {
-            const std::string apache_log = "/var/log/apache2/access.log";
-            add_directory_watch(std::filesystem::path(apache_log).parent_path());
-            add_file_watch(apache_log);
+    }
+    for (const auto& path : default_suricata_paths()) {
+        if (m_path_to_wd.find(path) == m_path_to_wd.end()) {
+            add_directory_watch(std::filesystem::path(path).parent_path());
+            add_file_watch(path);
         }
     }
 
@@ -211,6 +354,10 @@ void LogWatcher::run() {
     char buffer[4096] __attribute__ ((aligned(__alignof__(struct inotify_event))));
 
     while (m_running) {
+        if (std::chrono::steady_clock::now() >= m_next_discovery) {
+            refresh_dynamic_watches();
+            m_next_discovery = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+        }
         int poll_res = poll(&pfd, 1, 100);
         if (poll_res < 0) {
             if (errno == EINTR) continue;
@@ -237,11 +384,9 @@ void LogWatcher::run() {
                     std::lock_guard<std::mutex> lock(m_watch_mutex);
                     const auto dir_it = m_directory_wds.find(event->wd);
                     if (dir_it != m_directory_wds.end() && event->len > 0) {
+                        const auto created_path = (dir_it->second / event->name).string();
                         for (const auto& rule : m_rules) {
-                            const auto path = std::filesystem::path(rule.log_file);
-                            if (path.parent_path() == dir_it->second && path.filename() == event->name) {
-                                add_file_watch(rule.log_file);
-                            }
+                            if (rule_matches_file(rule, created_path)) add_file_watch(created_path);
                         }
                     }
                 } else if (event->mask & (IN_MODIFY | IN_ATTRIB)) {
@@ -263,6 +408,28 @@ void LogWatcher::run() {
     }
 }
 
+void LogWatcher::refresh_dynamic_watches() {
+    std::lock_guard<std::mutex> lock(m_watch_mutex);
+    std::vector<std::filesystem::path> roots = m_monitored_paths;
+    for (const auto& root : roots) {
+        std::error_code root_error;
+        if (!std::filesystem::is_directory(root, root_error)) continue;
+        std::filesystem::recursive_directory_iterator iterator(root,
+            std::filesystem::directory_options::skip_permission_denied, root_error);
+        const std::filesystem::recursive_directory_iterator end;
+        for (; iterator != end; iterator.increment(root_error)) {
+            if (root_error) {
+                root_error.clear();
+                continue;
+            }
+            std::error_code file_error;
+            if (iterator->is_regular_file(file_error) && !file_error && is_dynamic_log_candidate(iterator->path())) {
+                add_file_watch(iterator->path().string());
+            }
+        }
+    }
+}
+
 void LogWatcher::add_directory_watch(const std::filesystem::path& directory) {
     for (const auto& [wd, watched_directory] : m_directory_wds) {
         if (watched_directory == directory) return;
@@ -277,12 +444,15 @@ void LogWatcher::add_directory_watch(const std::filesystem::path& directory) {
 }
 
 void LogWatcher::add_file_watch(const std::string& path) {
-    if (m_path_to_wd.find(path) != m_path_to_wd.end() || !std::filesystem::is_regular_file(path)) return;
+    std::error_code canonical_error;
+    const auto canonical_path = std::filesystem::weakly_canonical(path, canonical_error);
+    const std::string watched_path = canonical_error ? path : canonical_path.string();
+    if (m_path_to_wd.find(watched_path) != m_path_to_wd.end() || !std::filesystem::is_regular_file(watched_path)) return;
 
-    const int wd = inotify_add_watch(m_inotify_fd, path.c_str(), IN_MODIFY | IN_ATTRIB | IN_DELETE_SELF | IN_MOVE_SELF);
+    const int wd = inotify_add_watch(m_inotify_fd, watched_path.c_str(), IN_MODIFY | IN_ATTRIB | IN_DELETE_SELF | IN_MOVE_SELF);
     if (wd < 0) return;
 
-    const int fd = open(path.c_str(), O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+    const int fd = open(watched_path.c_str(), O_RDONLY | O_NONBLOCK | O_CLOEXEC);
     if (fd < 0) {
         inotify_rm_watch(m_inotify_fd, wd);
         return;
@@ -296,13 +466,13 @@ void LogWatcher::add_file_watch(const std::string& path) {
     }
 
     FileState state;
-    state.path = path;
+    state.path = watched_path;
     state.wd = wd;
     state.fd = fd;
     state.read_offset = static_cast<std::uint64_t>(end);
     m_watched_files[wd] = std::move(state);
-    m_path_to_wd[path] = wd;
-    Logger::get_instance().log(LogLevel::INFO, "SYSTEM", "Monitoring log file: " + path);
+    m_path_to_wd[watched_path] = wd;
+    Logger::get_instance().log(LogLevel::INFO, "SYSTEM", "Monitoring log file: " + watched_path);
 }
 
 void LogWatcher::recover_file_watch(const std::string& path) {
@@ -367,14 +537,47 @@ void LogWatcher::read_new_lines(FileState& state) {
 
 void LogWatcher::handle_log_line(const std::string& file_path, const std::string& line) {
     m_shm_server.increment_processed_lines(1);
+    if (handle_suricata_line(file_path, line)) return;
     // -------------------------------------------------------------
     // WAF ENHANCEMENT: Multi-Stage String Normalization
     // -------------------------------------------------------------
-    std::string normalized_line = Normalizer::normalize(line);
+    const std::string normalized_line = Normalizer::normalize(line);
+    const std::string decoded_line = url_decode(normalized_line);
+
+    const bool http_access_log = file_path.find("access.log") != std::string::npos ||
+        file_path.find("/nginx/") != std::string::npos ||
+        file_path.find("/apache") != std::string::npos;
+    if (http_access_log) {
+        std::smatch request_match;
+        const std::regex request_path_regex(
+            R"(\"(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|CONNECT)\s+([^\s\"]+))",
+            std::regex_constants::icase);
+        std::smatch source_match;
+        const std::regex source_ip_regex(R"((\d{1,3}(?:\.\d{1,3}){3}))");
+        const bool has_source_ip = std::regex_search(decoded_line, source_match, source_ip_regex);
+        if (has_source_ip && std::regex_search(decoded_line, request_match, request_path_regex) &&
+            m_decoy_engine.inspect_request(source_match[1].str(), request_match[1].str())) {
+            return;
+        }
+        if (has_source_ip && m_http_rate_limiter.check_http_rate_limit(source_match[1].str())) {
+            Logger::get_instance().log(LogLevel::WARN, "HTTP_FLOOD_BANNED",
+                "HTTP request rate exceeded 30 requests per second",
+                "CRITICAL", "nftables_drop", source_match[1].str(),
+                "http-flood-ddos", "HTTP Flood / Slowloris", 31, 1,
+                "Impact", "TA0040", "T1499", "Endpoint Denial of Service", "",
+                file_path, line, "threat_prevention", 86400);
+            return;
+        }
+        std::smatch http_ip_match;
+        const std::regex http_ip_regex(R"((\d{1,3}(?:\.\d{1,3}){3}))");
+        if (std::regex_search(decoded_line, http_ip_match, http_ip_regex)) {
+            m_anomaly_engine.evaluate_http(http_ip_match[1].str(), decoded_line, decoded_line);
+        }
+    }
 
     HoneypotEngine honeypot;
     std::string matched_trap;
-    if (honeypot.is_honeypot_hit(normalized_line, matched_trap)) {
+    if (honeypot.is_honeypot_hit(decoded_line, matched_trap)) {
         std::string ip = "127.0.0.1";
         std::regex ip_regex(R"((\d{1,3}(?:\.\d{1,3}){3}|[A-Fa-f0-9:]+))");
         std::smatch ip_match;
@@ -404,18 +607,17 @@ void LogWatcher::handle_log_line(const std::string& file_path, const std::string
         );
 
         if (ip != "127.0.0.1" && ip != "::1" && ip != "localhost") {
-            m_detection_engine.record_hit(ip, ThreatScoreAccumulator::kHighSeverityPoints, 86400, "honeypot");
+            m_penalty_engine.record(ip, 100, "honeypot", line);
         }
         return;
     }
 
     for (const auto& rule : m_rules) {
-        const bool apache_fallback = rule.log_file == "/var/log/nginx/access.log" &&
-            file_path == "/var/log/apache2/access.log";
-        if (rule.log_file != file_path && !apache_fallback) continue;
+        if (!rule_matches_file(rule, file_path)) continue;
 
         std::smatch match;
-        if (std::regex_search(normalized_line, match, rule.regex)) {
+        if (!std::regex_search(decoded_line, match, rule.regex) &&
+            !std::regex_search(normalized_line, match, rule.regex)) continue;
             std::string ip = "127.0.0.1";
             for (const int group_index : rule.ip_group_indices) {
                 if (group_index < static_cast<int>(match.size()) && !match[group_index].str().empty()) {
@@ -432,13 +634,23 @@ void LogWatcher::handle_log_line(const std::string& file_path, const std::string
                 }
             }
 
+            {
+                std::lock_guard<std::mutex> correlation_lock(m_suricata_mutex);
+                m_suricata_recent["ip:" + ip] = std::chrono::system_clock::now();
+            }
+
             const std::string rule_text = rule.id + " " + rule.name;
-            const bool high_severity = rule_text.find("sqli") != std::string::npos ||
-                rule_text.find("rce") != std::string::npos ||
-                rule_text.find("injection") != std::string::npos ||
-                rule_text.find("exploit") != std::string::npos;
-            const int threat_points = high_severity ? ThreatScoreAccumulator::kHighSeverityPoints
-                                                    : ThreatScoreAccumulator::kLowSeverityPoints;
+            const bool critical = rule_text.find("rce") != std::string::npos ||
+                rule_text.find("command") != std::string::npos || rule_text.find("reverse") != std::string::npos;
+            const bool high = rule_text.find("sqli") != std::string::npos ||
+                rule_text.find("xxe") != std::string::npos || rule_text.find("brute") != std::string::npos ||
+                rule_text.find("spray") != std::string::npos;
+            const bool medium = rule_text.find("xss") != std::string::npos ||
+                rule_text.find("lfi") != std::string::npos || rule_text.find("path") != std::string::npos ||
+                rule_text.find("ssrf") != std::string::npos;
+            const int threat_points = critical ? 100 : (high ? 60 : (medium ? 35 : 15));
+            SiemExporter::instance().export_event("RULE_DETECTION", rule.id, critical ? 10 : high ? 8 : 5,
+                ip, "DETECT", line);
             m_shm_server.increment_threats(1);
             m_shm_server.record_event(
                 ip, rule.id, 0,
@@ -457,7 +669,7 @@ void LogWatcher::handle_log_line(const std::string& file_path, const std::string
 
                 bool is_loopback = (ip == "127.0.0.1" || ip == "::1" || ip == "localhost");
                 const bool ban_triggered = !is_loopback &&
-                    m_detection_engine.record_hit(ip, threat_points, escalated_ban_time, rule.id);
+                    m_penalty_engine.record(ip, threat_points, rule.id, line);
                 std::string action = is_loopback ? "skipped_lockout_prevention" :
                     (ban_triggered ? "nftables_drop" : "score_accumulating");
                 std::string log_msg = is_loopback
@@ -526,7 +738,88 @@ void LogWatcher::handle_log_line(const std::string& file_path, const std::string
     }
 }
 
-bool LogWatcher::check_rate_limit(const std::string& rule_id, const std::string& ip, int max_retry, int find_time, int& current_count) {
+bool copsec::LogWatcher::handle_suricata_line(const std::string& file_path, const std::string& line) {
+    const bool eve_log = file_path.ends_with("/suricata/eve.json");
+    const bool fast_log = file_path.ends_with("/suricata/fast.log");
+    if (eve_log) {
+        try {
+            const auto object = nlohmann::json::parse(line);
+            if (object.value("event_type", "") != "alert") return false;
+            const auto alert = object.value("alert", nlohmann::json::object());
+            const std::uint32_t severity = alert.value("severity", alert.value("priority", 3U));
+            record_suricata_alert(object.value("src_ip", ""), alert.value("signature", ""),
+                                  alert.value("signature_id", 0U), severity, line);
+            return true;
+        } catch (const nlohmann::json::exception&) {
+            return false;
+        }
+    }
+    if (fast_log) {
+        static const std::regex fast_pattern(
+            R"(\[\*\*\]\s*\[\d+:(\d+):\d+\]\s*(.*?)\s*\[\*\*\]\s*.*\{.*\}\s*(\d{1,3}(?:\.\d{1,3}){3}))");
+        std::smatch match;
+        if (!std::regex_search(line, match, fast_pattern)) return true;
+        record_suricata_alert(match[3].str(), match[2].str(),
+                              static_cast<std::uint32_t>(std::stoul(match[1].str())), 2U, line);
+        return true;
+    }
+    return false;
+}
+
+void copsec::LogWatcher::record_suricata_alert(const std::string& ip, const std::string& signature,
+                                       std::uint32_t sid, std::uint32_t severity,
+                                       const std::string& raw_line) {
+    if (ip.empty()) return;
+    m_suricata_alerts.fetch_add(1, std::memory_order_relaxed);
+    SiemExporter::instance().export_event("SURICATA_ALERT", signature, severity <= 1 ? 10 : severity == 2 ? 7 : 4,
+        ip, "DETECT", "mitre=T1190 (Exploit Public-Facing Application) sid=" +
+        std::to_string(sid) + " severity=" + std::to_string(severity));
+    const int points = severity <= 1 ? copsec::ThreatScoreAccumulator::kHighSeverityPoints :
+        (severity == 2 ? copsec::ThreatScoreAccumulator::kLowSeverityPoints : 5);
+    const std::string correlation_key = ip + ":" + std::to_string(sid) + ":" + signature;
+    const auto now = std::chrono::system_clock::now();
+    bool duplicate = false;
+    {
+        std::lock_guard<std::mutex> lock(m_suricata_mutex);
+        const auto found = m_suricata_recent.find(correlation_key);
+        const auto ip_found = m_suricata_recent.find("ip:" + ip);
+        duplicate = (found != m_suricata_recent.end() &&
+            std::chrono::duration_cast<std::chrono::seconds>(now - found->second).count() < 5) ||
+            (ip_found != m_suricata_recent.end() &&
+            std::chrono::duration_cast<std::chrono::seconds>(now - ip_found->second).count() < 5);
+        m_suricata_recent[correlation_key] = now;
+        for (auto it = m_suricata_recent.begin(); it != m_suricata_recent.end();) {
+            if (std::chrono::duration_cast<std::chrono::seconds>(now - it->second).count() >= 5) it = m_suricata_recent.erase(it);
+            else ++it;
+        }
+    }
+    m_shm_server.increment_threats(1);
+    copsec::DbManager::get_instance().record_threat_score(ip, points);
+    m_shm_server.push_event(ip, "suricata-alert", severity <= 1 ? 86400 : 3600,
+                            "Intrusion Detection", "SURICATA:" + std::to_string(sid), signature);
+    copsec::DbManager::get_instance().record_incident(ip, "suricata-alert", "Intrusion Detection",
+        "SURICATA:" + std::to_string(sid),
+        std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count(),
+        "", signature, raw_line, duplicate ? "CORRELATED_DUPLICATE" : "SURICATA_ALERT", 0);
+    if (!duplicate && severity <= 2) {
+        m_penalty_engine.record(ip, points, "suricata-alert", raw_line);
+    } else {
+        m_penalty_engine.score_only(ip, points);
+    }
+}
+
+bool copsec::LogWatcher::rule_matches_file(const copsec::Rule& rule, const std::string& file_path) const {
+    for (const auto& target : rule.log_files) {
+        if (copsec::wildcard_match(target, file_path)) return true;
+    }
+    if (rule.category == "web" || rule.category == "sqli" || rule.category == "xss" ||
+        rule.category == "rce" || rule.category == "lfi" || rule.category == "ssrf") {
+        return copsec::is_web_log_path(file_path);
+    }
+    return false;
+}
+
+bool copsec::LogWatcher::check_rate_limit(const std::string& rule_id, const std::string& ip, int max_retry, int find_time, int& current_count) {
     std::lock_guard<std::mutex> lock(m_limiter_mutex);
     auto now = std::chrono::system_clock::now();
     std::string key = rule_id + ":" + ip;
@@ -548,5 +841,3 @@ bool LogWatcher::check_rate_limit(const std::string& rule_id, const std::string&
 
     return false;
 }
-
-} // namespace copsec
