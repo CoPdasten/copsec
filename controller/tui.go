@@ -762,7 +762,11 @@ func (m *SIEMModel) renderFleetPanel(width, maxLines int) string {
 		ramBar := renderMiniBar(ramUsageMB/2048.0*100.0, 6)
 
 		// 1. Node Header
-		row1 := fmt.Sprintf("%s %s (VDS-Edge)", statusBadge, lipgloss.NewStyle().Bold(true).Foreground(colorCyberCyan).Render(nodeName))
+		groupTag := n.Group
+		if groupTag == "" {
+			groupTag = "VDS-Edge"
+		}
+		row1 := fmt.Sprintf("%s %s (%s)", statusBadge, lipgloss.NewStyle().Bold(true).Foreground(colorCyberCyan).Render(nodeName), styleWarning.Render(groupTag))
 		b.WriteString(hardTruncate(row1, width) + "\n")
 		linesWritten++
 		if linesWritten >= maxLines {

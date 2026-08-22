@@ -65,7 +65,7 @@ func TestIdentityEnrollment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetRequestMetadata failed: %v", err)
 	}
-	if md["x-node-id"] != nodeID || md["x-api-key"] != apiKey {
+	if md["x-node-id"] != nodeID || md["x-api-key"] != apiKey || md["x-node-group"] == "" {
 		t.Errorf("Metadata mismatch: %v", md)
 	}
 

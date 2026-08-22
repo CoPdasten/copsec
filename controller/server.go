@@ -24,6 +24,7 @@ import (
 type NodeSession struct {
 	NodeID          string
 	APIKey          string
+	Group           string
 	RemoteAddr      string
 	LastSeen        time.Time
 	CPUUsage        float64
@@ -138,8 +139,14 @@ func (s *CentralServer) authenticate(ctx context.Context) (string, error) {
 	nodeID := nodeIDs[0]
 	apiKey := apiKeys[0]
 
-	if !strings.HasPrefix(nodeID, "node-vps-") || len(apiKey) < 8 {
+	if !strings.HasPrefix(nodeID, "node-") || len(apiKey) < 8 {
 		return "", status.Errorf(codes.Unauthenticated, "invalid credentials format")
+	}
+
+	groups := md.Get("x-node-group")
+	group := "DEFAULT_EDGE"
+	if len(groups) > 0 && groups[0] != "" {
+		group = groups[0]
 	}
 
 	s.mu.Lock()
@@ -150,13 +157,17 @@ func (s *CentralServer) authenticate(ctx context.Context) (string, error) {
 		session = &NodeSession{
 			NodeID:      nodeID,
 			APIKey:      apiKey,
+			Group:       group,
 			LastSeen:    time.Now(),
 			CommandChan: make(chan *copsecproto.SOARCommand, 128),
 		}
 		s.nodes[nodeID] = session
-		log.Printf("[AUTH] Registered new edge node: %s", nodeID)
+		log.Printf("[AUTH] Registered new edge node: %s (Group: %s)", nodeID, group)
 	} else {
 		session.LastSeen = time.Now()
+		if group != "DEFAULT_EDGE" {
+			session.Group = group
+		}
 	}
 
 	return nodeID, nil

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 )
 
 // NodeIdentity represents the persistent cryptographic identity of the edge agent.
@@ -17,6 +18,7 @@ type NodeIdentity struct {
 	NodeID    string `json:"node_id"`
 	APIKey    string `json:"api_key"`
 	Hostname  string `json:"hostname,omitempty"`
+	Group     string `json:"group,omitempty"`
 	CreatedAt int64  `json:"created_at"`
 }
 
@@ -36,8 +38,11 @@ func LoadOrCreateIdentity(path string) (*IdentityManager, error) {
 	if err == nil {
 		var id NodeIdentity
 		if err := json.Unmarshal(data, &id); err == nil && id.NodeID != "" && id.APIKey != "" {
+			if id.Group == "" {
+				id.Group = "DEFAULT_EDGE"
+			}
 			mgr.identity = id
-			log.Printf("[INFO] Loaded existing agent identity: NodeID=%s", id.NodeID)
+			log.Printf("[INFO] Loaded existing agent identity: NodeID=%s Group=%s", id.NodeID, id.Group)
 			return mgr, nil
 		}
 	}
@@ -57,7 +62,8 @@ func LoadOrCreateIdentity(path string) (*IdentityManager, error) {
 		NodeID:    nodeID,
 		APIKey:    apiKey,
 		Hostname:  hostname,
-		CreatedAt: 0,
+		Group:     "DEFAULT_EDGE",
+		CreatedAt: time.Now().UnixMilli(),
 	}
 
 	dir := filepath.Dir(path)
@@ -95,13 +101,24 @@ func (m *IdentityManager) GetAPIKey() string {
 	return m.identity.APIKey
 }
 
+// GetGroup returns the fleet cluster group name.
+func (m *IdentityManager) GetGroup() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.identity.Group == "" {
+		return "DEFAULT_EDGE"
+	}
+	return m.identity.Group
+}
+
 // GetRequestMetadata implements grpc credentials.PerRPCCredentials interface.
 func (m *IdentityManager) GetRequestMetadata(ctx context.Context, uri ...string) (map[string]string, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return map[string]string{
-		"x-node-id": m.identity.NodeID,
-		"x-api-key": m.identity.APIKey,
+		"x-node-id":    m.identity.NodeID,
+		"x-api-key":    m.identity.APIKey,
+		"x-node-group": m.GetGroup(),
 	}, nil
 }
 
