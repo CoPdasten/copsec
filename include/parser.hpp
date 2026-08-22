@@ -34,6 +34,7 @@ struct Rule {
     int max_retry;
     int find_time;      // in seconds
     int ban_time;       // in seconds
+    std::vector<int> status_codes;
     std::string mitre_tactic;
     std::string mitre_tactic_id;
     std::string mitre_technique_id;

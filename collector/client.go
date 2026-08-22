@@ -1,0 +1,360 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"math"
+	"os/exec"
+	"runtime"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	copsecproto "github.com/copsec/collector/proto"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+)
+
+// GrpcClientConfig stores gRPC connection and server parameters.
+type GrpcClientConfig struct {
+	ServerAddress   string
+	HeartbeatPeriod time.Duration
+	MaxBatchSize    int
+}
+
+// ControllerClient coordinates live gRPC event streaming, auto-reconnect, and offline buffering.
+type ControllerClient struct {
+	cfg      GrpcClientConfig
+	identity *IdentityManager
+	buffer   *OfflineBuffer
+
+	incomingChan chan *copsecproto.LogEvent
+	isConnected  int32 // atomic bool (1=connected, 0=disconnected)
+	startTime    time.Time
+
+	conn   *grpc.ClientConn
+	client copsecproto.CopsecStreamServiceClient
+}
+
+// NewControllerClient initializes the hybrid gRPC client.
+func NewControllerClient(cfg GrpcClientConfig, identity *IdentityManager, buffer *OfflineBuffer) *ControllerClient {
+	if cfg.HeartbeatPeriod == 0 {
+		cfg.HeartbeatPeriod = 15 * time.Second
+	}
+	if cfg.MaxBatchSize == 0 {
+		cfg.MaxBatchSize = 100
+	}
+
+	return &ControllerClient{
+		cfg:          cfg,
+		identity:     identity,
+		buffer:       buffer,
+		incomingChan: make(chan *copsecproto.LogEvent, 2048),
+		startTime:    time.Now(),
+	}
+}
+
+// Submit enqueues a log event into the submission channel or disk buffer.
+func (c *ControllerClient) Submit(event *copsecproto.LogEvent) {
+	event.NodeId = c.identity.GetNodeID()
+
+	select {
+	case c.incomingChan <- event:
+	default:
+		// Queue full or backpressure: divert directly to disk buffer
+		_ = c.buffer.Enqueue(event)
+	}
+}
+
+// Start launches the background connection manager and worker loops.
+func (c *ControllerClient) Start(ctx context.Context, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	log.Printf("[INFO] Controller gRPC Client starting for target: %s", c.cfg.ServerAddress)
+
+	// Stream worker
+	wg.Add(1)
+	go c.runStreamLoop(ctx, wg)
+
+	// Heartbeat worker
+	wg.Add(1)
+	go c.runHeartbeatLoop(ctx, wg)
+
+	// Command sync worker
+	wg.Add(1)
+	go c.runCommandSyncLoop(ctx, wg)
+}
+
+// runStreamLoop manages connection lifecycle, offline buffer draining, and live streaming.
+func (c *ControllerClient) runStreamLoop(ctx context.Context, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	var backoff time.Duration = 1 * time.Second
+	const maxBackoff = 30 * time.Second
+
+	for {
+		select {
+		case <-ctx.Done():
+			c.closeConnection()
+			return
+		default:
+		}
+
+		conn, client, err := c.connect(ctx)
+		if err != nil {
+			atomic.StoreInt32(&c.isConnected, 0)
+			log.Printf("[WARN] Failed to connect to Controller (%s): %v. Retrying in %v...",
+				c.cfg.ServerAddress, err, backoff)
+
+			c.drainIncomingToBuffer(ctx, backoff)
+
+			backoff = time.Duration(math.Min(float64(backoff*2), float64(maxBackoff)))
+			continue
+		}
+
+		backoff = 1 * time.Second
+		c.conn = conn
+		c.client = client
+		atomic.StoreInt32(&c.isConnected, 1)
+		log.Printf("[INFO] gRPC connection established to Controller (%s)", c.cfg.ServerAddress)
+
+		// 1. Drain offline buffered items first (FIFO)
+		c.flushOfflineBuffer(ctx, client)
+
+		// 2. Stream live events
+		if err := c.streamLive(ctx, client); err != nil {
+			atomic.StoreInt32(&c.isConnected, 0)
+			log.Printf("[WARN] Live gRPC stream disconnected: %v", err)
+			c.closeConnection()
+		}
+	}
+}
+
+func (c *ControllerClient) connect(ctx context.Context) (*grpc.ClientConn, copsecproto.CopsecStreamServiceClient, error) {
+	dialCtx, dialCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer dialCancel()
+
+	opts := []grpc.DialOption{
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithPerRPCCredentials(c.identity),
+		grpc.WithBlock(),
+	}
+
+	conn, err := grpc.DialContext(dialCtx, c.cfg.ServerAddress, opts...)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return conn, copsecproto.NewCopsecStreamServiceClient(conn), nil
+}
+
+func (c *ControllerClient) closeConnection() {
+	if c.conn != nil {
+		_ = c.conn.Close()
+		c.conn = nil
+	}
+}
+
+// flushOfflineBuffer sends accumulated offline records to the controller.
+func (c *ControllerClient) flushOfflineBuffer(ctx context.Context, client copsecproto.CopsecStreamServiceClient) {
+	pending := c.buffer.Size()
+	if pending == 0 {
+		return
+	}
+
+	log.Printf("[INFO] Draining %d offline buffered events to Controller...", pending)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		batch, ids, err := c.buffer.DequeueBatch(c.cfg.MaxBatchSize)
+		if err != nil || len(batch) == 0 {
+			break
+		}
+
+		stream, err := client.StreamEvents(ctx)
+		if err != nil {
+			log.Printf("[WARN] Failed to open stream for buffer flush: %v", err)
+			return
+		}
+
+		for _, event := range batch {
+			if err := stream.Send(event); err != nil {
+				log.Printf("[WARN] Buffer stream interrupted: %v", err)
+				return
+			}
+		}
+
+		ack, err := stream.CloseAndRecv()
+		if err != nil || (ack != nil && !ack.Success) {
+			log.Printf("[WARN] Failed to receive buffer flush Ack: %v", err)
+			return
+		}
+
+		// Acknowledge and compact local disk buffer
+		_ = c.buffer.Ack(ids)
+	}
+
+	log.Println("[INFO] Offline buffer successfully drained.")
+}
+
+// streamLive pushes live incoming events directly to the Controller.
+func (c *ControllerClient) streamLive(ctx context.Context, client copsecproto.CopsecStreamServiceClient) error {
+	stream, err := client.StreamEvents(ctx)
+	if err != nil {
+		return err
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			_, _ = stream.CloseAndRecv()
+			return nil
+
+		case event := <-c.incomingChan:
+			if err := stream.Send(event); err != nil {
+				// Failed to send live: store in offline buffer
+				_ = c.buffer.Enqueue(event)
+				return err
+			}
+		}
+	}
+}
+
+// drainIncomingToBuffer diverts incoming events to disk buffer while disconnected.
+func (c *ControllerClient) drainIncomingToBuffer(ctx context.Context, duration time.Duration) {
+	timeout := time.After(duration)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-timeout:
+			return
+		case event := <-c.incomingChan:
+			_ = c.buffer.Enqueue(event)
+		}
+	}
+}
+
+// runHeartbeatLoop transmits periodic node telemetry.
+func (c *ControllerClient) runHeartbeatLoop(ctx context.Context, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	ticker := time.NewTicker(c.cfg.HeartbeatPeriod)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if atomic.LoadInt32(&c.isConnected) == 0 || c.client == nil {
+				continue
+			}
+
+			var memStats runtime.MemStats
+			runtime.ReadMemStats(&memStats)
+
+			hb := &copsecproto.Heartbeat{
+				NodeId:          c.identity.GetNodeID(),
+				UptimeSeconds:   int64(time.Since(c.startTime).Seconds()),
+				CpuUsage:        0.5,
+				MemoryUsage:     float64(memStats.Alloc) / 1024.0 / 1024.0, // MB
+				ActiveBansCount: 0,
+			}
+
+			hbCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+			_, _ = c.client.SendHeartbeat(hbCtx, hb)
+			cancel()
+		}
+	}
+}
+
+// runCommandSyncLoop receives SOAR execution commands from controller and applies actions.
+func (c *ControllerClient) runCommandSyncLoop(ctx context.Context, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		if atomic.LoadInt32(&c.isConnected) == 0 || c.client == nil {
+			time.Sleep(1 * time.Second)
+			continue
+		}
+
+		cmdStream, err := c.client.SyncCommands(ctx)
+		if err != nil {
+			time.Sleep(2 * time.Second)
+			continue
+		}
+
+		for {
+			cmd, err := cmdStream.Recv()
+			if err != nil {
+				break
+			}
+
+			if cmd != nil {
+				c.executeSOARCommand(cmd, cmdStream)
+			}
+		}
+	}
+}
+
+// executeSOARCommand runs local firewall / containment actions.
+func (c *ControllerClient) executeSOARCommand(cmd *copsecproto.SOARCommand, stream copsecproto.CopsecStreamService_SyncCommandsClient) {
+	log.Printf("[SOAR_COMMAND] Received directive: ID=%s, Action=%s, Target=%s",
+		cmd.CommandId, cmd.ActionType, cmd.TargetIp)
+
+	var success bool
+	var output string
+
+	switch cmd.ActionType {
+	case "BAN_IP":
+		// Direct execution via local copsec-cli or nftables
+		out, err := exec.Command("copsec-cli", "ban", cmd.TargetIp, fmt.Sprintf("%d", cmd.DurationSeconds)).CombinedOutput()
+		if err == nil {
+			success = true
+			output = string(out)
+		} else {
+			output = fmt.Sprintf("Failed to ban IP %s: %v (%s)", cmd.TargetIp, err, string(out))
+		}
+
+	case "UNBAN_IP":
+		out, err := exec.Command("copsec-cli", "unban", cmd.TargetIp).CombinedOutput()
+		if err == nil {
+			success = true
+			output = string(out)
+		} else {
+			output = fmt.Sprintf("Failed to unban IP %s: %v (%s)", cmd.TargetIp, err, string(out))
+		}
+
+	case "FLUSH_BANS":
+		out, err := exec.Command("copsec-cli", "flush").CombinedOutput()
+		if err == nil {
+			success = true
+			output = string(out)
+		} else {
+			output = fmt.Sprintf("Failed to flush bans: %v (%s)", err, string(out))
+		}
+
+	default:
+		output = "Unknown action type: " + cmd.ActionType
+	}
+
+	_ = stream.Send(&copsecproto.CommandAck{
+		CommandId:   cmd.CommandId,
+		Success:     success,
+		Output:      output,
+		TimestampMs: time.Now().UnixMilli(),
+	})
+}

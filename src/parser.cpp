@@ -7,6 +7,7 @@
 #include "shm_ipc.hpp"
 #include "db_manager.hpp"
 #include "siem_exporter.hpp"
+#include "whitelist.hpp"
 #include <sys/inotify.h>
 #include <fcntl.h>
 #include <poll.h>
@@ -26,6 +27,42 @@ namespace copsec {
 static Fail2banEngine g_fail2ban_engine;
 
 namespace {
+
+std::string fast_extract_ip_from_line(const std::string& line) {
+    static const std::regex ip_fast_regex(
+        R"((\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b|::1|::ffff:(?:[0-9]{1,3}\.){3}[0-9]{1,3}|\b[0-9a-fA-F]{1,4}(?::[0-9a-fA-F]{1,4}){1,7}\b))");
+    std::smatch match;
+    if (std::regex_search(line, match, ip_fast_regex)) {
+        return match[1].str();
+    }
+    return "";
+}
+
+int fast_extract_http_status_code(const std::string& line) {
+    static const std::regex status_regex(
+        R"(\"(?:GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|CONNECT)\s+[^\s\"]+(?:\s+HTTP\/[0-9.]+)?\"\s+([1-5][0-9]{2})\b)",
+        std::regex_constants::icase);
+    std::smatch match;
+    if (std::regex_search(line, match, status_regex)) {
+        try {
+            return std::stoi(match[1].str());
+        } catch (...) {
+            return 0;
+        }
+    }
+    return 0;
+}
+
+bool is_pre_routing_whitelisted_ip(const std::string& ip) {
+    if (ip.empty()) return false;
+    if (WhitelistManager::is_fast_path_builtin(ip)) {
+        return true;
+    }
+    if (DbManager::get_instance().is_whitelisted(ip)) {
+        return true;
+    }
+    return false;
+}
 
 bool wildcard_match(const std::string& pattern, const std::string& value) {
     std::string expression = "^";
@@ -195,6 +232,14 @@ bool LogWatcher::load_rules(const nlohmann::json& rules_json) {
             rule.find_time = rule_data.value("find_time", 60);
             rule.ban_time = rule_data.value("ban_duration", rule_data.value("ban_time", 3600));
 
+            if (rule_data.contains("status_codes") && rule_data["status_codes"].is_array()) {
+                for (const auto& sc : rule_data["status_codes"]) {
+                    if (sc.is_number_integer()) {
+                        rule.status_codes.push_back(sc.get<int>());
+                    }
+                }
+            }
+
             if (rule.id.empty() || rule.log_files.empty() || raw_pattern.empty()) {
                 Logger::get_instance().log(LogLevel::ERR, "CONFIG_ERROR", "Invalid rule: missing id, log_file, or pattern");
                 continue;
@@ -214,10 +259,13 @@ bool LogWatcher::load_rules(const nlohmann::json& rules_json) {
                 continue;
             }
 
-            if (rule_data.contains("mitre_tactic") || rule_data.contains("mitre_technique")) {
-                rule.mitre_tactic = rule_data.value("mitre_tactic", "");
-                rule.mitre_technique_id = rule_data.value("mitre_technique", "");
-            } else if (rule_data.contains("mitre")) {
+            if (rule_data.contains("mitre_tactic")) rule.mitre_tactic = rule_data.value("mitre_tactic", "");
+            if (rule_data.contains("mitre_tactic_id")) rule.mitre_tactic_id = rule_data.value("mitre_tactic_id", "");
+            if (rule_data.contains("mitre_technique_id")) rule.mitre_technique_id = rule_data.value("mitre_technique_id", "");
+            if (rule_data.contains("mitre_technique")) rule.mitre_technique_id = rule_data.value("mitre_technique", "");
+            if (rule_data.contains("mitre_technique_name")) rule.mitre_technique_name = rule_data.value("mitre_technique_name", "");
+
+            if (rule_data.contains("mitre")) {
                 auto mitre = rule_data["mitre"];
                 const auto add_mitre = [&rule](const nlohmann::json& item) {
                     rule.mitre_tactics.push_back(item.value("tactic", ""));
@@ -227,19 +275,19 @@ bool LogWatcher::load_rules(const nlohmann::json& rules_json) {
                 if (mitre.is_array()) {
                     for (const auto& item : mitre) add_mitre(item);
                     if (!mitre.empty()) {
-                        rule.mitre_tactic = mitre[0].value("tactic", "");
-                        rule.mitre_tactic_id = mitre[0].value("tactic_id", "");
-                        rule.mitre_technique_id = mitre[0].value("technique_id", "");
-                        rule.mitre_technique_name = mitre[0].value("technique_name", "");
-                        rule.mitre_url = mitre[0].value("url", "");
+                        if (rule.mitre_tactic.empty()) rule.mitre_tactic = mitre[0].value("tactic", "");
+                        if (rule.mitre_tactic_id.empty()) rule.mitre_tactic_id = mitre[0].value("tactic_id", "");
+                        if (rule.mitre_technique_id.empty()) rule.mitre_technique_id = mitre[0].value("technique_id", "");
+                        if (rule.mitre_technique_name.empty()) rule.mitre_technique_name = mitre[0].value("technique_name", "");
+                        if (rule.mitre_url.empty()) rule.mitre_url = mitre[0].value("url", "");
                     }
                 } else {
                     add_mitre(mitre);
-                    rule.mitre_tactic = mitre.value("tactic", "");
-                    rule.mitre_tactic_id = mitre.value("tactic_id", "");
-                    rule.mitre_technique_id = mitre.value("technique_id", "");
-                    rule.mitre_technique_name = mitre.value("technique_name", "");
-                    rule.mitre_url = mitre.value("url", "");
+                    if (rule.mitre_tactic.empty()) rule.mitre_tactic = mitre.value("tactic", "");
+                    if (rule.mitre_tactic_id.empty()) rule.mitre_tactic_id = mitre.value("tactic_id", "");
+                    if (rule.mitre_technique_id.empty()) rule.mitre_technique_id = mitre.value("technique_id", "");
+                    if (rule.mitre_technique_name.empty()) rule.mitre_technique_name = mitre.value("technique_name", "");
+                    if (rule.mitre_url.empty()) rule.mitre_url = mitre.value("url", "");
                 }
             }
 
@@ -537,7 +585,23 @@ void LogWatcher::read_new_lines(FileState& state) {
 
 void LogWatcher::handle_log_line(const std::string& file_path, const std::string& line) {
     m_shm_server.increment_processed_lines(1);
+    if (line.empty()) return;
+
+    // -------------------------------------------------------------
+    // 1. PRE-ROUTING WHITELIST (FAST-PATH) SHORT-CIRCUIT EVALUATION
+    // Check 127.0.0.0/8, ::1/128, Tailscale 100.64.0.0/10, trusted_cidrs
+    // -------------------------------------------------------------
+    const std::string pre_routing_ip = fast_extract_ip_from_line(line);
+    if (!pre_routing_ip.empty() && is_pre_routing_whitelisted_ip(pre_routing_ip)) {
+        // Fast-path: DROP/RETURN immediately without regex, honeypot, or anomaly analysis
+        return;
+    }
+
     if (handle_suricata_line(file_path, line)) return;
+
+    // Fast HTTP status code detection (e.g., 200, 400, 403, 404, 500)
+    const int http_status_code = fast_extract_http_status_code(line);
+
     // -------------------------------------------------------------
     // WAF ENHANCEMENT: Multi-Stage String Normalization
     // -------------------------------------------------------------
@@ -555,6 +619,9 @@ void LogWatcher::handle_log_line(const std::string& file_path, const std::string
         std::smatch source_match;
         const std::regex source_ip_regex(R"((\d{1,3}(?:\.\d{1,3}){3}))");
         const bool has_source_ip = std::regex_search(decoded_line, source_match, source_ip_regex);
+        if (has_source_ip && is_pre_routing_whitelisted_ip(source_match[1].str())) {
+            return;
+        }
         if (has_source_ip && std::regex_search(decoded_line, request_match, request_path_regex) &&
             m_decoy_engine.inspect_request(source_match[1].str(), request_match[1].str())) {
             return;
@@ -571,7 +638,9 @@ void LogWatcher::handle_log_line(const std::string& file_path, const std::string
         std::smatch http_ip_match;
         const std::regex http_ip_regex(R"((\d{1,3}(?:\.\d{1,3}){3}))");
         if (std::regex_search(decoded_line, http_ip_match, http_ip_regex)) {
-            m_anomaly_engine.evaluate_http(http_ip_match[1].str(), decoded_line, decoded_line);
+            if (!is_pre_routing_whitelisted_ip(http_ip_match[1].str())) {
+                m_anomaly_engine.evaluate_http(http_ip_match[1].str(), decoded_line, decoded_line);
+            }
         }
     }
 
@@ -583,6 +652,10 @@ void LogWatcher::handle_log_line(const std::string& file_path, const std::string
         std::smatch ip_match;
         if (std::regex_search(normalized_line, ip_match, ip_regex)) {
             ip = ip_match[1].str();
+        }
+
+        if (is_pre_routing_whitelisted_ip(ip)) {
+            return;
         }
 
         Logger::get_instance().log(
@@ -615,6 +688,20 @@ void LogWatcher::handle_log_line(const std::string& file_path, const std::string
     for (const auto& rule : m_rules) {
         if (!rule_matches_file(rule, file_path)) continue;
 
+        // -------------------------------------------------------------
+        // 2. HTTP STATUS CODE FILTER (SKIP REGEX FOR 200 OK IF RESTRICTED)
+        // -------------------------------------------------------------
+        if (!rule.status_codes.empty() && http_status_code > 0) {
+            const bool status_matched = std::any_of(
+                rule.status_codes.begin(), rule.status_codes.end(),
+                [http_status_code](int sc) { return sc == http_status_code; }
+            );
+            if (!status_matched) {
+                // HTTP Status code not in rule's allowed list (e.g. 200 OK) -> Skip regex evaluation
+                continue;
+            }
+        }
+
         std::smatch match;
         if (!std::regex_search(decoded_line, match, rule.regex) &&
             !std::regex_search(normalized_line, match, rule.regex)) continue;
@@ -632,6 +719,10 @@ void LogWatcher::handle_log_line(const std::string& file_path, const std::string
                 if (std::regex_search(normalized_line, source_match, source_ip_regex)) {
                     ip = source_match[1].str();
                 }
+            }
+
+            if (is_pre_routing_whitelisted_ip(ip)) {
+                continue;
             }
 
             {

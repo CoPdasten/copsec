@@ -296,10 +296,20 @@ std::vector<WhitelistEntry> DbManager::list_whitelist() const {
 }
 
 bool DbManager::is_whitelisted(const std::string& ip) const {
-    std::lock_guard<std::mutex> lock(mutex_);
+    if (ip.empty() || ip == "127.0.0.1" || ip == "::1" || ip == "localhost" ||
+        ip == "::ffff:127.0.0.1" || ip == "0:0:0:0:0:0:0:1") {
+        return true;
+    }
+
     in_addr address{};
     if (inet_pton(AF_INET, ip.c_str(), &address) == 1) {
         const uint32_t target = ntohl(address.s_addr);
+        // Fast-path: 127.0.0.0/8
+        if ((target & 0xFF000000U) == 0x7F000000U) return true;
+        // Fast-path: 100.64.0.0/10 (Tailscale CGNAT)
+        if ((target & 0xFFC00000U) == 0x64400000U) return true;
+
+        std::lock_guard<std::mutex> lock(mutex_);
         for (int prefix = 0; prefix <= 32; ++prefix) {
             for (const auto& network : ipv4_whitelist_cache_[prefix]) {
                 if ((target & network.mask) == network.network) return true;
@@ -308,6 +318,20 @@ bool DbManager::is_whitelisted(const std::string& ip) const {
         return false;
     }
 
+    in6_addr address6{};
+    if (inet_pton(AF_INET6, ip.c_str(), &address6) == 1) {
+        static const in6_addr loopback_addr = IN6ADDR_LOOPBACK_INIT;
+        if (std::memcmp(&address6, &loopback_addr, sizeof(in6_addr)) == 0) {
+            return true;
+        }
+        if (IN6_IS_ADDR_V4MAPPED(&address6)) {
+            const uint32_t mapped_ip = ntohl(*reinterpret_cast<const uint32_t*>(&address6.s6_addr[12]));
+            if ((mapped_ip & 0xFF000000U) == 0x7F000000U) return true;
+            if ((mapped_ip & 0xFFC00000U) == 0x64400000U) return true;
+        }
+    }
+
+    std::lock_guard<std::mutex> lock(mutex_);
     sqlite3_stmt* statement = nullptr;
     if (!database_ || sqlite3_prepare_v2(database_, "SELECT ip_cidr FROM whitelist WHERE ip_cidr LIKE '%:%';", -1, &statement, nullptr) != SQLITE_OK) return false;
     bool matched = false;

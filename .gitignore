@@ -1,4 +1,3 @@
-
 build/
 
 bin/
@@ -10,3 +9,18 @@ bin/
 *.so
 
 __pycache__/
+
+# Veritabanı, log ve offset dosyaları
+data/
+*.db
+*.db-wal
+*.db-shm
+offsets.json
+
+# Binary çıktıları
+copsec-controller
+copsec-collector
+
+# Hassas ortam/token dosyaları
+.env
+node.json

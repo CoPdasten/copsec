@@ -1,0 +1,63 @@
+syntax = "proto3";
+
+package copsec;
+
+option go_package = "github.com/copsec/collector/proto;copsecproto";
+
+// LogEvent represents an enriched, pre-filtered log security incident
+message LogEvent {
+  string node_id = 1;
+  string source = 2;              // "nginx", "ssh", "syslog"
+  string raw_line = 3;
+  string client_ip = 4;
+  int32 status_code = 5;
+  int64 timestamp_ms = 6;
+  string rule_id = 7;
+  string mitre_technique_id = 8;
+  int32 threat_score = 9;
+}
+
+// StreamAck confirms log batch delivery and reception
+message StreamAck {
+  bool success = 1;
+  uint64 processed_count = 2;
+  string message = 3;
+}
+
+// Heartbeat delivers agent telemetry and resource consumption
+message Heartbeat {
+  string node_id = 1;
+  int64 uptime_seconds = 2;
+  double cpu_usage = 3;
+  double memory_usage = 4;
+  int32 active_bans_count = 5;
+}
+
+// HeartbeatResponse contains acknowledgments and controller instructions
+message HeartbeatResponse {
+  bool acknowledged = 1;
+  int32 sync_interval_seconds = 2;
+}
+
+// SOARCommand is a proactive response directive dispatched from the central controller
+message SOARCommand {
+  string command_id = 1;
+  string action_type = 2;         // "BAN_IP", "UNBAN_IP", "FLUSH_BANS"
+  string target_ip = 3;
+  int64 duration_seconds = 4;
+}
+
+// CommandAck confirms execution status of a SOARCommand on the edge node
+message CommandAck {
+  string command_id = 1;
+  bool success = 2;
+  string output = 3;
+  int64 timestamp_ms = 4;
+}
+
+// CopsecStreamService orchestrates bidirectional streaming between edge nodes and Controller
+service CopsecStreamService {
+  rpc StreamEvents(stream LogEvent) returns (StreamAck);
+  rpc SendHeartbeat(Heartbeat) returns (HeartbeatResponse);
+  rpc SyncCommands(stream CommandAck) returns (stream SOARCommand);
+}
