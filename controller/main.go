@@ -51,12 +51,6 @@ func main() {
 	centralServer := NewCentralServer(storage, analyzer)
 	centralServer.SetAutoBanPolicy(*autoBan, *autoBanThreshold)
 
-	grpcServer, err := StartGRPCServer(*grpcAddr, centralServer)
-	if err != nil {
-		log.Fatalf("[FATAL] gRPC server binding failed: %v", err)
-	}
-	defer grpcServer.GracefulStop()
-
 	// 4. Telegram SOAR Bot
 	tgCfg := TelegramBotConfig{
 		BotToken: *tgToken,
@@ -70,6 +64,16 @@ func main() {
 
 	var wg sync.WaitGroup
 	tgBot.Start(ctx, &wg)
+
+	// 5. Start gRPC Server in background
+	go func() {
+		grpcServer, err := StartGRPCServer(*grpcAddr, centralServer)
+		if err != nil {
+			log.Fatalf("[FATAL] gRPC server binding failed: %v", err)
+		}
+		defer grpcServer.GracefulStop()
+		<-ctx.Done()
+	}()
 
 	// Handle OS shutdown signals
 	sigChan := make(chan os.Signal, 1)
@@ -85,7 +89,7 @@ func main() {
 		return
 	}
 
-	// 5. Matrix Cyberpunk TUI Dashboard (Bubbletea)
+	// 6. Matrix Cyberpunk TUI Dashboard (Bubbletea)
 	// Redirect logger to avoid breaking the TUI display
 	logFile, err := os.OpenFile("/tmp/copsec_controller.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0640)
 	if err == nil {
@@ -94,7 +98,10 @@ func main() {
 	}
 
 	model := NewSIEMModel(centralServer, storage)
-	p := tea.NewProgram(model, tea.WithAltScreen())
+	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
+
+	// Link Bubbletea Program directly to CentralServer for zero-latency reactive rendering
+	centralServer.SetTeaProgram(p)
 
 	go func() {
 		<-sigChan

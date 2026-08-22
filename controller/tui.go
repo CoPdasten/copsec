@@ -285,6 +285,10 @@ func hardTruncate(s string, maxLen int) string {
 
 func (m *SIEMModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case *StoredEvent:
+		m.processIncomingEvent(msg)
+		return m, nil
+
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -428,79 +432,8 @@ func (m *SIEMModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.mu.Lock()
 		if len(m.eventBuffer) > 0 {
 			for _, ev := range m.eventBuffer {
-				if !m.isPaused && !m.isFilterActive {
-					m.events = append([]*StoredEvent{ev}, m.events...)
-					if m.selectedLogIndex > 0 {
-						m.selectedLogIndex++
-						m.logScrollOffset++
-					}
-					if len(m.events) > 250 {
-						m.events = m.events[:250]
-					}
-				}
-				if ev.ThreatScore >= 50 {
-					m.incidents = append([]*StoredEvent{ev}, m.incidents...)
-					if m.selectedIncIndex > 0 {
-						m.selectedIncIndex++
-						m.incScrollOffset++
-					}
-					if len(m.incidents) > 120 {
-						m.incidents = m.incidents[:120]
-					}
-				}
-				if ev.MitreTechniqueID != "" {
-					m.mitreMap[ev.MitreTechniqueID]++
-					if strings.HasPrefix(ev.MitreTechniqueID, "T1595") || strings.HasPrefix(ev.MitreTechniqueID, "T1590") {
-						m.killChainHits["Recon"]++
-					} else if strings.HasPrefix(ev.MitreTechniqueID, "T1190") {
-						m.killChainHits["Initial"]++
-					} else if strings.HasPrefix(ev.MitreTechniqueID, "T1059") || strings.HasPrefix(ev.MitreTechniqueID, "T1203") {
-						m.killChainHits["Execution"]++
-					} else if strings.HasPrefix(ev.MitreTechniqueID, "T1078") || strings.HasPrefix(ev.MitreTechniqueID, "T1053") {
-						m.killChainHits["Persist"]++
-					} else if strings.HasPrefix(ev.MitreTechniqueID, "T1041") || strings.HasPrefix(ev.MitreTechniqueID, "T1567") {
-						m.killChainHits["Exfil"]++
-					}
-				}
-
-				target := extractTarget(ev.RawLine)
-				m.targetMap[target]++
-				m.totalTargetReq++
-
-				ent := CalculateShannonEntropy(ev.RawLine)
-				m.recentEntropies = append(m.recentEntropies, ent)
-				if len(m.recentEntropies) > 30 {
-					m.recentEntropies = m.recentEntropies[1:]
-				}
-
-				if ev.ClientIP != "" && ev.ClientIP != "127.0.0.1" {
-					if existing, ok := m.attackerMap[ev.ClientIP]; ok {
-						existing.Count++
-						if existing.TopTarget == "" {
-							existing.TopTarget = target
-						}
-					} else {
-						flag, org, class := lookupGeoThreatActor(ev.ClientIP)
-						m.attackerMap[ev.ClientIP] = &attackerIntel{
-							IP:        ev.ClientIP,
-							Flag:      flag,
-							Org:       org,
-							Class:     class,
-							Count:     1,
-							TopTarget: target,
-						}
-					}
-				}
+				m.processIncomingEvent(ev)
 			}
-
-			if len(m.recentEntropies) > 0 {
-				var sum float64
-				for _, v := range m.recentEntropies {
-					sum += v
-				}
-				m.avgEntropy = sum / float64(len(m.recentEntropies))
-			}
-
 			m.eventBuffer = nil
 		}
 		m.mu.Unlock()
@@ -523,6 +456,80 @@ func (m *SIEMModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+func (m *SIEMModel) processIncomingEvent(ev *StoredEvent) {
+	if !m.isPaused && !m.isFilterActive {
+		m.events = append([]*StoredEvent{ev}, m.events...)
+		if m.selectedLogIndex > 0 {
+			m.selectedLogIndex++
+			m.logScrollOffset++
+		}
+		if len(m.events) > 250 {
+			m.events = m.events[:250]
+		}
+	}
+	if ev.ThreatScore >= 50 {
+		m.incidents = append([]*StoredEvent{ev}, m.incidents...)
+		if m.selectedIncIndex > 0 {
+			m.selectedIncIndex++
+			m.incScrollOffset++
+		}
+		if len(m.incidents) > 120 {
+			m.incidents = m.incidents[:120]
+		}
+	}
+	if ev.MitreTechniqueID != "" {
+		m.mitreMap[ev.MitreTechniqueID]++
+		if strings.HasPrefix(ev.MitreTechniqueID, "T1595") || strings.HasPrefix(ev.MitreTechniqueID, "T1590") {
+			m.killChainHits["Recon"]++
+		} else if strings.HasPrefix(ev.MitreTechniqueID, "T1190") {
+			m.killChainHits["Initial"]++
+		} else if strings.HasPrefix(ev.MitreTechniqueID, "T1059") || strings.HasPrefix(ev.MitreTechniqueID, "T1203") {
+			m.killChainHits["Execution"]++
+		} else if strings.HasPrefix(ev.MitreTechniqueID, "T1078") || strings.HasPrefix(ev.MitreTechniqueID, "T1053") {
+			m.killChainHits["Persist"]++
+		} else if strings.HasPrefix(ev.MitreTechniqueID, "T1041") || strings.HasPrefix(ev.MitreTechniqueID, "T1567") {
+			m.killChainHits["Exfil"]++
+		}
+	}
+
+	target := extractTarget(ev.RawLine)
+	m.targetMap[target]++
+	m.totalTargetReq++
+
+	ent := CalculateShannonEntropy(ev.RawLine)
+	m.recentEntropies = append(m.recentEntropies, ent)
+	if len(m.recentEntropies) > 30 {
+		m.recentEntropies = m.recentEntropies[1:]
+	}
+
+	if len(m.recentEntropies) > 0 {
+		var sum float64
+		for _, v := range m.recentEntropies {
+			sum += v
+		}
+		m.avgEntropy = sum / float64(len(m.recentEntropies))
+	}
+
+	if ev.ClientIP != "" && ev.ClientIP != "127.0.0.1" {
+		if existing, ok := m.attackerMap[ev.ClientIP]; ok {
+			existing.Count++
+			if existing.TopTarget == "" {
+				existing.TopTarget = target
+			}
+		} else {
+			flag, org, class := lookupGeoThreatActor(ev.ClientIP)
+			m.attackerMap[ev.ClientIP] = &attackerIntel{
+				IP:        ev.ClientIP,
+				Flag:      flag,
+				Org:       org,
+				Class:     class,
+				Count:     1,
+				TopTarget: target,
+			}
+		}
+	}
 }
 
 func (m *SIEMModel) getCurrentEventsList() []*StoredEvent {

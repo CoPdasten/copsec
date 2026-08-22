@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/charmbracelet/bubbletea"
 	copsecproto "github.com/copsec/collector/proto"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -23,12 +24,12 @@ import (
 type NodeSession struct {
 	NodeID          string
 	APIKey          string
-	Hostname        string
+	RemoteAddr      string
 	LastSeen        time.Time
-	UptimeSeconds   int64
 	CPUUsage        float64
 	MemoryUsage     float64
 	ActiveBansCount int32
+	UptimeSeconds   int64
 	CommandChan     chan *copsecproto.SOARCommand
 }
 
@@ -41,6 +42,7 @@ type CentralServer struct {
 	analyzer     *RuleEngine
 	telegramBot  *TelegramSOARBot
 	aiEngine     *AIEngine
+	teaProgram   *tea.Program
 	nodes        map[string]*NodeSession
 	eventSubChan chan *StoredEvent
 
@@ -98,6 +100,13 @@ func (s *CentralServer) SetTelegramBot(bot *TelegramSOARBot) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.telegramBot = bot
+}
+
+// SetTeaProgram links the live Bubbletea program instance for direct reactive UI rendering.
+func (s *CentralServer) SetTeaProgram(p *tea.Program) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.teaProgram = p
 }
 
 // GetAnalyzer returns the rule engine instance.
@@ -246,6 +255,14 @@ func (s *CentralServer) processEvent(nodeID string, event *copsecproto.LogEvent)
 		}(stored)
 	} else if bot != nil && (stored.ThreatScore >= 40 || stored.StatusCode >= 400) {
 		go bot.ProcessEvent(stored)
+	}
+
+	// Direct reactive dispatch to Bubbletea TUI
+	s.mu.RLock()
+	p := s.teaProgram
+	s.mu.RUnlock()
+	if p != nil {
+		p.Send(stored)
 	}
 
 	// Broadcast to TUI subscriber non-blockingly
