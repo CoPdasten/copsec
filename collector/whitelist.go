@@ -87,13 +87,15 @@ func (f *PreRoutingFilter) loadConfig(path string) {
 	log.Printf("[INFO] Loaded %d trusted CIDRs into Pre-Routing Filter", len(f.trustedNets))
 }
 
-// ExtractIP extracts the first matching IPv4 or IPv6 from the line.
+// ExtractIP extracts the first matching valid IPv4 or IPv6 from the line.
 func ExtractIP(line string) net.IP {
-	match := ipRegex.FindString(line)
-	if match == "" {
-		return nil
+	matches := ipRegex.FindAllString(line, -1)
+	for _, match := range matches {
+		if ip := net.ParseIP(match); ip != nil {
+			return ip
+		}
 	}
-	return net.ParseIP(match)
+	return nil
 }
 
 // ExtractHTTPStatus extracts the HTTP status code integer (e.g. 200, 404).

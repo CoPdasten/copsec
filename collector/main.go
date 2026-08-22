@@ -20,6 +20,8 @@ func main() {
 	syslogPath := flag.String("syslog", "/var/log/syslog", "Path to system syslog file")
 	offsetFilePath := flag.String("offset-file", "/var/lib/copsec/offsets.json", "Path to save/load file offsets")
 	whitelistPath := flag.String("whitelist", "/etc/copsec/whitelist.json", "Path to whitelist configuration JSON")
+	fallbackTgToken := flag.String("fallback-telegram-token", "", "Optional Telegram Bot Token for direct offline edge emergency alerts")
+	fallbackTgChat := flag.String("fallback-telegram-chat", "", "Optional Telegram Chat ID for direct offline edge emergency alerts")
 	flag.Parse()
 
 	log.Println("[INFO] CoPSeC Phase 3 Edge Multi-Log Collector initializing...")
@@ -30,7 +32,7 @@ func main() {
 		log.Fatalf("[FATAL] Identity initialization failed: %v", err)
 	}
 
-	// 2. Offline Buffering
+	// 2. Offline Buffering & Autonomous Fallback Engine
 	finalBufferPath := *bufferDbPath
 	if err := os.MkdirAll(filepath.Dir(finalBufferPath), 0750); err != nil {
 		finalBufferPath = "./buffer.db"
@@ -41,6 +43,8 @@ func main() {
 	}
 	defer offlineBuffer.Close()
 
+	fallbackEngine := NewFallbackEngine(identityMgr.GetNodeID(), *fallbackTgToken, *fallbackTgChat)
+
 	// 3. gRPC Client for Controller Streaming
 	grpcCfg := GrpcClientConfig{
 		ServerAddress:   *controllerAddr,
@@ -48,6 +52,7 @@ func main() {
 		MaxBatchSize:    100,
 	}
 	controllerClient := NewControllerClient(grpcCfg, identityMgr, offlineBuffer)
+	controllerClient.SetFallbackEngine(fallbackEngine)
 
 	// 4. File Offsets & Whitelist
 	finalOffsetPath := *offsetFilePath

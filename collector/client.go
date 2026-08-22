@@ -29,9 +29,10 @@ type GrpcClientConfig struct {
 
 // ControllerClient coordinates live gRPC event streaming, auto-reconnect, and offline buffering.
 type ControllerClient struct {
-	cfg      GrpcClientConfig
-	identity *IdentityManager
-	buffer   *OfflineBuffer
+	cfg            GrpcClientConfig
+	identity       *IdentityManager
+	buffer         *OfflineBuffer
+	fallbackEngine *FallbackEngine
 
 	incomingChan chan *copsecproto.LogEvent
 	isConnected  int32 // atomic bool (1=connected, 0=disconnected)
@@ -59,9 +60,18 @@ func NewControllerClient(cfg GrpcClientConfig, identity *IdentityManager, buffer
 	}
 }
 
+// SetFallbackEngine links the offline autonomous threat engine.
+func (c *ControllerClient) SetFallbackEngine(engine *FallbackEngine) {
+	c.fallbackEngine = engine
+}
+
 // Submit enqueues a log event into the submission channel or disk buffer.
 func (c *ControllerClient) Submit(event *copsecproto.LogEvent) {
 	event.NodeId = c.identity.GetNodeID()
+
+	if atomic.LoadInt32(&c.isConnected) == 0 && c.fallbackEngine != nil {
+		c.fallbackEngine.InspectOffline(event.RawLine, event.Source)
+	}
 
 	select {
 	case c.incomingChan <- event:
@@ -108,6 +118,9 @@ func (c *ControllerClient) runStreamLoop(ctx context.Context, wg *sync.WaitGroup
 		conn, client, err := c.connect(ctx)
 		if err != nil {
 			atomic.StoreInt32(&c.isConnected, 0)
+			if c.fallbackEngine != nil {
+				c.fallbackEngine.SetFallbackActive(true)
+			}
 			log.Printf("[WARN] Failed to connect to Controller (%s): %v. Retrying in %v...",
 				c.cfg.ServerAddress, err, backoff)
 
@@ -121,6 +134,9 @@ func (c *ControllerClient) runStreamLoop(ctx context.Context, wg *sync.WaitGroup
 		c.conn = conn
 		c.client = client
 		atomic.StoreInt32(&c.isConnected, 1)
+		if c.fallbackEngine != nil {
+			c.fallbackEngine.SetFallbackActive(false)
+		}
 		log.Printf("[INFO] gRPC connection established to Controller (%s)", c.cfg.ServerAddress)
 
 		// 1. Drain offline buffered items first (FIFO)
@@ -129,6 +145,9 @@ func (c *ControllerClient) runStreamLoop(ctx context.Context, wg *sync.WaitGroup
 		// 2. Stream live events
 		if err := c.streamLive(ctx, client); err != nil {
 			atomic.StoreInt32(&c.isConnected, 0)
+			if c.fallbackEngine != nil {
+				c.fallbackEngine.SetFallbackActive(true)
+			}
 			log.Printf("[WARN] Live gRPC stream disconnected: %v", err)
 			c.closeConnection()
 		}
@@ -277,6 +296,9 @@ func (c *ControllerClient) drainIncomingToBuffer(ctx context.Context, duration t
 			return
 		case event := <-c.incomingChan:
 			_ = c.buffer.Enqueue(event)
+			if c.fallbackEngine != nil {
+				c.fallbackEngine.InspectOffline(event.RawLine, event.Source)
+			}
 		}
 	}
 }

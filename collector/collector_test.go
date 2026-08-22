@@ -244,3 +244,48 @@ func TestGrpcClientFlushOfflineBufferLive(t *testing.T) {
 		t.Errorf("Expected 5 received logs on server, got %d", receivedCount)
 	}
 }
+
+func TestFallbackEngineAutonomousInspection(t *testing.T) {
+	fallback := NewFallbackEngine("node-vps-test", "", "")
+	fallback.SetFallbackActive(true)
+
+	if !fallback.IsActive() {
+		t.Fatalf("Expected fallback engine to be active")
+	}
+
+	// 1. Test Static Critical Detection (SQLi)
+	critLog := "198.51.100.77 - - [22/Aug/2026:16:00:00 +0000] \"GET /search?q=1' UNION SELECT 1,2-- HTTP/1.1\" 200 45"
+	fallback.InspectOffline(critLog, "nginx")
+
+	fallback.mu.Lock()
+	_, banned := fallback.bannedIPs["198.51.100.77"]
+	fallback.mu.Unlock()
+
+	if !banned {
+		t.Fatalf("Expected IP 198.51.100.77 to be autonomously banned by fallback engine")
+	}
+
+	// 2. Test Correlational Spike Detection (3x SSH Failed Password)
+	spikeIP := "198.51.100.66"
+	sshLog := fmt.Sprintf("Aug 22 16:00:01 server sshd[1234]: Failed password for root from %s port 2222 ssh2", spikeIP)
+
+	// Event 1 & 2
+	fallback.InspectOffline(sshLog, "ssh")
+	fallback.InspectOffline(sshLog, "ssh")
+
+	fallback.mu.Lock()
+	_, spikeBanned := fallback.bannedIPs[spikeIP]
+	fallback.mu.Unlock()
+	if spikeBanned {
+		t.Fatalf("IP %s should not be banned after only 2 attempts", spikeIP)
+	}
+
+	// Event 3 (triggers correlation)
+	fallback.InspectOffline(sshLog, "ssh")
+	fallback.mu.Lock()
+	_, spikeBanned = fallback.bannedIPs[spikeIP]
+	fallback.mu.Unlock()
+	if !spikeBanned {
+		t.Fatalf("Expected IP %s to be autonomously banned after 3 attempts", spikeIP)
+	}
+}
