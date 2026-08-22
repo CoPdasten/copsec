@@ -148,6 +148,10 @@ type SIEMModel struct {
 	isFilterActive bool
 	inputSearch    string
 
+	// Multi-Node Fleet Switcher State
+	selectedNodeIndex  int
+	selectedNodeFilter string // Empty string = All Nodes, otherwise filtered to specific NodeID
+
 	// Viewport Scroll & Cursor State
 	selectedLogIndex int
 	logScrollOffset  int
@@ -375,7 +379,21 @@ func (m *SIEMModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "q", "ctrl+c":
 			return m, tea.Quit
 		case "tab":
-			m.activeTab = (m.activeTab + 1) % 4
+			m.activeTab = (m.activeTab + 1) % 3
+		case "f1":
+			m.activeTab = 0
+			m.statusPrompt = "🌐 Focus: FLEET MATRIX"
+		case "f2":
+			m.activeTab = 1
+			m.statusPrompt = "📊 Focus: LIVE STREAM"
+		case "f3":
+			m.activeTab = 2
+			m.statusPrompt = "🚨 Focus: CRITICAL INCIDENTS"
+		case "a", "A":
+			m.selectedNodeFilter = ""
+			m.selectedLogIndex = 0
+			m.logScrollOffset = 0
+			m.statusPrompt = "🌐 Fleet Focus: ALL NODES"
 		case "/", "f":
 			m.mode = modalSearch
 			m.inputSearch = m.searchQuery
@@ -387,9 +405,18 @@ func (m *SIEMModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.selectedLogIndex = 0
 				m.logScrollOffset = 0
 				m.statusPrompt = "🔍 Filter cleared"
+			} else if m.selectedNodeFilter != "" {
+				m.selectedNodeFilter = ""
+				m.selectedLogIndex = 0
+				m.logScrollOffset = 0
+				m.statusPrompt = "🌐 Fleet Focus: ALL NODES"
 			}
 		case "up", "k":
-			if m.activeTab == 2 {
+			if m.activeTab == 0 {
+				if m.selectedNodeIndex > 0 {
+					m.selectedNodeIndex--
+				}
+			} else if m.activeTab == 2 {
 				if m.selectedIncIndex > 0 {
 					m.selectedIncIndex--
 					if m.selectedIncIndex < m.incScrollOffset {
@@ -405,8 +432,13 @@ func (m *SIEMModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		case "down", "j":
-			if m.activeTab == 2 {
-				if m.selectedIncIndex < len(m.incidents)-1 {
+			if m.activeTab == 0 {
+				if m.selectedNodeIndex < len(m.nodes)-1 {
+					m.selectedNodeIndex++
+				}
+			} else if m.activeTab == 2 {
+				currentIncs := m.getCurrentIncidentsList()
+				if m.selectedIncIndex < len(currentIncs)-1 {
 					m.selectedIncIndex++
 				}
 			} else {
@@ -419,21 +451,38 @@ func (m *SIEMModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.activeTab == 2 {
 				m.selectedIncIndex = max(0, m.selectedIncIndex-5)
 				m.incScrollOffset = max(0, m.incScrollOffset-5)
-			} else {
+			} else if m.activeTab == 1 {
 				m.selectedLogIndex = max(0, m.selectedLogIndex-5)
 				m.logScrollOffset = max(0, m.logScrollOffset-5)
 			}
 		case "pgdown", "ctrl+d":
 			if m.activeTab == 2 {
-				m.selectedIncIndex = min(len(m.incidents)-1, m.selectedIncIndex+5)
-			} else {
+				currentIncs := m.getCurrentIncidentsList()
+				m.selectedIncIndex = min(len(currentIncs)-1, m.selectedIncIndex+5)
+			} else if m.activeTab == 1 {
 				currentList := m.getCurrentEventsList()
 				m.selectedLogIndex = min(len(currentList)-1, m.selectedLogIndex+5)
 			}
 		case "enter":
-			if m.activeTab == 2 && len(m.incidents) > 0 && m.selectedIncIndex < len(m.incidents) {
-				m.inspectEvent = m.incidents[m.selectedIncIndex]
-				m.mode = modalLogDetail
+			if m.activeTab == 0 {
+				if len(m.nodes) > 0 && m.selectedNodeIndex < len(m.nodes) {
+					targetNode := m.nodes[m.selectedNodeIndex].NodeID
+					if m.selectedNodeFilter == targetNode {
+						m.selectedNodeFilter = ""
+						m.statusPrompt = "🌐 Fleet Focus: ALL NODES"
+					} else {
+						m.selectedNodeFilter = targetNode
+						m.selectedLogIndex = 0
+						m.logScrollOffset = 0
+						m.statusPrompt = fmt.Sprintf("🎯 Focused Node: %s (Press 'A' for All)", targetNode)
+					}
+				}
+			} else if m.activeTab == 2 {
+				currentIncs := m.getCurrentIncidentsList()
+				if len(currentIncs) > 0 && m.selectedIncIndex < len(currentIncs) {
+					m.inspectEvent = currentIncs[m.selectedIncIndex]
+					m.mode = modalLogDetail
+				}
 			} else {
 				currentList := m.getCurrentEventsList()
 				if len(currentList) > 0 && m.selectedLogIndex < len(currentList) {
@@ -580,10 +629,33 @@ func (m *SIEMModel) processIncomingEvent(ev *StoredEvent) {
 }
 
 func (m *SIEMModel) getCurrentEventsList() []*StoredEvent {
+	list := m.events
 	if m.isFilterActive {
-		return m.filteredEvents
+		list = m.filteredEvents
 	}
-	return m.events
+	if m.selectedNodeFilter == "" {
+		return list
+	}
+	var filtered []*StoredEvent
+	for _, ev := range list {
+		if ev.NodeID == m.selectedNodeFilter {
+			filtered = append(filtered, ev)
+		}
+	}
+	return filtered
+}
+
+func (m *SIEMModel) getCurrentIncidentsList() []*StoredEvent {
+	if m.selectedNodeFilter == "" {
+		return m.incidents
+	}
+	var filtered []*StoredEvent
+	for _, ev := range m.incidents {
+		if ev.NodeID == m.selectedNodeFilter {
+			filtered = append(filtered, ev)
+		}
+	}
+	return filtered
 }
 
 func (m *SIEMModel) executeSearch() {
@@ -760,7 +832,11 @@ func renderMiniBar(pct float64, width int) string {
 
 func (m *SIEMModel) renderFleetPanel(width, maxLines int) string {
 	var b strings.Builder
-	b.WriteString(hardTruncate(styleMatrixTitle.Render("🌐 FLEET MATRIX & TELEMETRY"), width) + "\n")
+	titleText := "🌐 FLEET MATRIX & TELEMETRY"
+	if m.selectedNodeFilter != "" {
+		titleText = fmt.Sprintf("🌐 FLEET [FOCUS: %s]", hardTruncate(m.selectedNodeFilter, 12))
+	}
+	b.WriteString(hardTruncate(styleMatrixTitle.Render(titleText), width) + "\n")
 	b.WriteString(styleMuted.Render(strings.Repeat("─", max(2, width))) + "\n")
 
 	if len(m.nodes) == 0 {
@@ -771,7 +847,7 @@ func (m *SIEMModel) renderFleetPanel(width, maxLines int) string {
 	}
 
 	linesWritten := 2
-	for _, n := range m.nodes {
+	for idx, n := range m.nodes {
 		if linesWritten >= maxLines {
 			break
 		}
@@ -783,7 +859,18 @@ func (m *SIEMModel) renderFleetPanel(width, maxLines int) string {
 			statusText = "OFFLINE"
 		}
 
-		nodeName := hardTruncate(n.NodeID, max(4, width-3))
+		cursor := " "
+		if m.activeTab == 0 && idx == m.selectedNodeIndex {
+			cursor = "►"
+		}
+
+		isFocused := m.selectedNodeFilter == n.NodeID
+		focusBadge := ""
+		if isFocused {
+			focusBadge = " " + styleAlert.Render("🎯[FOCUSED]")
+		}
+
+		nodeName := hardTruncate(n.NodeID, max(4, width-12))
 		cpuBar := renderMiniBar(n.CPUUsage, 8)
 		ramUsageMB := n.MemoryUsage
 		if ramUsageMB <= 0 {
@@ -796,7 +883,7 @@ func (m *SIEMModel) renderFleetPanel(width, maxLines int) string {
 		if groupTag == "" {
 			groupTag = "VDS-Edge"
 		}
-		row1 := fmt.Sprintf("%s %s (%s)", statusBadge, lipgloss.NewStyle().Bold(true).Foreground(colorCyberCyan).Render(nodeName), styleWarning.Render(groupTag))
+		row1 := fmt.Sprintf("%s%s %s (%s)%s", cursor, statusBadge, lipgloss.NewStyle().Bold(true).Foreground(colorCyberCyan).Render(nodeName), styleWarning.Render(groupTag), focusBadge)
 		b.WriteString(hardTruncate(row1, width) + "\n")
 		linesWritten++
 		if linesWritten >= maxLines {
@@ -870,6 +957,12 @@ func (m *SIEMModel) renderFleetPanel(width, maxLines int) string {
 			linesWritten++
 		}
 	}
+
+	if linesWritten < maxLines {
+		hint := "[↑/↓] Select  [Enter] Focus  [A] All Nodes"
+		b.WriteString(hardTruncate(styleMuted.Render(hint), width))
+	}
+
 	return b.String()
 }
 
@@ -944,6 +1037,9 @@ func (m *SIEMModel) renderThreatStream(width, maxLines int) string {
 
 	currentList := m.getCurrentEventsList()
 	title := "⚡ LIVE STREAM"
+	if m.selectedNodeFilter != "" {
+		title = fmt.Sprintf("⚡ LIVE [%s]", hardTruncate(m.selectedNodeFilter, 10))
+	}
 	if m.isFilterActive {
 		title = fmt.Sprintf("🔍 FILTER: [%s]", hardTruncate(m.searchQuery, 10))
 	}
@@ -1043,10 +1139,15 @@ func (m *SIEMModel) renderThreatStream(width, maxLines int) string {
 
 func (m *SIEMModel) renderIncidentStream(width, maxLines int) string {
 	var b strings.Builder
-	b.WriteString(hardTruncate(styleAlert.Render("🔥 CRITICAL INCIDENTS (THREAT >= 50)"), width) + "\n")
+	titleText := "🔥 CRITICAL INCIDENTS (THREAT >= 50)"
+	if m.selectedNodeFilter != "" {
+		titleText = fmt.Sprintf("🔥 INCIDENTS [%s]", hardTruncate(m.selectedNodeFilter, 10))
+	}
+	b.WriteString(hardTruncate(styleAlert.Render(titleText), width) + "\n")
 	b.WriteString(styleMuted.Render(strings.Repeat("─", max(2, width))) + "\n")
 
-	if len(m.incidents) == 0 {
+	currentIncs := m.getCurrentIncidentsList()
+	if len(currentIncs) == 0 {
 		b.WriteString(hardTruncate(styleMuted.Render("No critical incidents logged. Threat perimeter secure."), width))
 		return b.String()
 	}
@@ -1065,11 +1166,11 @@ func (m *SIEMModel) renderIncidentStream(width, maxLines int) string {
 
 	for i := 0; i < visibleItems; i++ {
 		idx := m.incScrollOffset + i
-		if idx >= len(m.incidents) {
+		if idx >= len(currentIncs) {
 			break
 		}
 
-		ev := m.incidents[idx]
+		ev := currentIncs[idx]
 		timeStr := time.UnixMilli(ev.TimestampMs).Format("15:04:05")
 		scoreBadge := styleAlert.Render(fmt.Sprintf("[%d]", ev.ThreatScore))
 		if ev.ThreatScore < 70 {
@@ -1082,8 +1183,8 @@ func (m *SIEMModel) renderIncidentStream(width, maxLines int) string {
 		}
 
 		scrollChar := styleScrollTrack.Render("│")
-		if len(m.incidents) > 1 && visibleItems > 1 {
-			thumbPos := int(float64(m.selectedIncIndex) / float64(len(m.incidents)-1) * float64(visibleItems-1))
+		if len(currentIncs) > 1 && visibleItems > 1 {
+			thumbPos := int(float64(m.selectedIncIndex) / float64(len(currentIncs)-1) * float64(visibleItems-1))
 			if i == thumbPos {
 				scrollChar = styleAlert.Render("█")
 			}
@@ -1215,7 +1316,7 @@ func (m *SIEMModel) renderBottomPanel(width int) string {
 	eps := m.server.GetEPS()
 	threats := len(m.incidents)
 
-	bottomText := fmt.Sprintf(" [/] Search  [B] Ban  [U] Unban  [Space] Pause  [Tab] Focus  [Enter] Inspect  [Q] Quit    |  EPS: %d  Peak: %d  Threats: %d",
+	bottomText := fmt.Sprintf(" [Tab/F1-F3] Focus  [A] All  [/] Search  [B] Ban  [U] Unban  [Space] Pause  [Enter] Inspect  [Q] Quit  |  EPS: %d  Peak: %d  Threats: %d",
 		eps, m.peakEPS, threats)
 
 	if m.statusPrompt != "" {

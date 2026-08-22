@@ -327,14 +327,19 @@ func (c *ControllerClient) runHeartbeatLoop(ctx context.Context, wg *sync.WaitGr
 				continue
 			}
 
-			var memStats runtime.MemStats
-			runtime.ReadMemStats(&memStats)
+			metrics := CollectSystemMetrics()
+			memUsageMB := metrics.RAMUsedMB
+			if memUsageMB <= 0 {
+				var memStats runtime.MemStats
+				runtime.ReadMemStats(&memStats)
+				memUsageMB = float64(memStats.Alloc) / 1024.0 / 1024.0
+			}
 
 			hb := &copsecproto.Heartbeat{
 				NodeId:          c.identity.GetNodeID(),
 				UptimeSeconds:   int64(time.Since(c.startTime).Seconds()),
-				CpuUsage:        0.5,
-				MemoryUsage:     float64(memStats.Alloc) / 1024.0 / 1024.0, // MB
+				CpuUsage:        float64(metrics.CPUPercent),
+				MemoryUsage:     memUsageMB, // MB
 				ActiveBansCount: 0,
 			}
 
