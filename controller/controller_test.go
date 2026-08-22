@@ -183,11 +183,25 @@ func TestAutonomousAutoBanPolicy(t *testing.T) {
 	analyzer := NewRuleEngine("")
 	server := NewCentralServer(store, analyzer)
 
-	// 1. Test Static Critical Threshold (ThreatScore >= 85)
+	// 1. Test Internal IP Protection (Loopback & Private IP should NEVER be banned)
+	loopbackEvent := &StoredEvent{
+		NodeID:           "node-vps-test",
+		ClientIP:         "127.0.0.1",
+		ThreatScore:      99,
+		MitreTechniqueID: "T1190",
+		RuleID:           "sqli_union_injection",
+	}
+	server.checkAutonomousBanPolicy(loopbackEvent)
+	bans, _ := store.GetActiveBans()
+	if len(bans) != 0 {
+		t.Fatalf("Internal loopback IP 127.0.0.1 must not be banned, got %d bans", len(bans))
+	}
+
+	// 2. Test Static Threshold (ThreatScore >= 50 triggers instant ban)
 	critEvent := &StoredEvent{
 		NodeID:           "node-vps-test",
 		ClientIP:         "198.51.100.88",
-		ThreatScore:      90,
+		ThreatScore:      60,
 		MitreTechniqueID: "T1190",
 		RuleID:           "sqli_union_injection",
 		RawLine:          "GET /search?q=1' UNION SELECT 1,2--",
@@ -197,15 +211,15 @@ func TestAutonomousAutoBanPolicy(t *testing.T) {
 
 	bans, err := store.GetActiveBans()
 	if err != nil || len(bans) != 1 || bans[0].IP != "198.51.100.88" {
-		t.Fatalf("Expected auto-ban for 198.51.100.88, got %+v", bans)
+		t.Fatalf("Expected auto-ban for 198.51.100.88 (ThreatScore: 60 >= 50), got %+v", bans)
 	}
 
-	// 2. Test Correlational Spike Threshold (3x >= 50 within 60s)
+	// 3. Test Correlational Spike Threshold (3x >= 35 within 60s)
 	spikeIP := "198.51.100.99"
 	spikeEvent := &StoredEvent{
 		NodeID:           "node-vps-test",
 		ClientIP:         spikeIP,
-		ThreatScore:      55,
+		ThreatScore:      40,
 		MitreTechniqueID: "T1110.001",
 		RuleID:           "ssh_failed_password",
 		RawLine:          "Failed password for invalid user root",

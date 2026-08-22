@@ -69,7 +69,7 @@ func NewCentralServer(storage *StorageEngine, analyzer *RuleEngine) *CentralServ
 		nodes:            make(map[string]*NodeSession),
 		eventSubChan:     make(chan *StoredEvent, 4096),
 		autoBanEnabled:   true,
-		autoBanThreshold: 85,
+		autoBanThreshold: 50,
 		ipHistory:        make(map[string][]int64),
 		autoBanned:       make(map[string]int64),
 	}
@@ -294,13 +294,19 @@ func (s *CentralServer) processEvent(nodeID string, event *copsecproto.LogEvent)
 	}
 }
 
-// checkAutonomousBanPolicy evaluates static critical scores and correlation spike windows.
+// isInternalIP returns true if the IP is loopback, private, unspecified, or CGNAT.
+func isInternalIP(ipStr string) bool {
+	ip := net.ParseIP(strings.TrimSpace(ipStr))
+	if ip == nil {
+		return true
+	}
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsUnspecified() || strings.HasPrefix(ipStr, "100.64.")
+}
+
+// checkAutonomousBanPolicy evaluates static critical scores (>=50) and correlation spike windows.
 func (s *CentralServer) checkAutonomousBanPolicy(event *StoredEvent) {
 	ip := strings.TrimSpace(event.ClientIP)
-	if ip == "" || ip == "127.0.0.1" || ip == "::1" || strings.HasPrefix(ip, "100.64.") || strings.HasPrefix(ip, "10.") || strings.HasPrefix(ip, "192.168.") {
-		return
-	}
-	if net.ParseIP(ip) == nil {
+	if ip == "" || isInternalIP(ip) {
 		return
 	}
 
@@ -321,18 +327,18 @@ func (s *CentralServer) checkAutonomousBanPolicy(event *StoredEvent) {
 	triggerAutoBan := false
 	banReason := ""
 
-	// Condition 1: Static Critical Threshold
+	// Condition 1: Static Critical / High-Threat Threshold (ThreatScore >= 50)
 	threshold := s.autoBanThreshold
 	if threshold <= 0 {
-		threshold = 85
+		threshold = 50
 	}
 	if event.ThreatScore >= threshold {
 		triggerAutoBan = true
-		banReason = fmt.Sprintf("Static Critical Threshold (ThreatScore: %d >= %d)", event.ThreatScore, threshold)
+		banReason = fmt.Sprintf("Auto-ban: Threat Score %d/100 triggered (Rule: %s, MITRE: %s)", event.ThreatScore, event.RuleID, event.MitreTechniqueID)
 	}
 
 	// Condition 2: Correlational Spike / Brute-Force Threshold (>= 3 high-threat events in 60s)
-	if event.ThreatScore >= 50 {
+	if event.ThreatScore >= 35 {
 		history := s.ipHistory[ip]
 		var recent []int64
 		for _, ts := range history {
@@ -351,14 +357,14 @@ func (s *CentralServer) checkAutonomousBanPolicy(event *StoredEvent) {
 
 	if triggerAutoBan {
 		s.autoBanned[ip] = now
-		jailTag := fmt.Sprintf("⚡ AUTO-BAN (%s)", event.MitreTechniqueID)
+		jailTag := fmt.Sprintf("[AUTO] %s (%d/100)", event.MitreTechniqueID, event.ThreatScore)
 		if event.MitreTechniqueID == "" {
-			jailTag = "⚡ AUTO-BAN"
+			jailTag = fmt.Sprintf("[AUTO] Score:%d", event.ThreatScore)
 		}
 
-		dispatched := s.BroadcastSOARCommand("BAN_IP", ip, 3600)
+		dispatched := s.BroadcastSOARCommand("BAN_IP", ip, 86400)
 		if s.storage != nil {
-			_ = s.storage.RecordBan(ip, jailTag, 3600)
+			_ = s.storage.RecordBan(ip, jailTag, 86400)
 		}
 
 		log.Printf("[SOAR_AUTOBAN] Autonomous Ban executed for IP %s (Reason: %s, Dispatched: %d nodes)", ip, banReason, dispatched)

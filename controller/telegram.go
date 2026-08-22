@@ -128,13 +128,13 @@ func (b *TelegramSOARBot) SendAutoBanAlert(ev *StoredEvent, banReason string, di
 	}
 
 	text := fmt.Sprintf("⚡ *[SOAR AUTONOMOUS MITIGATION EXECUTED]*\n\n"+
-		"🛡 *Action:* `AUTOMATIC FLEET BAN (3600s TTL)`\n"+
+		"🚫 *SOAR Action:* `AUTOMATICALLY BANNED (86400s / 24h TTL)`\n"+
 		"🎯 *Offending IP:* `%s`\n"+
 		"🖥 *Triggered On Node:* `%s`\n"+
-		"🚨 *Threat Score:* `%d/100 (CRITICAL)`\n"+
+		"🚨 *Threat Score:* `%d/100`\n"+
 		"🏷 *MITRE Technique:* `%s`\n"+
 		"📋 *Reason:* `%s`\n"+
-		"🌐 *Fleet Enforcement:* `%d Edge Node(s) Applied iptables DROP`\n\n"+
+		"🌐 *Fleet Enforcement:* `%d Edge Node(s) Applied raw/input DROP`\n\n"+
 		"📜 *Offending Payload:*\n`%s`",
 		ev.ClientIP,
 		ev.NodeID,
