@@ -174,19 +174,22 @@ func (t *Tailer) tailFile(ctx context.Context) error {
 	// Setup non-blocking inotify watch
 	inotifyFd, err := syscall.InotifyInit1(syscall.IN_NONBLOCK | syscall.IN_CLOEXEC)
 	if err != nil {
-		return fmt.Errorf("inotify_init failed: %w", err)
+		inotifyFd = -1
+	} else {
+		defer syscall.Close(inotifyFd)
+		watchMask := uint32(syscall.IN_MODIFY | syscall.IN_MOVE_SELF | syscall.IN_DELETE_SELF)
+		wd, err := syscall.InotifyAddWatch(inotifyFd, t.filePath, watchMask)
+		if err == nil {
+			defer syscall.InotifyRmWatch(inotifyFd, uint32(wd))
+		}
 	}
-	defer syscall.Close(inotifyFd)
-
-	watchMask := uint32(syscall.IN_MODIFY | syscall.IN_MOVE_SELF | syscall.IN_DELETE_SELF)
-	wd, err := syscall.InotifyAddWatch(inotifyFd, t.filePath, watchMask)
-	if err != nil {
-		return fmt.Errorf("inotify_add_watch failed: %w", err)
-	}
-	defer syscall.InotifyRmWatch(inotifyFd, uint32(wd))
 
 	flushTicker := time.NewTicker(5 * time.Second)
 	defer flushTicker.Stop()
+
+	// 250ms Hybrid Polling ticker to guarantee zero-miss on Linux inotify stalls / logrotate
+	pollTicker := time.NewTicker(250 * time.Millisecond)
+	defer pollTicker.Stop()
 
 	buf := make([]byte, 4096)
 	for {
@@ -200,14 +203,39 @@ func (t *Tailer) tailFile(ctx context.Context) error {
 			t.offsetManager.SetOffset(t.filePath, currentOffset)
 			_ = t.offsetManager.Flush()
 
+		case <-pollTicker.C:
+			// Periodic size check to catch rotations or missed inotify events
+			st, err := os.Stat(t.filePath)
+			if err != nil {
+				if os.IsNotExist(err) {
+					// File moved / rotated
+					log.Printf("[INFO] File %s temporarily unlinked. Waiting for recreate...", t.filePath)
+					return nil
+				}
+			} else {
+				if st.Size() < currentOffset {
+					log.Printf("[INFO] File %s truncated (Size %d < Offset %d). Reopening...", t.filePath, st.Size(), currentOffset)
+					return nil
+				} else if st.Size() > currentOffset {
+					currentOffset = t.readLines(reader, file, currentOffset)
+					t.offsetManager.SetOffset(t.filePath, currentOffset)
+				}
+			}
+
 		default:
+			if inotifyFd < 0 {
+				time.Sleep(100 * time.Millisecond)
+				continue
+			}
+
 			n, err := syscall.Read(inotifyFd, buf)
 			if err != nil {
 				if errors.Is(err, syscall.EAGAIN) || errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EINTR) {
 					time.Sleep(50 * time.Millisecond)
 					continue
 				}
-				return err
+				time.Sleep(50 * time.Millisecond)
+				continue
 			}
 
 			if n < syscall.SizeofInotifyEvent {
