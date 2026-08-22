@@ -594,19 +594,14 @@ func (m *SIEMModel) View() string {
 		centerWidth = 30
 	}
 
-	mainHeight := m.height - 4
-	if mainHeight < 16 {
-		mainHeight = 16
+	// Height math: 1 line banner + mainHeight + 1 line bottom bar = m.height
+	mainHeight := m.height - 3
+	if mainHeight < 14 {
+		mainHeight = 14
 	}
 
-	topHeight := int(float64(mainHeight) * 0.52)
-	if topHeight < 6 {
-		topHeight = 6
-	}
-	bottomHeight := mainHeight - topHeight - 2
-	if bottomHeight < 6 {
-		bottomHeight = 6
-	}
+	topHeight := mainHeight / 2
+	bottomHeight := mainHeight - topHeight
 
 	// 2. Top Header Banner
 	banner := styleHeader.Render("⚡ CoPSeC ENTERPRISE CYBER-DEFENSE COCKPIT") + " " +
@@ -648,7 +643,7 @@ func (m *SIEMModel) View() string {
 	middleRow := lipgloss.JoinHorizontal(lipgloss.Top, leftColumn, centerColumn, rightColumn)
 
 	// 7. Clean Single-line Bottom Status Bar
-	bottomContent := m.renderBottomPanel(m.width - 2)
+	bottomContent := m.renderBottomPanel(m.width)
 
 	baseView := lipgloss.JoinVertical(lipgloss.Left, banner, middleRow, bottomContent)
 
@@ -1072,26 +1067,20 @@ func (m *SIEMModel) renderThreatIntelPanel(width, maxLines int) string {
 
 func (m *SIEMModel) renderBottomPanel(width int) string {
 	eps := m.server.GetEPS()
-	total := m.server.GetTotalEvents()
+	threats := len(m.incidents)
 
-	threatIndex := styleGreen.Render("🟢 LOW")
-	if m.peakEPS > 40 || eps > 20 {
-		threatIndex = styleAlert.Render("🔴 CRITICAL")
-	} else if m.peakEPS > 10 || eps > 5 {
-		threatIndex = styleWarning.Render("🟡 ELEVATED")
+	bottomText := fmt.Sprintf(" [/] Search  [B] Ban  [U] Unban  [Space] Pause  [Tab] Focus  [Enter] Inspect  [Q] Quit    |  EPS: %d  Peak: %d  Threats: %d",
+		eps, m.peakEPS, threats)
+
+	if m.statusPrompt != "" {
+		bottomText += fmt.Sprintf("  |  %s", m.statusPrompt)
 	}
 
-	shortcuts := styleCyan.Render("[/] Search | [B] Ban | [U] Unban | [Space] Pause | [Tab] Focus | [Enter] Inspect | [Q] Quit")
-	rateDisplay := fmt.Sprintf("[EPS: %d | Peak: %d | Total: %s | Threat: %s]",
-		eps, m.peakEPS, strconv.FormatUint(total, 10), threatIndex)
-
-	status := m.statusPrompt
-	if status != "" {
-		status = styleAlert.Render(" " + status)
-	}
-
-	line := fmt.Sprintf("%s    %s%s", shortcuts, styleGreen.Render(rateDisplay), status)
-	return truncateString(line, width)
+	return lipgloss.NewStyle().
+		Width(width).
+		Background(lipgloss.Color("#11111b")).
+		Foreground(lipgloss.Color("#a6adc8")).
+		Render(bottomText)
 }
 
 func (m *SIEMModel) renderSearchModalOverlay(baseView string) string {
