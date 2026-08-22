@@ -10,6 +10,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -263,6 +264,9 @@ func (t *Tailer) readLines(reader *bufio.Reader, file *os.File, currentOffset in
 			}
 
 			if len(line) > 0 {
+				if isNoisyCollectorLog(line) {
+					continue
+				}
 				entry := LogEntry{
 					Source:    t.source,
 					Line:      line,
@@ -284,4 +288,23 @@ func (t *Tailer) readLines(reader *bufio.Reader, file *os.File, currentOffset in
 		}
 	}
 	return currentOffset
+}
+
+func isNoisyCollectorLog(rawLine string) bool {
+	lower := strings.ToLower(rawLine)
+	if strings.Contains(lower, "tailscaled") ||
+		strings.Contains(lower, "magicsock") ||
+		strings.Contains(lower, "open-conn-track") ||
+		strings.Contains(lower, "sysstat-collect") ||
+		strings.Contains(lower, "systemd-resolved") ||
+		strings.Contains(lower, "systemd-logind") ||
+		strings.Contains(lower, "pam_unix(sudo:session)") ||
+		strings.Contains(lower, "pam_unix(cron:session)") ||
+		strings.Contains(lower, "session closed for user") ||
+		(strings.Contains(lower, "cron[") && strings.Contains(lower, "session closed")) ||
+		(strings.Contains(lower, "session opened for user root") && strings.Contains(lower, "by (uid=0)")) ||
+		strings.Contains(lower, "starting clean php session") {
+		return true
+	}
+	return false
 }

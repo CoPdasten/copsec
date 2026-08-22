@@ -35,6 +35,17 @@ func TestRuleEngineAnalysis(t *testing.T) {
 	if matched {
 		t.Errorf("Expected normal 200 OK traffic to not match, but matched")
 	}
+
+	// 4. Noisy log filtering
+	noisy := `tailscaled[1234]: magicsock: periodic endpoints update`
+	if !IsNoisyLog(noisy) {
+		t.Errorf("Expected tailscaled log to be flagged as noisy")
+	}
+
+	name, tactic := engine.GetTechniqueMeta("T1190")
+	if name == "" || tactic == "" {
+		t.Errorf("Expected technique meta for T1190, got: name=%s, tactic=%s", name, tactic)
+	}
 }
 
 func TestStorageEngine(t *testing.T) {

@@ -86,6 +86,13 @@ func (s *CentralServer) GetEPS() uint64 {
 	return atomic.LoadUint64(&s.currentEPS)
 }
 
+// GetAnalyzer returns the rule engine instance.
+func (s *CentralServer) GetAnalyzer() *RuleEngine {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.analyzer
+}
+
 // GetTotalEvents returns total processed events count.
 func (s *CentralServer) GetTotalEvents() uint64 {
 	return atomic.LoadUint64(&s.totalEventsProcessed)
