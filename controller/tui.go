@@ -59,11 +59,11 @@ var (
 			Padding(1, 2).
 			Width(72)
 
-	detailBoxStyle = lipgloss.NewStyle().
-			Border(lipgloss.DoubleBorder()).
-			BorderForeground(colorCyberCyan).
-			Padding(1, 2).
-			Width(76)
+	inspectionCardStyle = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(colorCyberCyan).
+				Padding(1, 2).
+				Width(74)
 )
 
 type tickMsg time.Time
@@ -111,9 +111,10 @@ type SIEMModel struct {
 	isFilterActive bool
 	inputSearch    string
 
-	// Navigation
+	// Navigation & Cursor Binding
 	selectedLogIndex int
 	selectedIncIndex int
+	inspectEvent     *StoredEvent
 
 	// Async event queue buffer
 	mu          sync.Mutex
@@ -193,12 +194,14 @@ func (m *SIEMModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.statusPrompt = "🔍 Search filter cleared"
 				}
 				m.mode = modalNone
+				m.inspectEvent = nil
 				m.inputIP = ""
 				m.inputSearch = ""
 				return m, nil
 			case "enter":
 				if m.mode == modalLogDetail {
 					m.mode = modalNone
+					m.inspectEvent = nil
 					return m, nil
 				} else if m.mode == modalSearch {
 					m.executeSearch()
@@ -242,29 +245,32 @@ func (m *SIEMModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.statusPrompt = "🔍 Search filter cleared. Resumed live stream."
 			}
 		case "up", "k":
-			if m.activeTab == 1 { // Live Stream
-				if m.selectedLogIndex > 0 {
-					m.selectedLogIndex--
-				}
-			} else if m.activeTab == 2 { // Critical Incidents
+			if m.activeTab == 2 { // Critical Incidents
 				if m.selectedIncIndex > 0 {
 					m.selectedIncIndex--
 				}
+			} else { // Live Stream or default
+				if m.selectedLogIndex > 0 {
+					m.selectedLogIndex--
+				}
 			}
 		case "down", "j":
-			if m.activeTab == 1 {
-				if m.selectedLogIndex < len(m.events)-1 && m.selectedLogIndex < 15 {
-					m.selectedLogIndex++
-				}
-			} else if m.activeTab == 2 {
+			if m.activeTab == 2 { // Critical Incidents
 				if m.selectedIncIndex < len(m.incidents)-1 && m.selectedIncIndex < 15 {
 					m.selectedIncIndex++
 				}
+			} else { // Live Stream or default
+				if m.selectedLogIndex < len(m.events)-1 && m.selectedLogIndex < 15 {
+					m.selectedLogIndex++
+				}
 			}
 		case "enter":
+			// Bind single selected event under cursor
 			if m.activeTab == 2 && len(m.incidents) > 0 && m.selectedIncIndex < len(m.incidents) {
+				m.inspectEvent = m.incidents[m.selectedIncIndex]
 				m.mode = modalLogDetail
 			} else if len(m.events) > 0 && m.selectedLogIndex < len(m.events) {
+				m.inspectEvent = m.events[m.selectedLogIndex]
 				m.mode = modalLogDetail
 			}
 		case " ":
@@ -371,7 +377,6 @@ func (m *SIEMModel) View() string {
 	}
 
 	// 1. Strict Grid Math Calculation
-	// Left Panel: 22% of total width (bounded between 24 and 32 chars)
 	leftWidth := int(float64(m.width) * 0.22)
 	if leftWidth < 24 {
 		leftWidth = 24
@@ -379,20 +384,16 @@ func (m *SIEMModel) View() string {
 		leftWidth = 32
 	}
 
-	// Right Panel: 28% of total width (min 30 chars)
 	rightWidth := int(float64(m.width) * 0.28)
 	if rightWidth < 30 {
 		rightWidth = 30
 	}
 
-	// Center Column: Remaining width (accounts for 3 panel borders: 2 chars each = 6)
 	centerWidth := m.width - leftWidth - rightWidth - 6
 	if centerWidth < 30 {
 		centerWidth = 30
 	}
 
-	// Vertical Grid Math
-	// mainHeight excludes header (1 line), banner/margins (1 line), and bottom bar (2 lines)
 	mainHeight := m.height - 4
 	if mainHeight < 14 {
 		mainHeight = 14
@@ -455,7 +456,7 @@ func (m *SIEMModel) View() string {
 
 	// Overlay Modals
 	if m.mode == modalLogDetail {
-		return m.renderDetailModalOverlay(baseView)
+		return m.renderInspectionModal(baseView)
 	} else if m.mode == modalSearch {
 		return m.renderSearchModalOverlay(baseView)
 	} else if m.mode != modalNone {
@@ -807,14 +808,8 @@ func (m *SIEMModel) renderModalOverlay(baseView string) string {
 	)
 }
 
-func (m *SIEMModel) renderDetailModalOverlay(baseView string) string {
-	var ev *StoredEvent
-	if m.activeTab == 2 && len(m.incidents) > 0 && m.selectedIncIndex < len(m.incidents) {
-		ev = m.incidents[m.selectedIncIndex]
-	} else if len(m.events) > 0 && m.selectedLogIndex < len(m.events) {
-		ev = m.events[m.selectedLogIndex]
-	}
-
+func (m *SIEMModel) renderInspectionModal(baseView string) string {
+	ev := m.inspectEvent
 	if ev == nil {
 		m.mode = modalNone
 		return baseView
@@ -826,38 +821,61 @@ func (m *SIEMModel) renderDetailModalOverlay(baseView string) string {
 		techName, tactic = analyzer.GetTechniqueMeta(ev.MitreTechniqueID)
 	}
 
-	aiSection := ""
+	scoreLabel := fmt.Sprintf("[%d]", ev.ThreatScore)
+	if ev.ThreatScore >= 80 {
+		scoreLabel = fmt.Sprintf("[CRITICAL %d]", ev.ThreatScore)
+	} else if ev.ThreatScore >= 50 {
+		scoreLabel = fmt.Sprintf("[WARNING %d]", ev.ThreatScore)
+	}
+
+	sourceLabel := "HTTP (Nginx)"
+	if ev.Source == "ssh" {
+		sourceLabel = "AUTH (SSH)"
+	} else if ev.Source == "syslog" {
+		sourceLabel = "SYS (Linux)"
+	}
+
+	timeStr := time.UnixMilli(ev.TimestampMs).UTC().Format("2006-01-02 15:04:05 UTC")
+	decodedPayload := NormalizePayload(ev.RawLine)
+
+	aiIntelText := "No anomalies requiring deep LLM analysis detected."
 	if ev.AIAnalysis != "" {
-		aiSection = fmt.Sprintf("\n🧠  AI Threat Intelligence:\n%s\n", lipgloss.NewStyle().Foreground(colorNeonGreen).Render(ev.AIAnalysis))
+		aiIntelText = ev.AIAnalysis
+	} else if ev.ThreatScore >= 80 {
+		aiIntelText = fmt.Sprintf("Critical exploit attempt matched signature '%s'. Recommended action: Global Fleet Ban.", ev.RuleID)
 	}
 
 	content := fmt.Sprintf("🔍 %s\n\n"+
-		"🖥  Node ID:         %s\n"+
-		"🌐  Source:          %s\n"+
-		"🎯  Attacker IP:     %s\n"+
-		"🏷  MITRE Technique: %s (%s)\n"+
-		"🛡  MITRE Tactic:    %s\n"+
-		"⚡  Threat Score:    %d/100\n"+
-		"⏱  Timestamp:       %s\n\n"+
-		"📜  Raw Log Payload:\n%s\n"+
-		"%s\n"+
+		"🕒 Timestamp:    %s\n"+
+		"🌐 Node ID:      %s\n"+
+		"🎯 Source:       %s\n"+
+		"🚨 Threat Score: %s\n"+
+		"🛡 MITRE Tactic: %s\n"+
+		"🏷 Technique:    %s - %s\n"+
+		"👤 Attacker IP:  %s\n\n"+
+		"📜 %s:\n"+
+		"%s\n\n"+
+		"🧠 %s:\n"+
+		"%s\n\n"+
 		"%s",
-		lipgloss.NewStyle().Bold(true).Foreground(colorCyberCyan).Render("SECURITY INCIDENT FORENSIC INSPECTION"),
-		lipgloss.NewStyle().Foreground(colorTextLight).Render(ev.NodeID),
-		lipgloss.NewStyle().Foreground(colorNeonGreen).Render(ev.Source),
-		lipgloss.NewStyle().Bold(true).Foreground(colorAlertPink).Render(ev.ClientIP),
-		lipgloss.NewStyle().Bold(true).Foreground(colorWarningGold).Render(ev.MitreTechniqueID),
+		lipgloss.NewStyle().Bold(true).Foreground(colorCyberCyan).Render("FORENSIC INCIDENT INSPECTION"),
+		lipgloss.NewStyle().Foreground(colorTextLight).Render(timeStr),
+		lipgloss.NewStyle().Foreground(colorNeonGreen).Render(ev.NodeID),
+		lipgloss.NewStyle().Foreground(colorCyberCyan).Render(sourceLabel),
+		alertStyle.Render(scoreLabel),
+		lipgloss.NewStyle().Foreground(colorWarningGold).Render(tactic),
+		lipgloss.NewStyle().Bold(true).Foreground(colorCyberCyan).Render(ev.MitreTechniqueID),
 		techName,
-		lipgloss.NewStyle().Foreground(colorCyberCyan).Render(tactic),
-		ev.ThreatScore,
-		time.UnixMilli(ev.TimestampMs).Format("2006-01-02 15:04:05.000"),
-		lipgloss.NewStyle().Foreground(colorTextLight).Render(ev.RawLine),
-		aiSection,
+		lipgloss.NewStyle().Bold(true).Foreground(colorAlertPink).Render(ev.ClientIP),
+		lipgloss.NewStyle().Bold(true).Foreground(colorWarningGold).Render("DECODED PAYLOAD"),
+		lipgloss.NewStyle().Foreground(colorTextLight).Render(decodedPayload),
+		lipgloss.NewStyle().Bold(true).Foreground(colorNeonGreen).Render("AI INTEL & INTENT"),
+		lipgloss.NewStyle().Foreground(colorTextMuted).Render(aiIntelText),
 		lipgloss.NewStyle().Foreground(colorTextMuted).Render("[Esc / Enter] Close Inspection Modal"),
 	)
 
-	detailBox := detailBoxStyle.Render(content)
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, detailBox,
+	card := inspectionCardStyle.Render(content)
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, card,
 		lipgloss.WithWhitespaceChars(" "),
 		lipgloss.WithWhitespaceForeground(colorDarkBg),
 	)
