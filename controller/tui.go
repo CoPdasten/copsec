@@ -53,6 +53,12 @@ var (
 			Padding(1, 2).
 			Width(68)
 
+	searchBoxStyle = lipgloss.NewStyle().
+			Border(lipgloss.DoubleBorder()).
+			BorderForeground(colorCyberCyan).
+			Padding(1, 2).
+			Width(72)
+
 	detailBoxStyle = lipgloss.NewStyle().
 			Border(lipgloss.DoubleBorder()).
 			BorderForeground(colorCyberCyan).
@@ -68,6 +74,7 @@ const (
 	modalNone modalMode = iota
 	modalBanIP
 	modalUnbanIP
+	modalSearch
 	modalLogDetail
 )
 
@@ -83,13 +90,14 @@ type attackerStat struct {
 	Count int
 }
 
-// SIEMModel holds the state for the high-performance async Bubbletea dashboard.
+// SIEMModel holds the state for the dual-window SOC cockpit with search & forensic inspection.
 type SIEMModel struct {
 	server       *CentralServer
 	storage      *StorageEngine
 	width        int
 	height       int
 	events       []*StoredEvent
+	incidents    []*StoredEvent
 	nodes        []NodeSession
 	mitreMap     map[string]int
 	attackerMap  map[string]int
@@ -98,19 +106,25 @@ type SIEMModel struct {
 	statusPrompt string
 	isPaused     bool
 
+	// Threat Hunting Search
+	searchQuery   string
+	isFilterActive bool
+	inputSearch   string
+
 	// Navigation
 	selectedLogIndex int
+	selectedIncIndex int
 
-	// Async event queue buffer to prevent TUI blocking
+	// Async event queue buffer
 	mu          sync.Mutex
 	eventBuffer []*StoredEvent
 
-	// Interactive Modal State
+	// Modal State
 	mode    modalMode
 	inputIP string
 }
 
-// NewSIEMModel creates a new TUI dashboard model with async ingestion.
+// NewSIEMModel creates a new TUI dashboard model with dual-window layout.
 func NewSIEMModel(server *CentralServer, storage *StorageEngine) *SIEMModel {
 	m := &SIEMModel{
 		server:      server,
@@ -126,11 +140,14 @@ func NewSIEMModel(server *CentralServer, storage *StorageEngine) *SIEMModel {
 		m.mitreMap[t] = 0
 	}
 
-	// Initialize with historical MITRE stats from DB
+	// Load historical stats and incidents from DB
 	if stats, err := storage.GetMITREStats(); err == nil {
 		for _, s := range stats {
 			m.mitreMap[s.TechniqueID] = s.Count
 		}
+	}
+	if incs, err := storage.GetCriticalEvents(20); err == nil {
+		m.incidents = incs
 	}
 
 	// Background worker reading events into memory buffer
@@ -169,24 +186,41 @@ func (m *SIEMModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Modal interaction
 		if m.mode != modalNone {
 			switch msg.String() {
-			case "esc", "q", "enter":
+			case "esc":
+				if m.mode == modalSearch && m.isFilterActive {
+					m.isFilterActive = false
+					m.searchQuery = ""
+					m.statusPrompt = "🔍 Search filter cleared"
+				}
+				m.mode = modalNone
+				m.inputIP = ""
+				m.inputSearch = ""
+				return m, nil
+			case "enter":
 				if m.mode == modalLogDetail {
 					m.mode = modalNone
 					return m, nil
+				} else if m.mode == modalSearch {
+					m.executeSearch()
+					return m, nil
 				}
-				if msg.String() == "esc" {
-					m.mode = modalNone
-					m.inputIP = ""
-				} else if msg.String() == "enter" {
-					m.submitModal()
-				}
+				m.submitModal()
+				return m, nil
 			case "backspace":
-				if len(m.inputIP) > 0 {
+				if m.mode == modalSearch {
+					if len(m.inputSearch) > 0 {
+						m.inputSearch = m.inputSearch[:len(m.inputSearch)-1]
+					}
+				} else if len(m.inputIP) > 0 {
 					m.inputIP = m.inputIP[:len(m.inputIP)-1]
 				}
 			default:
 				if len(msg.String()) == 1 && m.mode != modalLogDetail {
-					m.inputIP += msg.String()
+					if m.mode == modalSearch {
+						m.inputSearch += msg.String()
+					} else {
+						m.inputIP += msg.String()
+					}
 				}
 			}
 			return m, nil
@@ -197,17 +231,40 @@ func (m *SIEMModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "q", "ctrl+c":
 			return m, tea.Quit
 		case "tab":
-			m.activeTab = (m.activeTab + 1) % 3
+			m.activeTab = (m.activeTab + 1) % 4
+		case "/", "f":
+			m.mode = modalSearch
+			m.inputSearch = m.searchQuery
+		case "esc":
+			if m.isFilterActive {
+				m.isFilterActive = false
+				m.searchQuery = ""
+				m.statusPrompt = "🔍 Search filter cleared. Resumed live stream."
+			}
 		case "up", "k":
-			if m.selectedLogIndex > 0 {
-				m.selectedLogIndex--
+			if m.activeTab == 1 { // Live Stream
+				if m.selectedLogIndex > 0 {
+					m.selectedLogIndex--
+				}
+			} else if m.activeTab == 2 { // Critical Incidents
+				if m.selectedIncIndex > 0 {
+					m.selectedIncIndex--
+				}
 			}
 		case "down", "j":
-			if m.selectedLogIndex < len(m.events)-1 && m.selectedLogIndex < 20 {
-				m.selectedLogIndex++
+			if m.activeTab == 1 {
+				if m.selectedLogIndex < len(m.events)-1 && m.selectedLogIndex < 15 {
+					m.selectedLogIndex++
+				}
+			} else if m.activeTab == 2 {
+				if m.selectedIncIndex < len(m.incidents)-1 && m.selectedIncIndex < 15 {
+					m.selectedIncIndex++
+				}
 			}
 		case "enter":
-			if len(m.events) > 0 && m.selectedLogIndex < len(m.events) {
+			if m.activeTab == 2 && len(m.incidents) > 0 && m.selectedIncIndex < len(m.incidents) {
+				m.mode = modalLogDetail
+			} else if len(m.events) > 0 && m.selectedLogIndex < len(m.events) {
 				m.mode = modalLogDetail
 			}
 		case " ":
@@ -232,8 +289,14 @@ func (m *SIEMModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.mu.Lock()
 		if len(m.eventBuffer) > 0 {
 			for _, ev := range m.eventBuffer {
-				if !m.isPaused {
+				if !m.isPaused && !m.isFilterActive {
 					m.events = append([]*StoredEvent{ev}, m.events...)
+				}
+				if ev.ThreatScore >= 50 {
+					m.incidents = append([]*StoredEvent{ev}, m.incidents...)
+					if len(m.incidents) > 40 {
+						m.incidents = m.incidents[:40]
+					}
 				}
 				if ev.MitreTechniqueID != "" {
 					m.mitreMap[ev.MitreTechniqueID]++
@@ -260,6 +323,28 @@ func (m *SIEMModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m *SIEMModel) executeSearch() {
+	query := strings.TrimSpace(m.inputSearch)
+	m.mode = modalNone
+	if query == "" {
+		m.isFilterActive = false
+		m.searchQuery = ""
+		return
+	}
+
+	results, err := m.storage.SearchEvents(query, 50)
+	if err != nil {
+		m.statusPrompt = fmt.Sprintf("⚠️ Search error: %v", err)
+		return
+	}
+
+	m.isFilterActive = true
+	m.searchQuery = query
+	m.events = results
+	m.selectedLogIndex = 0
+	m.statusPrompt = fmt.Sprintf("🔍 Filter active: '%s' (%d matches found)", query, len(results))
+}
+
 func (m *SIEMModel) submitModal() {
 	ip := strings.TrimSpace(m.inputIP)
 	if ip == "" {
@@ -282,25 +367,28 @@ func (m *SIEMModel) submitModal() {
 
 func (m *SIEMModel) View() string {
 	if m.width == 0 {
-		return "Initializing CoPSeC Cyberpunk SOC Cockpit..."
+		return "Initializing CoPSeC Enterprise Cyber-Defense Cockpit..."
 	}
 
 	totalWidth := m.width - 4
 	if totalWidth < 80 {
 		totalWidth = 80
 	}
-	leftWidth := totalWidth * 25 / 100
+	leftWidth := totalWidth * 24 / 100
 	rightWidth := totalWidth * 32 / 100
 	centerWidth := totalWidth - leftWidth - rightWidth - 6
 
 	mainHeight := m.height - 10
-	if mainHeight < 14 {
-		mainHeight = 14
+	if mainHeight < 16 {
+		mainHeight = 16
 	}
+
+	streamHeight := mainHeight / 2
+	incidentHeight := mainHeight - streamHeight
 
 	// 1. Top Banner
 	banner := headerStyle.Render("⚡ CoPSeC ENTERPRISE CYBER-DEFENSE COCKPIT") + " " +
-		matrixTitleStyle.Render("v2.0 [ULTRA HD]") + "\n"
+		matrixTitleStyle.Render("v2.0 [DUAL-WINDOW SOC]") + "\n"
 
 	// 2. Left Panel: Fleet Matrix & Telemetry
 	leftContent := m.renderFleetPanel(leftWidth - 2)
@@ -310,23 +398,32 @@ func (m *SIEMModel) View() string {
 	}
 	leftPanel := leftStyle.Width(leftWidth).Height(mainHeight).Render(leftContent)
 
-	// 3. Center Panel: Live Threat Stream (Ultra HD)
-	centerContent := m.renderThreatStream(centerWidth - 2)
-	centerStyle := panelStyle
+	// 3. Center Panels (Dual-Window): Top Ingestion Stream + Bottom Incident Alerts
+	centerTopContent := m.renderThreatStream(centerWidth-2, streamHeight-2)
+	topStyle := panelStyle
 	if m.activeTab == 1 {
-		centerStyle = activePanelStyle
+		topStyle = activePanelStyle
 	}
-	centerPanel := centerStyle.Width(centerWidth).Height(mainHeight).Render(centerContent)
+	centerTopPanel := topStyle.Width(centerWidth).Height(streamHeight).Render(centerTopContent)
+
+	centerBottomContent := m.renderIncidentStream(centerWidth-2, incidentHeight-2)
+	bottomStyle := panelStyle
+	if m.activeTab == 2 {
+		bottomStyle = activePanelStyle
+	}
+	centerBottomPanel := bottomStyle.Width(centerWidth).Height(incidentHeight).Render(centerBottomContent)
+
+	centerColumn := lipgloss.JoinVertical(lipgloss.Left, centerTopPanel, centerBottomPanel)
 
 	// 4. Right Panel: Enterprise MITRE Heatmap & Intel
-	rightContent := m.renderMITREPanel(rightWidth - 2, mainHeight-2)
+	rightContent := m.renderMITREPanel(rightWidth-2, mainHeight-2)
 	rightStyle := panelStyle
-	if m.activeTab == 2 {
+	if m.activeTab == 3 {
 		rightStyle = activePanelStyle
 	}
 	rightPanel := rightStyle.Width(rightWidth).Height(mainHeight).Render(rightContent)
 
-	middleRow := lipgloss.JoinHorizontal(lipgloss.Top, leftPanel, centerPanel, rightPanel)
+	middleRow := lipgloss.JoinHorizontal(lipgloss.Top, leftPanel, centerColumn, rightPanel)
 
 	// 5. Bottom Panel: Metrics & Controls
 	bottomContent := m.renderBottomPanel(totalWidth)
@@ -337,6 +434,8 @@ func (m *SIEMModel) View() string {
 	// Overlay Modals
 	if m.mode == modalLogDetail {
 		return m.renderDetailModalOverlay(baseView)
+	} else if m.mode == modalSearch {
+		return m.renderSearchModalOverlay(baseView)
 	} else if m.mode != modalNone {
 		return m.renderModalOverlay(baseView)
 	}
@@ -388,18 +487,23 @@ func (m *SIEMModel) renderFleetPanel(width int) string {
 	return b.String()
 }
 
-func (m *SIEMModel) renderThreatStream(width int) string {
+func (m *SIEMModel) renderThreatStream(width, maxLines int) string {
 	var b strings.Builder
 	eps := m.server.GetEPS()
 	pauseTag := ""
 	if m.isPaused {
 		pauseTag = " [PAUSED]"
 	}
+	filterTag := ""
+	if m.isFilterActive {
+		filterTag = fmt.Sprintf(" 🔍 [FILTER: %s]", m.searchQuery)
+	}
 
-	b.WriteString(fmt.Sprintf("%s %s%s\n",
-		headerStyle.Render("⚡ LIVE THREAT STREAM (ULTRA HD)"),
+	b.WriteString(fmt.Sprintf("%s %s%s%s\n",
+		headerStyle.Render("⚡ LIVE INGESTION STREAM"),
 		lipgloss.NewStyle().Foreground(colorNeonGreen).Render(fmt.Sprintf("(%d EPS)", eps)),
-		alertStyle.Render(pauseTag)))
+		alertStyle.Render(pauseTag),
+		lipgloss.NewStyle().Foreground(colorWarningGold).Render(filterTag)))
 	b.WriteString(lipgloss.NewStyle().Foreground(colorTextMuted).Render(strings.Repeat("─", width)) + "\n")
 
 	if len(m.events) == 0 {
@@ -407,14 +511,17 @@ func (m *SIEMModel) renderThreatStream(width int) string {
 		return b.String()
 	}
 
+	limit := maxLines / 2
+	if limit <= 0 {
+		limit = 4
+	}
+
 	for i, ev := range m.events {
-		if i >= 10 {
+		if i >= limit {
 			break
 		}
 
 		timeStr := time.UnixMilli(ev.TimestampMs).Format("15:04:05")
-
-		// Source icon
 		srcIcon := "🌐 HTTP"
 		if ev.Source == "ssh" {
 			srcIcon = "🔑 AUTH"
@@ -429,13 +536,8 @@ func (m *SIEMModel) renderThreatStream(width int) string {
 			scoreBadge = lipgloss.NewStyle().Bold(true).Foreground(colorWarningGold).Render(fmt.Sprintf("[WARN %d]", ev.ThreatScore))
 		}
 
-		techStr := ev.MitreTechniqueID
-		if techStr == "" {
-			techStr = "T1595"
-		}
-
 		prefix := "  "
-		if i == m.selectedLogIndex {
+		if m.activeTab == 1 && i == m.selectedLogIndex {
 			prefix = "▶ "
 		}
 
@@ -445,13 +547,62 @@ func (m *SIEMModel) renderThreatStream(width int) string {
 			scoreBadge,
 			lipgloss.NewStyle().Foreground(colorCyberCyan).Render(srcIcon),
 			lipgloss.NewStyle().Bold(true).Foreground(colorTextLight).Render(ev.ClientIP),
-			lipgloss.NewStyle().Foreground(colorWarningGold).Render(techStr),
+			lipgloss.NewStyle().Foreground(colorWarningGold).Render(ev.MitreTechniqueID),
 		)
+		line2 := fmt.Sprintf("    %s", lipgloss.NewStyle().Foreground(colorTextMuted).Render(truncateString(ev.RawLine, width-6)))
 
-		payloadText := truncateString(ev.RawLine, width-6)
-		line2 := fmt.Sprintf("    %s", lipgloss.NewStyle().Foreground(colorTextMuted).Render(payloadText))
+		if m.activeTab == 1 && i == m.selectedLogIndex {
+			b.WriteString(lipgloss.NewStyle().Background(colorSelectedBg).Render(line1) + "\n")
+			b.WriteString(lipgloss.NewStyle().Background(colorSelectedBg).Render(line2) + "\n")
+		} else {
+			b.WriteString(line1 + "\n" + line2 + "\n")
+		}
+	}
+	return b.String()
+}
 
-		if i == m.selectedLogIndex {
+func (m *SIEMModel) renderIncidentStream(width, maxLines int) string {
+	var b strings.Builder
+	b.WriteString(alertStyle.Render("🔥 CRITICAL & WARN INCIDENTS (THREAT >= 50)") + "\n")
+	b.WriteString(lipgloss.NewStyle().Foreground(colorTextMuted).Render(strings.Repeat("─", width)) + "\n")
+
+	if len(m.incidents) == 0 {
+		b.WriteString(lipgloss.NewStyle().Foreground(colorTextMuted).Render("No critical incidents logged. Threat perimeter secure.\n"))
+		return b.String()
+	}
+
+	limit := maxLines / 2
+	if limit <= 0 {
+		limit = 4
+	}
+
+	for i, ev := range m.incidents {
+		if i >= limit {
+			break
+		}
+
+		timeStr := time.UnixMilli(ev.TimestampMs).Format("15:04:05")
+		scoreBadge := alertStyle.Render(fmt.Sprintf("[CRIT %d]", ev.ThreatScore))
+		if ev.ThreatScore < 70 {
+			scoreBadge = lipgloss.NewStyle().Bold(true).Foreground(colorWarningGold).Render(fmt.Sprintf("[WARN %d]", ev.ThreatScore))
+		}
+
+		prefix := "  "
+		if m.activeTab == 2 && i == m.selectedIncIndex {
+			prefix = "▶ "
+		}
+
+		line1 := fmt.Sprintf("%s%s %s 🎯 %s 🏷 %s (%s)",
+			prefix,
+			lipgloss.NewStyle().Foreground(colorTextMuted).Render(timeStr),
+			scoreBadge,
+			lipgloss.NewStyle().Bold(true).Foreground(colorAlertPink).Render(ev.ClientIP),
+			lipgloss.NewStyle().Foreground(colorWarningGold).Render(ev.MitreTechniqueID),
+			lipgloss.NewStyle().Foreground(colorCyberCyan).Render(ev.RuleID),
+		)
+		line2 := fmt.Sprintf("    %s", lipgloss.NewStyle().Foreground(colorTextLight).Render(truncateString(ev.RawLine, width-6)))
+
+		if m.activeTab == 2 && i == m.selectedIncIndex {
 			b.WriteString(lipgloss.NewStyle().Background(colorSelectedBg).Render(line1) + "\n")
 			b.WriteString(lipgloss.NewStyle().Background(colorSelectedBg).Render(line2) + "\n")
 		} else {
@@ -468,7 +619,6 @@ func (m *SIEMModel) renderMITREPanel(width, maxLines int) string {
 
 	analyzer := m.server.GetAnalyzer()
 
-	// Sort techniques by count
 	var list []techniqueStat
 	for k, v := range m.mitreMap {
 		name, tactic := "", ""
@@ -503,11 +653,6 @@ func (m *SIEMModel) renderMITREPanel(width, maxLines int) string {
 		}
 		filled := strings.Repeat("█", barLen)
 		empty := strings.Repeat("░", 8-barLen)
-
-		tacticShort := st.Tactic
-		if len(tacticShort) > 12 {
-			tacticShort = tacticShort[:12]
-		}
 
 		techName := st.Name
 		if len(techName) > 16 {
@@ -585,7 +730,7 @@ func (m *SIEMModel) renderBottomPanel(width int) string {
 		threatIndex = lipgloss.NewStyle().Bold(true).Foreground(colorWarningGold).Render("🟡 ELEVATED")
 	}
 
-	shortcuts := lipgloss.NewStyle().Foreground(colorCyberCyan).Render("[B] Ban  |  [U] Unban  |  [Space] Pause  |  [Tab] Focus  |  [Enter] Inspect  |  [Q] Quit")
+	shortcuts := lipgloss.NewStyle().Foreground(colorCyberCyan).Render("[/] Search  |  [B] Ban  |  [U] Unban  |  [Space] Pause  |  [Tab] Focus  |  [Enter] Inspect  |  [Q] Quit")
 	rateDisplay := lipgloss.NewStyle().Bold(true).Foreground(colorNeonGreen).Render(fmt.Sprintf("EPS: [%d]  Total: [%s]  Threat: [%s]", eps, strconv.FormatUint(total, 10), threatIndex))
 	graph := lipgloss.NewStyle().Foreground(colorCyberCyan).Render(fmt.Sprintf("[%s]", sparkline.String()))
 
@@ -595,7 +740,25 @@ func (m *SIEMModel) renderBottomPanel(width int) string {
 	}
 
 	return fmt.Sprintf("%s   %s %s%s\n%s", shortcuts, rateDisplay, graph, status,
-		lipgloss.NewStyle().Foreground(colorTextMuted).Render("CoPSeC Autonomous SOC Cockpit • Pure Cyberpunk Threat Hunting Core"))
+		lipgloss.NewStyle().Foreground(colorTextMuted).Render("CoPSeC Enterprise SOC Cockpit • Dual-Window Threat Hunting Core"))
+}
+
+func (m *SIEMModel) renderSearchModalOverlay(baseView string) string {
+	title := "🔍 THREAT HUNTING SEARCH MATRIX"
+	prompt := "Syntax: ip:1.2.3.4  |  mitre:T1190  |  score:>70  |  src:nginx  |  q:keyword"
+
+	content := fmt.Sprintf("%s\n\n%s\n\n> %s█\n\n%s",
+		headerStyle.Render(title),
+		lipgloss.NewStyle().Foreground(colorTextMuted).Render(prompt),
+		lipgloss.NewStyle().Bold(true).Foreground(colorNeonGreen).Render(m.inputSearch),
+		lipgloss.NewStyle().Foreground(colorTextMuted).Render("[Enter] Execute Query   [Esc] Cancel / Clear Filter"),
+	)
+
+	modalBox := searchBoxStyle.Render(content)
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modalBox,
+		lipgloss.WithWhitespaceChars(" "),
+		lipgloss.WithWhitespaceForeground(colorDarkBg),
+	)
 }
 
 func (m *SIEMModel) renderModalOverlay(baseView string) string {
@@ -621,12 +784,18 @@ func (m *SIEMModel) renderModalOverlay(baseView string) string {
 }
 
 func (m *SIEMModel) renderDetailModalOverlay(baseView string) string {
-	if len(m.events) == 0 || m.selectedLogIndex >= len(m.events) {
+	var ev *StoredEvent
+	if m.activeTab == 2 && len(m.incidents) > 0 && m.selectedIncIndex < len(m.incidents) {
+		ev = m.incidents[m.selectedIncIndex]
+	} else if len(m.events) > 0 && m.selectedLogIndex < len(m.events) {
+		ev = m.events[m.selectedLogIndex]
+	}
+
+	if ev == nil {
 		m.mode = modalNone
 		return baseView
 	}
 
-	ev := m.events[m.selectedLogIndex]
 	analyzer := m.server.GetAnalyzer()
 	techName, tactic := "", ""
 	if analyzer != nil {

@@ -154,7 +154,4 @@ func (c *MultiLogCollector) dispatch(entry LogEntry) {
 	if c.client != nil {
 		c.client.Submit(event)
 	}
-
-	log.Printf("[COLLECTOR_EVENT] [%s] (IP: %s, Status: %d) -> %s",
-		entry.Source, clientIP, statusCode, entry.Line)
 }

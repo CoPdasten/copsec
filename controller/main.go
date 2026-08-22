@@ -81,6 +81,13 @@ func main() {
 	}
 
 	// 5. Matrix Cyberpunk TUI Dashboard (Bubbletea)
+	// Redirect logger to avoid breaking the TUI display
+	logFile, err := os.OpenFile("/tmp/copsec_controller.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0640)
+	if err == nil {
+		log.SetOutput(logFile)
+		defer logFile.Close()
+	}
+
 	model := NewSIEMModel(centralServer, storage)
 	p := tea.NewProgram(model, tea.WithAltScreen())
 

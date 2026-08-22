@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -93,22 +94,26 @@ func (b *TelegramSOARBot) ProcessEvent(ev *StoredEvent) {
 		truncateString(ev.RawLine, 140),
 		aiSection)
 
-	// Interactive Inline Buttons
-	buttons := [][]map[string]string{
-		{
-			{"text": "🚫 Global Ban", "callback_data": fmt.Sprintf("ban:%s", ev.ClientIP)},
-			{"text": "🔓 Unban IP", "callback_data": fmt.Sprintf("unban:%s", ev.ClientIP)},
-			{"text": "🛡 Whitelist", "callback_data": fmt.Sprintf("white:%s", ev.ClientIP)},
-		},
+	var buttons [][]map[string]string
+	if ev.ClientIP != "" && net.ParseIP(ev.ClientIP) != nil {
+		buttons = [][]map[string]string{
+			{
+				{"text": "🚫 Global Ban", "callback_data": fmt.Sprintf("ban:%s", ev.ClientIP)},
+				{"text": "🔓 Unban IP", "callback_data": fmt.Sprintf("unban:%s", ev.ClientIP)},
+				{"text": "🛡 Whitelist", "callback_data": fmt.Sprintf("white:%s", ev.ClientIP)},
+			},
+		}
 	}
 
 	payload := map[string]interface{}{
 		"chat_id":    b.cfg.ChatID,
 		"text":       text,
 		"parse_mode": "Markdown",
-		"reply_markup": map[string]interface{}{
+	}
+	if len(buttons) > 0 {
+		payload["reply_markup"] = map[string]interface{}{
 			"inline_keyboard": buttons,
-		},
+		}
 	}
 
 	go b.sendTelegramRequest("sendMessage", payload)
@@ -190,7 +195,16 @@ func (b *TelegramSOARBot) fetchUpdates() {
 				continue
 			}
 
-			action, ip := parts[0], parts[1]
+			action, ip := parts[0], strings.TrimSpace(parts[1])
+			if ip == "" || net.ParseIP(ip) == nil {
+				b.sendTelegramRequest("answerCallbackQuery", map[string]interface{}{
+					"callback_query_id": update.CallbackQuery.ID,
+					"text":              "⚠️ Invalid IP address",
+					"show_alert":        true,
+				})
+				continue
+			}
+
 			var notification string
 
 			switch action {

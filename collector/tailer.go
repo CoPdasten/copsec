@@ -24,51 +24,44 @@ type OffsetManager struct {
 	offsets  map[string]int64
 }
 
-// NewOffsetManager initializes an offset manager storing state in targetPath.
-func NewOffsetManager(targetPath string) *OffsetManager {
+// NewOffsetManager initializes an OffsetManager with offset persistence.
+func NewOffsetManager(filePath string) *OffsetManager {
 	om := &OffsetManager{
-		filePath: targetPath,
+		filePath: filePath,
 		offsets:  make(map[string]int64),
 	}
-	om.load()
+	_ = om.Load()
 	return om
 }
 
-func (om *OffsetManager) load() {
+// Load reads previously saved byte offsets from disk.
+func (om *OffsetManager) Load() error {
 	om.mu.Lock()
 	defer om.mu.Unlock()
 
 	data, err := os.ReadFile(om.filePath)
 	if err != nil {
-		if !os.IsNotExist(err) {
-			log.Printf("[WARN] Failed to read offset file %s: %v", om.filePath, err)
-		}
-		return
+		return err
 	}
 
-	var loaded map[string]int64
-	if err := json.Unmarshal(data, &loaded); err != nil {
-		log.Printf("[WARN] Failed to parse offset JSON %s: %v", om.filePath, err)
-		return
-	}
-	om.offsets = loaded
+	return json.Unmarshal(data, &om.offsets)
 }
 
-// GetOffset returns the recorded byte offset for a given file path.
+// GetOffset returns the stored offset for a file.
 func (om *OffsetManager) GetOffset(path string) int64 {
 	om.mu.RLock()
 	defer om.mu.RUnlock()
 	return om.offsets[path]
 }
 
-// SetOffset stores in-memory offset and commits atomically to disk.
+// SetOffset stores the updated offset for a file in memory.
 func (om *OffsetManager) SetOffset(path string, offset int64) {
 	om.mu.Lock()
+	defer om.mu.Unlock()
 	om.offsets[path] = offset
-	om.mu.Unlock()
 }
 
-// Flush writes the in-memory offsets map to disk atomically.
+// Flush persists in-memory offsets to disk atomically.
 func (om *OffsetManager) Flush() error {
 	om.mu.RLock()
 	data, err := json.MarshalIndent(om.offsets, "", "  ")
@@ -160,14 +153,10 @@ func (t *Tailer) tailFile(ctx context.Context) error {
 
 	var currentOffset int64
 	if savedOffset > currentSize {
-		// Log rotation or truncation occurred: restart from beginning
-		log.Printf("[INFO] File truncated or rotated for %s (size: %d < savedOffset: %d). Resetting offset to 0.",
-			t.filePath, currentSize, savedOffset)
+		// Log truncation detected (logrotate without copytruncate)
+		log.Printf("[WARN] Log truncation detected on %s (offset: %d > size: %d). Resetting to 0.",
+			t.filePath, savedOffset, currentSize)
 		currentOffset = 0
-	} else if savedOffset == 0 && currentSize > 0 {
-		// If first run and no saved offset, seek to the end
-		currentOffset = currentSize
-		t.offsetManager.SetOffset(t.filePath, currentOffset)
 	} else {
 		currentOffset = savedOffset
 	}
@@ -176,27 +165,28 @@ func (t *Tailer) tailFile(ctx context.Context) error {
 		return err
 	}
 
-	// Initialize Non-blocking Inotify
+	reader := bufio.NewReader(file)
+
+	// Catch up on unread lines
+	currentOffset = t.readLines(reader, file, currentOffset)
+	t.offsetManager.SetOffset(t.filePath, currentOffset)
+
+	// Setup non-blocking inotify watch
 	inotifyFd, err := syscall.InotifyInit1(syscall.IN_NONBLOCK | syscall.IN_CLOEXEC)
 	if err != nil {
 		return fmt.Errorf("inotify_init failed: %w", err)
 	}
 	defer syscall.Close(inotifyFd)
 
-	watchFlags := uint32(syscall.IN_MODIFY | syscall.IN_ATTRIB | syscall.IN_MOVE_SELF | syscall.IN_DELETE_SELF)
-	wd, err := syscall.InotifyAddWatch(inotifyFd, t.filePath, watchFlags)
+	watchMask := uint32(syscall.IN_MODIFY | syscall.IN_MOVE_SELF | syscall.IN_DELETE_SELF)
+	wd, err := syscall.InotifyAddWatch(inotifyFd, t.filePath, watchMask)
 	if err != nil {
-		return fmt.Errorf("inotify_add_watch failed for %s: %w", t.filePath, err)
+		return fmt.Errorf("inotify_add_watch failed: %w", err)
 	}
 	defer syscall.InotifyRmWatch(inotifyFd, uint32(wd))
 
-	reader := bufio.NewReaderSize(file, 64*1024)
-	flushTicker := time.NewTicker(2 * time.Second)
+	flushTicker := time.NewTicker(5 * time.Second)
 	defer flushTicker.Stop()
-
-	// Initial read
-	currentOffset = t.readLines(reader, file, currentOffset)
-	t.offsetManager.SetOffset(t.filePath, currentOffset)
 
 	buf := make([]byte, 4096)
 	for {
@@ -214,7 +204,6 @@ func (t *Tailer) tailFile(ctx context.Context) error {
 			n, err := syscall.Read(inotifyFd, buf)
 			if err != nil {
 				if errors.Is(err, syscall.EAGAIN) || errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EINTR) {
-					// Check file size periodically in case inotify missed an event or to avoid spinning
 					time.Sleep(50 * time.Millisecond)
 					continue
 				}
@@ -275,7 +264,7 @@ func (t *Tailer) readLines(reader *bufio.Reader, file *os.File, currentOffset in
 				select {
 				case t.outChan <- entry:
 				default:
-					// Ring-buffer / non-blocking behavior: prevent tailer lockup if consumer is delayed
+					// Ring-buffer non-blocking: prevent reader lockup
 				}
 			}
 		}
@@ -290,14 +279,20 @@ func (t *Tailer) readLines(reader *bufio.Reader, file *os.File, currentOffset in
 	return currentOffset
 }
 
+// isNoisyCollectorLog drops self-generated feedback loop lines and background noise.
 func isNoisyCollectorLog(rawLine string) bool {
 	lower := strings.ToLower(rawLine)
-	if strings.Contains(lower, "tailscaled") ||
+	if strings.Contains(lower, "copsec-collector") ||
+		strings.Contains(lower, "[collector_event]") ||
+		strings.Contains(lower, "[soar_command]") ||
+		strings.Contains(lower, "[soar_ack]") ||
+		strings.Contains(lower, "tailscaled") ||
 		strings.Contains(lower, "magicsock") ||
 		strings.Contains(lower, "open-conn-track") ||
 		strings.Contains(lower, "sysstat-collect") ||
 		strings.Contains(lower, "systemd-resolved") ||
 		strings.Contains(lower, "systemd-logind") ||
+		strings.Contains(lower, "systemd[") ||
 		strings.Contains(lower, "pam_unix(sudo:session)") ||
 		strings.Contains(lower, "pam_unix(cron:session)") ||
 		strings.Contains(lower, "session closed for user") ||

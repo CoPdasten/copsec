@@ -113,6 +113,12 @@ func TestStorageEngine(t *testing.T) {
 	if stats[0].TechniqueID != "T1595.002" || stats[0].Count != 1 {
 		t.Errorf("MITRE stat mismatch: %+v", stats[0])
 	}
+
+	// Threat hunting search test
+	searchResults, err := store.SearchEvents("ip:198.51.100.25 mitre:T1595", 10)
+	if err != nil || len(searchResults) != 1 {
+		t.Fatalf("Expected 1 search result, got %d (err: %v)", len(searchResults), err)
+	}
 }
 
 func TestCentralServerAuthAndHeartbeat(t *testing.T) {

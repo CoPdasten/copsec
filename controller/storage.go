@@ -6,6 +6,8 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -31,12 +33,6 @@ type StoredEvent struct {
 type MITREStat struct {
 	TechniqueID string `json:"technique_id"`
 	Count       int    `json:"count"`
-}
-
-// TrendPoint represents aggregated event counts per interval.
-type TrendPoint struct {
-	TimestampMs int64 `json:"timestamp_ms"`
-	EventCount  int   `json:"event_count"`
 }
 
 // StorageEngine manages the embedded WAL-mode SQLite database.
@@ -94,6 +90,7 @@ func (s *StorageEngine) initSchema() error {
 	CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp_ms DESC);
 	CREATE INDEX IF NOT EXISTS idx_events_client_ip ON events(client_ip);
 	CREATE INDEX IF NOT EXISTS idx_events_mitre ON events(mitre_technique_id);
+	CREATE INDEX IF NOT EXISTS idx_events_threat_score ON events(threat_score DESC);
 	CREATE INDEX IF NOT EXISTS idx_events_node_id ON events(node_id);
 
 	CREATE TABLE IF NOT EXISTS node_registry (
@@ -147,6 +144,94 @@ func (s *StorageEngine) GetRecentEvents(limit int) ([]*StoredEvent, error) {
 	}
 	defer rows.Close()
 
+	return scanEvents(rows)
+}
+
+// GetCriticalEvents retrieves recent high-threat incidents (ThreatScore >= 50).
+func (s *StorageEngine) GetCriticalEvents(limit int) ([]*StoredEvent, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	query := `SELECT id, node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis
+	          FROM events WHERE threat_score >= 50 ORDER BY timestamp_ms DESC LIMIT ?`
+	rows, err := s.db.Query(query, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return scanEvents(rows)
+}
+
+// SearchEvents executes advanced Threat Hunting query filters.
+func (s *StorageEngine) SearchEvents(filterStr string, limit int) ([]*StoredEvent, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	filterStr = strings.TrimSpace(filterStr)
+	if filterStr == "" {
+		return s.GetRecentEvents(limit)
+	}
+
+	var conditions []string
+	var args []interface{}
+
+	tokens := strings.Fields(filterStr)
+	for _, token := range tokens {
+		if strings.HasPrefix(token, "ip:") {
+			ipVal := strings.TrimPrefix(token, "ip:")
+			conditions = append(conditions, "client_ip LIKE ?")
+			args = append(args, "%"+ipVal+"%")
+		} else if strings.HasPrefix(token, "mitre:") {
+			mitreVal := strings.TrimPrefix(token, "mitre:")
+			conditions = append(conditions, "mitre_technique_id LIKE ?")
+			args = append(args, "%"+mitreVal+"%")
+		} else if strings.HasPrefix(token, "src:") {
+			srcVal := strings.TrimPrefix(token, "src:")
+			conditions = append(conditions, "source = ?")
+			args = append(args, srcVal)
+		} else if strings.HasPrefix(token, "node:") {
+			nodeVal := strings.TrimPrefix(token, "node:")
+			conditions = append(conditions, "node_id LIKE ?")
+			args = append(args, "%"+nodeVal+"%")
+		} else if strings.HasPrefix(token, "score:>") {
+			scoreVal, _ := strconv.Atoi(strings.TrimPrefix(token, "score:>"))
+			conditions = append(conditions, "threat_score > ?")
+			args = append(args, scoreVal)
+		} else if strings.HasPrefix(token, "score:>=") {
+			scoreVal, _ := strconv.Atoi(strings.TrimPrefix(token, "score:>="))
+			conditions = append(conditions, "threat_score >= ?")
+			args = append(args, scoreVal)
+		} else if strings.HasPrefix(token, "q:") {
+			qVal := strings.TrimPrefix(token, "q:")
+			conditions = append(conditions, "(raw_line LIKE ? OR client_ip LIKE ? OR rule_id LIKE ?)")
+			args = append(args, "%"+qVal+"%", "%"+qVal+"%", "%"+qVal+"%")
+		} else {
+			// Free text search across raw_line, IP, rule
+			conditions = append(conditions, "(raw_line LIKE ? OR client_ip LIKE ? OR rule_id LIKE ?)")
+			args = append(args, "%"+token+"%", "%"+token+"%", "%"+token+"%")
+		}
+	}
+
+	whereClause := ""
+	if len(conditions) > 0 {
+		whereClause = "WHERE " + strings.Join(conditions, " AND ")
+	}
+
+	query := fmt.Sprintf(`SELECT id, node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis
+	                       FROM events %s ORDER BY timestamp_ms DESC LIMIT ?`, whereClause)
+	args = append(args, limit)
+
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return scanEvents(rows)
+}
+
+func scanEvents(rows *sql.Rows) ([]*StoredEvent, error) {
 	var results []*StoredEvent
 	for rows.Next() {
 		ev := &StoredEvent{}
@@ -163,7 +248,7 @@ func (s *StorageEngine) GetMITREStats() ([]MITREStat, error) {
 	defer s.mu.RUnlock()
 
 	query := `SELECT mitre_technique_id, COUNT(*) as cnt FROM events
-	          WHERE mitre_technique_id != '' GROUP BY mitre_technique_id ORDER BY cnt DESC LIMIT 20`
+	          WHERE mitre_technique_id != '' GROUP BY mitre_technique_id ORDER BY cnt DESC LIMIT 25`
 	rows, err := s.db.Query(query)
 	if err != nil {
 		return nil, err

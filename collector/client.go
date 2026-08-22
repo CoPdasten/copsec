@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"net"
 	"os/exec"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -346,7 +348,7 @@ func (c *ControllerClient) runCommandSyncLoop(ctx context.Context, wg *sync.Wait
 	}
 }
 
-// executeSOARCommand runs local firewall / containment actions.
+// executeSOARCommand runs local firewall / containment actions safely.
 func (c *ControllerClient) executeSOARCommand(cmd *copsecproto.SOARCommand, stream copsecproto.CopsecStreamService_SyncCommandsClient) {
 	log.Printf("[SOAR_COMMAND] Received directive: ID=%s, Action=%s, Target=%s",
 		cmd.CommandId, cmd.ActionType, cmd.TargetIp)
@@ -354,24 +356,57 @@ func (c *ControllerClient) executeSOARCommand(cmd *copsecproto.SOARCommand, stre
 	var success bool
 	var output string
 
+	targetIP := strings.TrimSpace(cmd.TargetIp)
+
 	switch cmd.ActionType {
 	case "BAN_IP":
-		// Direct execution via local copsec-cli or nftables
-		out, err := exec.Command("copsec-cli", "ban", cmd.TargetIp, fmt.Sprintf("%d", cmd.DurationSeconds)).CombinedOutput()
+		if net.ParseIP(targetIP) == nil {
+			output = fmt.Sprintf("Rejected: invalid IP address '%s'", targetIP)
+			break
+		}
+
+		// Try copsec-cli first, fallback to iptables
+		out, err := exec.Command("copsec-cli", "ban", targetIP, fmt.Sprintf("%d", cmd.DurationSeconds)).CombinedOutput()
 		if err == nil {
 			success = true
 			output = string(out)
 		} else {
-			output = fmt.Sprintf("Failed to ban IP %s: %v (%s)", cmd.TargetIp, err, string(out))
+			// Check if already dropped in iptables
+			checkErr := exec.Command("iptables", "-C", "INPUT", "-s", targetIP, "-j", "DROP").Run()
+			if checkErr == nil {
+				success = true
+				output = fmt.Sprintf("IP %s is already banned in iptables", targetIP)
+			} else {
+				// Insert drop rule at top of INPUT chain
+				iptOut, iptErr := exec.Command("iptables", "-I", "INPUT", "-s", targetIP, "-j", "DROP").CombinedOutput()
+				if iptErr == nil {
+					success = true
+					output = fmt.Sprintf("Successfully banned IP %s via iptables", targetIP)
+				} else {
+					output = fmt.Sprintf("Failed to ban IP %s: %v (%s)", targetIP, iptErr, string(iptOut))
+				}
+			}
 		}
 
 	case "UNBAN_IP":
-		out, err := exec.Command("copsec-cli", "unban", cmd.TargetIp).CombinedOutput()
+		if net.ParseIP(targetIP) == nil {
+			output = fmt.Sprintf("Rejected: invalid IP address '%s'", targetIP)
+			break
+		}
+
+		out, err := exec.Command("copsec-cli", "unban", targetIP).CombinedOutput()
 		if err == nil {
 			success = true
 			output = string(out)
 		} else {
-			output = fmt.Sprintf("Failed to unban IP %s: %v (%s)", cmd.TargetIp, err, string(out))
+			// Remove from iptables
+			iptOut, iptErr := exec.Command("iptables", "-D", "INPUT", "-s", targetIP, "-j", "DROP").CombinedOutput()
+			if iptErr == nil {
+				success = true
+				output = fmt.Sprintf("Successfully unbanned IP %s via iptables", targetIP)
+			} else {
+				output = fmt.Sprintf("Failed to unban IP %s: %v (%s)", targetIP, iptErr, string(iptOut))
+			}
 		}
 
 	case "FLUSH_BANS":
