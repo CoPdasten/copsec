@@ -45,9 +45,11 @@ type CentralServer struct {
 	eventSubChan chan *StoredEvent
 
 	// Autonomous Auto-Ban Tracker
-	autoBanMu  sync.Mutex
-	ipHistory  map[string][]int64
-	autoBanned map[string]int64
+	autoBanMu        sync.Mutex
+	autoBanEnabled   bool
+	autoBanThreshold int
+	ipHistory        map[string][]int64
+	autoBanned       map[string]int64
 
 	totalEventsProcessed uint64
 	currentEPS           uint64
@@ -57,13 +59,15 @@ type CentralServer struct {
 // NewCentralServer creates a new CentralServer instance.
 func NewCentralServer(storage *StorageEngine, analyzer *RuleEngine) *CentralServer {
 	srv := &CentralServer{
-		storage:      storage,
-		analyzer:     analyzer,
-		aiEngine:     NewAIEngine(),
-		nodes:        make(map[string]*NodeSession),
-		eventSubChan: make(chan *StoredEvent, 4096),
-		ipHistory:    make(map[string][]int64),
-		autoBanned:   make(map[string]int64),
+		storage:          storage,
+		analyzer:         analyzer,
+		aiEngine:         NewAIEngine(),
+		nodes:            make(map[string]*NodeSession),
+		eventSubChan:     make(chan *StoredEvent, 4096),
+		autoBanEnabled:   true,
+		autoBanThreshold: 85,
+		ipHistory:        make(map[string][]int64),
+		autoBanned:       make(map[string]int64),
 	}
 
 	// EPS Calculator ticker
@@ -77,6 +81,16 @@ func NewCentralServer(storage *StorageEngine, analyzer *RuleEngine) *CentralServ
 	}()
 
 	return srv
+}
+
+// SetAutoBanPolicy configures autonomous auto-ban behavior.
+func (s *CentralServer) SetAutoBanPolicy(enabled bool, threshold int) {
+	s.autoBanMu.Lock()
+	defer s.autoBanMu.Unlock()
+	s.autoBanEnabled = enabled
+	if threshold > 0 {
+		s.autoBanThreshold = threshold
+	}
 }
 
 // SetTelegramBot configures the telegram alert bot.
@@ -254,6 +268,10 @@ func (s *CentralServer) checkAutonomousBanPolicy(event *StoredEvent) {
 	s.autoBanMu.Lock()
 	defer s.autoBanMu.Unlock()
 
+	if !s.autoBanEnabled {
+		return
+	}
+
 	now := time.Now().Unix()
 
 	// Check if already auto-banned within last 1 hour
@@ -264,10 +282,14 @@ func (s *CentralServer) checkAutonomousBanPolicy(event *StoredEvent) {
 	triggerAutoBan := false
 	banReason := ""
 
-	// Condition 1: Static Critical Threshold (ThreatScore >= 85)
-	if event.ThreatScore >= 85 {
+	// Condition 1: Static Critical Threshold
+	threshold := s.autoBanThreshold
+	if threshold <= 0 {
+		threshold = 85
+	}
+	if event.ThreatScore >= threshold {
 		triggerAutoBan = true
-		banReason = fmt.Sprintf("Static Critical Threshold (ThreatScore: %d >= 85)", event.ThreatScore)
+		banReason = fmt.Sprintf("Static Critical Threshold (ThreatScore: %d >= %d)", event.ThreatScore, threshold)
 	}
 
 	// Condition 2: Correlational Spike / Brute-Force Threshold (>= 3 high-threat events in 60s)

@@ -14,11 +14,13 @@ import (
 )
 
 func main() {
-	grpcAddr := flag.String("grpc-addr", "0.0.0.0:50051", "gRPC listen host:port for edge nodes")
-	dbPath := flag.String("db", "/var/lib/copsec/copsec_controller.db", "Path to SQLite/DuckDB timeseries database")
-	rulesPath := flag.String("rules", "/etc/copsec/rules.json", "Path to detection rules JSON")
-	botToken := flag.String("telegram-token", os.Getenv("COPSEC_TELEGRAM_BOT_TOKEN"), "Telegram Bot Token for SOAR alerts")
-	chatID := flag.String("telegram-chat", os.Getenv("COPSEC_TELEGRAM_CHAT_ID"), "Telegram Chat ID for SOAR alerts")
+	grpcAddr := flag.String("grpc-addr", "0.0.0.0:8443", "gRPC listen address")
+	rulesPath := flag.String("rules", "../config/rules.json", "Rules JSON path")
+	dbPath := flag.String("db", "./data/copsec.db", "SQLite DB path")
+	tgToken := flag.String("telegram-token", os.Getenv("COPSEC_TELEGRAM_BOT_TOKEN"), "Telegram Bot Token")
+	tgChat := flag.String("telegram-chat", os.Getenv("COPSEC_TELEGRAM_CHAT_ID"), "Telegram Chat ID")
+	autoBan := flag.Bool("auto-ban", true, "Enable autonomous SOAR auto-ban")
+	autoBanThreshold := flag.Int("auto-ban-threshold", 85, "Threat score threshold for auto-ban")
 	headless := flag.Bool("headless", false, "Run in headless daemon mode without TUI dashboard")
 	flag.Parse()
 
@@ -27,7 +29,7 @@ func main() {
 	// 1. Embedded Timeseries Storage (WAL-mode SQLite)
 	finalDbPath := *dbPath
 	if err := os.MkdirAll(filepath.Dir(finalDbPath), 0750); err != nil {
-		finalDbPath = "./copsec_controller.db"
+		finalDbPath = "./copsec.db"
 	}
 	storage, err := NewStorageEngine(finalDbPath)
 	if err != nil {
@@ -38,15 +40,17 @@ func main() {
 	// 2. Rule Engine & Deep Inspection
 	finalRulesPath := *rulesPath
 	if _, err := os.Stat(finalRulesPath); os.IsNotExist(err) {
-		fallback := "../config/rules.json"
+		fallback := "/etc/copsec/rules.json"
 		if _, err := os.Stat(fallback); err == nil {
 			finalRulesPath = fallback
 		}
 	}
 	analyzer := NewRuleEngine(finalRulesPath)
 
-	// 3. Central gRPC Server & Node Registry
+	// 3. Central gRPC Server, Autonomous SOAR & Node Registry
 	centralServer := NewCentralServer(storage, analyzer)
+	centralServer.SetAutoBanPolicy(*autoBan, *autoBanThreshold)
+
 	grpcServer, err := StartGRPCServer(*grpcAddr, centralServer)
 	if err != nil {
 		log.Fatalf("[FATAL] gRPC server binding failed: %v", err)
@@ -55,8 +59,8 @@ func main() {
 
 	// 4. Telegram SOAR Bot
 	tgCfg := TelegramBotConfig{
-		BotToken: *botToken,
-		ChatID:   *chatID,
+		BotToken: *tgToken,
+		ChatID:   *tgChat,
 	}
 	tgBot := NewTelegramSOARBot(tgCfg, centralServer)
 	centralServer.SetTelegramBot(tgBot)
@@ -72,7 +76,8 @@ func main() {
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
 	if *headless {
-		log.Printf("[INFO] Controller running in Headless Mode on %s. Press Ctrl+C to stop.", *grpcAddr)
+		log.Printf("[INFO] Controller running in Headless Mode on %s. Auto-Ban: %v (Threshold: %d). Press Ctrl+C to stop.",
+			*grpcAddr, *autoBan, *autoBanThreshold)
 		<-sigChan
 		log.Println("[INFO] Shutting down Controller gracefully...")
 		cancel()
@@ -98,7 +103,7 @@ func main() {
 	}()
 
 	if _, err := p.Run(); err != nil {
-		log.Fatalf("[FATAL] TUI error: %v", err)
+		log.Fatalf("[FATAL] TUI execution failed: %v", err)
 	}
 
 	cancel()
