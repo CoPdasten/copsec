@@ -152,11 +152,15 @@ func (t *Tailer) tailFile(ctx context.Context) error {
 	currentSize := stat.Size()
 
 	var currentOffset int64
-	if savedOffset > currentSize {
+	if savedOffset <= 0 {
+		// First start: Seek to EOF (io.SeekEnd) to only stream fresh real-time events
+		currentOffset = currentSize
+		log.Printf("[TAILER] 🚀 Real-time tail active for [%s] -> %s (Started at EOF, Offset: %d)", t.source, t.filePath, currentOffset)
+	} else if savedOffset > currentSize {
 		// Log truncation detected (logrotate without copytruncate)
-		log.Printf("[WARN] Log truncation detected on %s (offset: %d > size: %d). Resetting to 0.",
+		log.Printf("[WARN] Log truncation detected on %s (offset: %d > size: %d). Resetting to EOF.",
 			t.filePath, savedOffset, currentSize)
-		currentOffset = 0
+		currentOffset = currentSize
 	} else {
 		currentOffset = savedOffset
 	}
@@ -308,7 +312,7 @@ func (t *Tailer) sendLogNonBlocking(entry LogEntry) {
 	select {
 	case t.outChan <- entry:
 	default:
-		// Drop on saturated edge buffer to guarantee continuous file reading
+		// Queue saturated: skip line non-blockingly to guarantee zero reader lockup
 	}
 }
 

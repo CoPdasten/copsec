@@ -50,15 +50,19 @@ func (b *OfflineBuffer) init() error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	// Count existing records and find the maximum ID
+	// 1. Read existing records, prune stale items older than 1 hour and cap to max 50
 	file, err := os.OpenFile(b.filePath, os.O_RDWR|os.O_CREATE, 0640)
 	if err != nil {
 		return fmt.Errorf("failed to open buffer file: %w", err)
 	}
 
 	scanner := bufio.NewScanner(file)
-	var count int
+	var records []BufferedRecord
 	var maxID int64
+	nowMs := time.Now().UnixMilli()
+	const maxTTLMs = 3600 * 1000  // 1 hour TTL
+	const maxInitialBuffered = 50 // Keep max 50 freshest items on startup
+
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		if len(line) == 0 {
@@ -66,18 +70,39 @@ func (b *OfflineBuffer) init() error {
 		}
 		var rec BufferedRecord
 		if err := json.Unmarshal(line, &rec); err == nil {
-			count++
 			if rec.ID > maxID {
 				maxID = rec.ID
 			}
+			if nowMs-rec.Timestamp <= maxTTLMs || rec.Timestamp == 0 {
+				records = append(records, rec)
+			}
+		}
+	}
+	_ = file.Close()
+
+	if len(records) > maxInitialBuffered {
+		records = records[len(records)-maxInitialBuffered:]
+	}
+
+	// Rewrite compacted clean buffer
+	compactFile, err := os.OpenFile(b.filePath, os.O_CREATE|os.O_TRUNC|os.O_RDWR, 0640)
+	if err != nil {
+		return err
+	}
+
+	for _, r := range records {
+		data, err := json.Marshal(r)
+		if err == nil {
+			_, _ = compactFile.Write(append(data, '\n'))
 		}
 	}
 
 	b.nextID = maxID + 1
-	b.inMemorySize = count
-	b.appendFile = file
+	b.inMemorySize = len(records)
+	b.appendFile = compactFile
 
-	log.Printf("[INFO] Offline Buffer initialized (%s). Recovered %d pending records.", b.filePath, count)
+	log.Printf("[INFO] Offline Buffer initialized (%s). Retained %d fresh pending records (Capped to %d).",
+		b.filePath, len(records), maxInitialBuffered)
 	return nil
 }
 
