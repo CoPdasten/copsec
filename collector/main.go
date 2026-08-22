@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -75,9 +76,14 @@ func main() {
 	}
 
 	collector := NewMultiLogCollector(sources, finalOffsetPath, finalWhitelistPath, controllerClient)
+	fallbackEngine.SetWhitelistFilter(collector.GetFilter(), finalWhitelistPath)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go fallbackEngine.StartTelegramPolling(ctx, &wg)
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
@@ -89,4 +95,5 @@ func main() {
 	}()
 
 	collector.Start(ctx)
+	wg.Wait()
 }

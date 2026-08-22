@@ -155,3 +155,8 @@ func (c *MultiLogCollector) dispatch(entry LogEntry) {
 		c.client.Submit(event)
 	}
 }
+
+// GetFilter returns the PreRoutingFilter instance.
+func (c *MultiLogCollector) GetFilter() *PreRoutingFilter {
+	return c.filter
+}
