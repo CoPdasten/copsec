@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"math"
 	"net"
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -408,6 +410,47 @@ func (c *ControllerClient) executeSOARCommand(cmd *copsecproto.SOARCommand, stre
 				output = fmt.Sprintf("Failed to unban IP %s: %v (%s)", targetIP, iptErr, string(iptOut))
 			}
 		}
+
+	case "WHITELIST_IP":
+		if net.ParseIP(targetIP) == nil {
+			output = fmt.Sprintf("Rejected: invalid IP address '%s'", targetIP)
+			break
+		}
+
+		// Remove any iptables ban first
+		_ = exec.Command("iptables", "-D", "INPUT", "-s", targetIP, "-j", "DROP").Run()
+		_ = exec.Command("copsec-cli", "unban", targetIP).Run()
+
+		// Persist to /etc/copsec/whitelist.json
+		wlPath := "/etc/copsec/whitelist.json"
+		if _, err := os.Stat("/etc/copsec"); os.IsNotExist(err) {
+			_ = os.MkdirAll("/etc/copsec", 0750)
+		}
+		if _, err := os.Stat(wlPath); os.IsNotExist(err) {
+			wlPath = "config/whitelist.json"
+		}
+
+		var cfg struct {
+			TrustedCIDRs []string `json:"trusted_cidrs"`
+		}
+		data, _ := os.ReadFile(wlPath)
+		_ = json.Unmarshal(data, &cfg)
+
+		exists := false
+		for _, c := range cfg.TrustedCIDRs {
+			if strings.TrimSpace(c) == targetIP || strings.TrimSpace(c) == targetIP+"/32" {
+				exists = true
+				break
+			}
+		}
+		if !exists {
+			cfg.TrustedCIDRs = append(cfg.TrustedCIDRs, targetIP+"/32")
+			outData, _ := json.MarshalIndent(cfg, "", "  ")
+			_ = os.WriteFile(wlPath, outData, 0640)
+		}
+
+		success = true
+		output = fmt.Sprintf("Successfully whitelisted IP %s and cleared iptables rule", targetIP)
 
 	case "FLUSH_BANS":
 		out, err := exec.Command("copsec-cli", "flush").CombinedOutput()

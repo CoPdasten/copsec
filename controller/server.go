@@ -326,7 +326,7 @@ func (s *CentralServer) BroadcastSOARCommand(actionType, targetIP string, durati
 	if s.storage != nil {
 		if actionType == "BAN_IP" {
 			_ = s.storage.RecordBan(targetIP, "Manual/SOAR Alert", durationSec)
-		} else if actionType == "UNBAN_IP" {
+		} else if actionType == "UNBAN_IP" || actionType == "WHITELIST_IP" {
 			_ = s.storage.RemoveBan(targetIP)
 		}
 		_ = s.storage.RecordSOARAction(actionType, targetIP, dispatched)

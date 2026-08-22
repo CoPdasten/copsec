@@ -163,3 +163,55 @@ func (f *PreRoutingFilter) ShouldDrop(entry LogEntry) (bool, string) {
 
 	return false, ""
 }
+
+// AddDynamicWhitelist adds an IP to the in-memory filter and persists to whitelist.json.
+func (f *PreRoutingFilter) AddDynamicWhitelist(ipStr string, configPath string) error {
+	ip := net.ParseIP(strings.TrimSpace(ipStr))
+	if ip == nil {
+		return &net.ParseError{Type: "IP address", Text: ipStr}
+	}
+
+	cidr := ipStr
+	if !strings.Contains(cidr, "/") {
+		if strings.Contains(cidr, ":") {
+			cidr += "/128"
+		} else {
+			cidr += "/32"
+		}
+	}
+	_, ipNet, err := net.ParseCIDR(cidr)
+	if err != nil {
+		return err
+	}
+
+	f.mu.Lock()
+	// Check duplicate
+	exists := false
+	for _, n := range f.trustedNets {
+		if n.String() == ipNet.String() {
+			exists = true
+			break
+		}
+	}
+	if !exists {
+		f.trustedNets = append(f.trustedNets, ipNet)
+	}
+
+	// Prepare persist list
+	var cidrList []string
+	for _, n := range f.trustedNets {
+		cidrList = append(cidrList, n.String())
+	}
+	f.mu.Unlock()
+
+	if configPath != "" {
+		cfg := WhitelistConfigFile{TrustedCIDRs: cidrList}
+		data, err := json.MarshalIndent(cfg, "", "  ")
+		if err == nil {
+			_ = os.WriteFile(configPath, data, 0640)
+		}
+	}
+
+	log.Printf("[WHITELIST] Dynamically whitelisted %s (%s)", ipStr, ipNet.String())
+	return nil
+}
