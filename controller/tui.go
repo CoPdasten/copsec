@@ -167,6 +167,12 @@ type SIEMModel struct {
 }
 
 // NewSIEMModel creates a high-performance strictly-bounded 6-panel TUI model.
+// LogEventMsg encapsulates an event dispatched directly from gRPC stream to TUI.
+type LogEventMsg struct {
+	Event *StoredEvent
+}
+
+// NewSIEMModel creates a high-performance strictly-bounded 6-panel TUI model.
 func NewSIEMModel(server *CentralServer, storage *StorageEngine) *SIEMModel {
 	m := &SIEMModel{
 		server:          server,
@@ -192,7 +198,10 @@ func NewSIEMModel(server *CentralServer, storage *StorageEngine) *SIEMModel {
 			m.mitreMap[s.TechniqueID] = s.Count
 		}
 	}
-	if incs, err := storage.GetCriticalEvents(40); err == nil {
+	if evs, err := storage.GetRecentEvents(100); err == nil && len(evs) > 0 {
+		m.events = evs
+	}
+	if incs, err := storage.GetCriticalEvents(40); err == nil && len(incs) > 0 {
 		m.incidents = incs
 	}
 	if bans, err := storage.GetActiveBans(); err == nil {
@@ -286,6 +295,12 @@ func (m *SIEMModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case *StoredEvent:
 		m.processIncomingEvent(msg)
+		return m, nil
+
+	case LogEventMsg:
+		if msg.Event != nil {
+			m.processIncomingEvent(msg.Event)
+		}
 		return m, nil
 
 	case tea.WindowSizeMsg:
@@ -471,7 +486,7 @@ func (m *SIEMModel) processIncomingEvent(ev *StoredEvent) {
 			m.events = m.events[:250]
 		}
 	}
-	if ev.ThreatScore >= 50 {
+	if ev.ThreatScore >= 40 {
 		m.incidents = append([]*StoredEvent{ev}, m.incidents...)
 		if m.selectedIncIndex > 0 {
 			m.selectedIncIndex++
