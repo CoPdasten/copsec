@@ -31,29 +31,64 @@ type NodeSession struct {
 	CommandChan     chan *copsecproto.SOARCommand
 }
 
-// CentralServer implements the gRPC CopsecStreamService with authentication & fleet dispatch.
+// CentralServer implements the gRPC CopsecStreamService with threat analysis, auto-auth & fleet dispatch.
 type CentralServer struct {
 	copsecproto.UnimplementedCopsecStreamServiceServer
 
 	mu                   sync.RWMutex
 	storage              *StorageEngine
+	analyzer             *RuleEngine
+	telegramBot          *TelegramSOARBot
 	nodes                map[string]*NodeSession
 	eventSubChan         chan *StoredEvent
+
 	totalEventsProcessed uint64
+	currentEPS           uint64
+	epsEventsThisSec     uint64
 }
 
 // NewCentralServer creates a new CentralServer instance.
-func NewCentralServer(storage *StorageEngine) *CentralServer {
-	return &CentralServer{
+func NewCentralServer(storage *StorageEngine, analyzer *RuleEngine) *CentralServer {
+	srv := &CentralServer{
 		storage:      storage,
+		analyzer:     analyzer,
 		nodes:        make(map[string]*NodeSession),
 		eventSubChan: make(chan *StoredEvent, 4096),
 	}
+
+	// EPS Calculator ticker
+	go func() {
+		ticker := time.NewTicker(1 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			count := atomic.SwapUint64(&srv.epsEventsThisSec, 0)
+			atomic.StoreUint64(&srv.currentEPS, count)
+		}
+	}()
+
+	return srv
+}
+
+// SetTelegramBot wires the SOAR alert bot.
+func (s *CentralServer) SetTelegramBot(bot *TelegramSOARBot) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.telegramBot = bot
 }
 
 // SubscribeEvents returns the channel receiving real-time events for TUI / Telegram.
 func (s *CentralServer) SubscribeEvents() <-chan *StoredEvent {
 	return s.eventSubChan
+}
+
+// GetEPS returns the live events per second throughput.
+func (s *CentralServer) GetEPS() uint64 {
+	return atomic.LoadUint64(&s.currentEPS)
+}
+
+// GetTotalEvents returns total processed events count.
+func (s *CentralServer) GetTotalEvents() uint64 {
+	return atomic.LoadUint64(&s.totalEventsProcessed)
 }
 
 // authenticate extracts and validates x-node-id and x-api-key from incoming gRPC context metadata.
@@ -82,7 +117,7 @@ func (s *CentralServer) authenticate(ctx context.Context) (string, error) {
 			CommandChan: make(chan *copsecproto.SOARCommand, 128),
 		}
 		s.nodes[nodeID] = session
-		log.Printf("[AUTH] Registered new node: %s", nodeID)
+		log.Printf("[AUTH] Registered new edge node: %s", nodeID)
 	} else {
 		session.LastSeen = time.Now()
 	}
@@ -98,22 +133,43 @@ func (s *CentralServer) StreamEvents(stream grpc.ClientStreamingServer[copsecpro
 		return err
 	}
 
-	var count uint64
+	var batchCount uint64
 	for {
 		event, err := stream.Recv()
 		if errors.Is(err, io.EOF) {
 			return stream.SendAndClose(&copsecproto.StreamAck{
 				Success:        true,
-				ProcessedCount: count,
-				Message:        "Batch accepted successfully",
+				ProcessedCount: batchCount,
+				Message:        "Batch processed successfully",
 			})
 		}
 		if err != nil {
 			return err
 		}
 
-		count++
+		batchCount++
 		atomic.AddUint64(&s.totalEventsProcessed, 1)
+		atomic.AddUint64(&s.epsEventsThisSec, 1)
+
+		ruleID := event.RuleId
+		mitreID := event.MitreTechniqueId
+		threatScore := int(event.ThreatScore)
+
+		// Run deep inspection via RuleEngine if not already classified by agent
+		if s.analyzer != nil {
+			matchedRule, matchedMitre, matchedScore, matched := s.analyzer.Analyze(event.RawLine, int(event.StatusCode))
+			if matched {
+				if ruleID == "" {
+					ruleID = matchedRule
+				}
+				if mitreID == "" {
+					mitreID = matchedMitre
+				}
+				if threatScore < matchedScore {
+					threatScore = matchedScore
+				}
+			}
+		}
 
 		stored := &StoredEvent{
 			NodeID:           nodeID,
@@ -122,9 +178,9 @@ func (s *CentralServer) StreamEvents(stream grpc.ClientStreamingServer[copsecpro
 			ClientIP:         event.ClientIp,
 			StatusCode:       int(event.StatusCode),
 			TimestampMs:      event.TimestampMs,
-			RuleID:           event.RuleId,
-			MitreTechniqueID: event.MitreTechniqueId,
-			ThreatScore:      int(event.ThreatScore),
+			RuleID:           ruleID,
+			MitreTechniqueID: mitreID,
+			ThreatScore:      threatScore,
 		}
 
 		if stored.TimestampMs == 0 {
@@ -134,7 +190,15 @@ func (s *CentralServer) StreamEvents(stream grpc.ClientStreamingServer[copsecpro
 		// Persist to embedded SQLite
 		_ = s.storage.InsertEvent(stored)
 
-		// Broadcast to local TUI / Telegram subscribers
+		// Trigger instant Telegram SOAR alert if ThreatScore >= 70
+		s.mu.RLock()
+		bot := s.telegramBot
+		s.mu.RUnlock()
+		if bot != nil && stored.ThreatScore >= 70 {
+			bot.ProcessEvent(stored)
+		}
+
+		// Broadcast to TUI subscriber non-blockingly
 		select {
 		case s.eventSubChan <- stored:
 		default:

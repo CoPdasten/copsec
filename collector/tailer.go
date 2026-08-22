@@ -263,10 +263,15 @@ func (t *Tailer) readLines(reader *bufio.Reader, file *os.File, currentOffset in
 			}
 
 			if len(line) > 0 {
-				t.outChan <- LogEntry{
+				entry := LogEntry{
 					Source:    t.source,
 					Line:      line,
 					Timestamp: time.Now().UnixMilli(),
+				}
+				select {
+				case t.outChan <- entry:
+				default:
+					// Ring-buffer / non-blocking behavior: prevent tailer lockup if consumer is delayed
 				}
 			}
 		}

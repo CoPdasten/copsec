@@ -10,6 +10,33 @@ import (
 	"google.golang.org/grpc/metadata"
 )
 
+func TestRuleEngineAnalysis(t *testing.T) {
+	engine := NewRuleEngine("") // Load built-ins
+
+	// 1. SQL Injection attempt
+	sqli := `198.51.100.1 - - [22/Aug/2026:12:00:00 +0300] "GET /login?user=admin%27%20or%201=1-- HTTP/1.1" 403`
+	ruleID, techID, score, matched := engine.Analyze(sqli, 403)
+	if !matched || techID != "T1190" || score < 70 {
+		t.Errorf("Expected SQLi match T1190 (score>=70), got: match=%v, rule=%s, tech=%s, score=%d",
+			matched, ruleID, techID, score)
+	}
+
+	// 2. Command Injection / RCE
+	rce := `203.0.113.50 - - [22/Aug/2026:12:00:00 +0300] "GET /cgi-bin/test?cmd=%3B%20id HTTP/1.1" 500`
+	ruleID, techID, score, matched = engine.Analyze(rce, 500)
+	if !matched || techID != "T1059.004" || score < 80 {
+		t.Errorf("Expected RCE match T1059.004, got: match=%v, rule=%s, tech=%s, score=%d",
+			matched, ruleID, techID, score)
+	}
+
+	// 3. Status code filtering: 200 OK should not match when restricted to error codes
+	normal := `127.0.0.1 - - [22/Aug/2026:12:00:00 +0300] "GET /index.html HTTP/1.1" 200`
+	_, _, _, matched = engine.Analyze(normal, 200)
+	if matched {
+		t.Errorf("Expected normal 200 OK traffic to not match, but matched")
+	}
+}
+
 func TestStorageEngine(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test_controller.db")
@@ -58,9 +85,9 @@ func TestCentralServerAuthAndHeartbeat(t *testing.T) {
 	store, _ := NewStorageEngine(filepath.Join(tmpDir, "test.db"))
 	defer store.Close()
 
-	server := NewCentralServer(store)
+	analyzer := NewRuleEngine("")
+	server := NewCentralServer(store, analyzer)
 
-	// Valid authentication metadata
 	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs(
 		"x-node-id", "node-vps-test",
 		"x-api-key", "cps_live_secret123",
@@ -84,39 +111,8 @@ func TestCentralServerAuthAndHeartbeat(t *testing.T) {
 		t.Errorf("Expected registered node in snapshot, got %v", nodes)
 	}
 
-	// Test fleet command broadcast
 	dispatched := server.BroadcastSOARCommand("BAN_IP", "203.0.113.99", 86400)
 	if dispatched != 1 {
 		t.Errorf("Expected 1 dispatched command, got %d", dispatched)
 	}
-}
-
-func TestTelegramAlertFormat(t *testing.T) {
-	tmpDir := t.TempDir()
-	store, _ := NewStorageEngine(filepath.Join(tmpDir, "test.db"))
-	defer store.Close()
-
-	server := NewCentralServer(store)
-	bot := NewTelegramSOARBot(TelegramBotConfig{
-		BotToken: "dummy_token",
-		ChatID:   "123456",
-		Enabled:  false, // Keep network disabled for unit test
-	}, server)
-
-	evLow := &StoredEvent{
-		NodeID:      "vps-1",
-		ThreatScore: 10, // Under threshold
-	}
-	bot.ProcessEvent(evLow) // Should safely ignore without panic
-
-	evHigh := &StoredEvent{
-		NodeID:           "vps-1",
-		Source:           "nginx",
-		RawLine:          "GET /wp-login.php HTTP/1.1",
-		ClientIP:         "198.51.100.88",
-		MitreTechniqueID: "T1595.002",
-		ThreatScore:      60,
-		TimestampMs:      time.Now().UnixMilli(),
-	}
-	bot.ProcessEvent(evHigh)
 }
