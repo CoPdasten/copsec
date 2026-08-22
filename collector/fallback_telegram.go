@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os/exec"
 	"regexp"
 	"strings"
 	"sync"
@@ -14,9 +15,8 @@ import (
 )
 
 var (
-	// URL decode edilmiş metin üzerinde agresif arama
 	criticalAttackPatterns = map[string]*regexp.Regexp{
-		"SQL_INJECTION":    regexp.MustCompile(`(?i)(union[\s\+]+select|select.+from|information_schema|waitfor[\s\+]+delay|benchmark\(|order[\s\+]+by[\s\+]+[0-9]+|1=1|1=2|'\s*or\s*'|--\s*$)`),
+		"SQL_INJECTION":    regexp.MustCompile(`(?i)(union[\s\+]+select|select.+from|information_schema|waitfor[\s\+]+delay|benchmark\(|order[\s\+]+by[\s\+]+[0-9]+|1=1|1=2|'\s*or\s*'|--\s*)`),
 		"PATH_TRAVERSAL":   regexp.MustCompile(`(?i)(\.\./|\.\.\\|/etc/passwd|/etc/shadow|/proc/self)`),
 		"REMOTE_CODE_EXEC": regexp.MustCompile(`(?i)(/bin/bash|/bin/sh|cmd\.exe|powershell|wget[\s\+]|curl[\s\+]|\$\(.*\)|;\s*cat\s+)`),
 		"SENSITIVE_LEAK":   regexp.MustCompile(`(?i)(\.env|\.git/|wp-config\.php|id_rsa|\.aws/)`),
@@ -35,7 +35,7 @@ type AutonomousEdgeEngine struct {
 var edgeEngine = &AutonomousEdgeEngine{
 	Token:       "8275343323:AAHnc6qdWOSJW5ozJ5xsTyaQkE7BSCW7lFE",
 	ChatID:      "6352241918",
-	IsConnected: false, // Varsayılan fallback hazır
+	IsConnected: false,
 	httpClient:  &http.Client{Timeout: 5 * time.Second},
 }
 
@@ -48,16 +48,16 @@ func (e *AutonomousEdgeEngine) ProcessAutonomousInspection(rawLog string, source
 		return
 	}
 
-	// 1. URL Decoding: %20, %27, %2b vb. çöz
+	// 1. Tüm satırı (URI + Referer + User-Agent) URL-Decode et
 	decodedLog, err := url.QueryUnescape(rawLog)
 	if err != nil {
 		decodedLog = rawLog
 	}
-	// İkinci katman decode (çift encode saldırılar için)
 	if d2, err2 := url.PathUnescape(decodedLog); err2 == nil {
 		decodedLog = d2
 	}
 
+	// 2. Hem ham hem decode edilmiş tam metin üzerinde ara
 	var detectedVulnerability string
 	for vulnType, pattern := range criticalAttackPatterns {
 		if pattern.MatchString(decodedLog) || pattern.MatchString(rawLog) {
@@ -70,23 +70,32 @@ func (e *AutonomousEdgeEngine) ProcessAutonomousInspection(rawLog string, source
 		return
 	}
 
-	// Tekrarlanan banları önle
 	if _, banned := e.bannedCache.Load(attackerIP); banned {
 		return
 	}
 	e.bannedCache.Store(attackerIP, time.Now())
 
-	log.Printf("[FALLBACK_SOAR] 🚨 THREAT MATCHED [%s] from IP: %s", detectedVulnerability, attackerIP)
+	log.Printf("[FALLBACK_SOAR] 🚨 FULL-SPECTRUM THREAT MATCHED [%s] from IP: %s", detectedVulnerability, attackerIP)
 	go e.executeAutonomousHybridBan(attackerIP, detectedVulnerability, decodedLog, source)
 }
 
 func (e *AutonomousEdgeEngine) executeAutonomousHybridBan(ip string, vuln string, logSample string, source string) {
-	// 1. L3/L4 & L7 Hibrit Ban
+	// L3/L4 & L7 Mitigation
 	if err := ExecuteBan(ip, 86400); err != nil {
-		log.Printf("[FALLBACK_SOAR] ⚠️ Ban execution warning for %s: %v", ip, err)
+		_ = exec.Command("sudo", "iptables", "-t", "raw", "-I", "PREROUTING", "1", "-s", ip, "-j", "DROP").Run()
+		_ = exec.Command("sudo", "iptables", "-I", "INPUT", "1", "-s", ip, "-j", "DROP").Run()
+		_ = exec.Command("sudo", "ss", "-K", "dst", ip).Run()
+
+		blockLine := fmt.Sprintf("deny %s;\n", ip)
+		f, pipeErr := exec.Command("sudo", "tee", "-a", "/etc/nginx/conf.d/copsec_blocklist.conf").StdinPipe()
+		if pipeErr == nil {
+			_, _ = f.Write([]byte(blockLine))
+			_ = f.Close()
+			_ = exec.Command("sudo", "nginx", "-s", "reload").Run()
+		}
 	}
 
-	// 2. Telegram Bildirimi
+	// Telegram Bildirimi
 	msg := fmt.Sprintf("🛡️ *[COPSEC AUTONOMOUS EDGE SOAR]*\n\n"+
 		"🚨 *CRITICAL THREAT AUTO-MITIGATED*\n"+
 		"⚠️ *Status:* `CONTROLLER OFFLINE (Edge Defense)`\n"+
@@ -95,8 +104,8 @@ func (e *AutonomousEdgeEngine) executeAutonomousHybridBan(ip string, vuln string
 		"🌐 *Source:* `%s`\n"+
 		"🔒 *Action:* `PERMANENT BAN (iptables + Nginx WAF)`\n"+
 		"⏰ *Time:* `%s`\n\n"+
-		"📝 *Decoded Payload:*\n`%s`",
-		ip, vuln, source, time.Now().Format("15:04:05"), sanitizePayload(logSample, 150))
+		"📝 *Payload:*\n`%s`",
+		ip, vuln, source, time.Now().Format("15:04:05"), sanitizePayload(logSample, 160))
 
 	e.sendTelegram(msg)
 }
