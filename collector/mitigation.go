@@ -151,7 +151,7 @@ func isProtectedIP(ipStr string) bool {
 	}
 	parsed := net.ParseIP(ipStr)
 	if parsed != nil {
-		return parsed.IsLoopback() || parsed.IsPrivate() || parsed.IsUnspecified()
+		return parsed.IsLoopback() || parsed.IsUnspecified()
 	}
 	return false
 }

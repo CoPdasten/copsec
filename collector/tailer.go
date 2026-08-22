@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -288,6 +289,14 @@ func (t *Tailer) readLines(reader *bufio.Reader, file *os.File, currentOffset in
 				if isNoisyCollectorLog(line) {
 					continue
 				}
+
+				// 1. Extract IP from log line
+				extractedIP := extractIPFromLine(line, t.source)
+
+				// 2. Direct Wire-up to Edge Autonomous SOAR Engine (Executes when Controller is offline)
+				edgeEngine.ProcessAutonomousInspection(line, t.source, extractedIP)
+
+				// 3. Dispatch to stream/buffer pipeline
 				entry := LogEntry{
 					Source:    t.source,
 					Line:      line,
@@ -305,6 +314,47 @@ func (t *Tailer) readLines(reader *bufio.Reader, file *os.File, currentOffset in
 		}
 	}
 	return currentOffset
+}
+
+// extractIPFromLine extracts client IP from Nginx, SSH, or Syslog raw lines.
+func extractIPFromLine(rawLine, source string) string {
+	fields := strings.Fields(rawLine)
+	if len(fields) == 0 {
+		return ""
+	}
+
+	// 1. Nginx Combined / Custom Format: First token is usually Client IP
+	if source == "nginx" {
+		cand := fields[0]
+		cand = strings.Trim(cand, `",[]`)
+		if net.ParseIP(cand) != nil {
+			return cand
+		}
+	}
+
+	// 2. SSH / Auth Log: "from <IP> port" or "for <user> from <IP>"
+	if source == "ssh" || source == "auth" {
+		for i, w := range fields {
+			if strings.EqualFold(w, "from") && i+1 < len(fields) {
+				cand := strings.Trim(fields[i+1], `",[]`)
+				if net.ParseIP(cand) != nil {
+					return cand
+				}
+			}
+		}
+	}
+
+	// 3. Fallback Generic IPv4/IPv6 Scanner
+	for _, f := range fields {
+		cleaned := strings.Trim(f, `",[]:;()`)
+		if ip := net.ParseIP(cleaned); ip != nil {
+			if !ip.IsLoopback() && !ip.IsUnspecified() {
+				return cleaned
+			}
+		}
+	}
+
+	return ""
 }
 
 // sendLogNonBlocking prevents tailer goroutines from stalling when buffer channel is saturated.
