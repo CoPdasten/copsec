@@ -444,13 +444,13 @@ func (m *SIEMModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tickMsg:
 		m.mu.Lock()
-		if len(m.eventBuffer) > 0 {
-			for _, ev := range m.eventBuffer {
-				m.processIncomingEvent(ev)
-			}
-			m.eventBuffer = nil
-		}
+		buffered := m.eventBuffer
+		m.eventBuffer = nil
 		m.mu.Unlock()
+
+		for _, ev := range buffered {
+			m.processIncomingEvent(ev)
+		}
 
 		m.nodes = m.server.GetNodesSnapshot()
 		if bans, err := m.storage.GetActiveBans(); err == nil {
@@ -476,6 +476,9 @@ func (m *SIEMModel) processIncomingEvent(ev *StoredEvent) {
 	if ev == nil {
 		return
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	if !m.isPaused && !m.isFilterActive {
 		m.events = append([]*StoredEvent{ev}, m.events...)
 		if m.selectedLogIndex > 0 {
