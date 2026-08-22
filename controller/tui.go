@@ -12,7 +12,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// Cyberpunk / Matrix Color Palette
+// Cyberpunk / Matrix Pre-compiled Palette & Styles (Zero runtime allocations)
 var (
 	colorNeonGreen   = lipgloss.Color("#00FF66")
 	colorCyberCyan   = lipgloss.Color("#00F0FF")
@@ -25,42 +25,64 @@ var (
 	colorTextLight   = lipgloss.Color("#E2E8F0")
 	colorSelectedBg  = lipgloss.Color("#1A2333")
 
-	// Base Panel Styles
-	basePanelStyle = lipgloss.NewStyle().
+	// Pre-cached Lipgloss Styles
+	styleBasePanel = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(colorPanelBorder).
 			Padding(0, 1)
 
-	activePanelStyle = lipgloss.NewStyle().
+	styleActivePanel = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
 				BorderForeground(colorCyberCyan).
 				Padding(0, 1)
 
-	headerStyle = lipgloss.NewStyle().
+	styleHeader = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(colorCyberCyan)
 
-	matrixTitleStyle = lipgloss.NewStyle().
+	styleMatrixTitle = lipgloss.NewStyle().
 				Bold(true).
 				Foreground(colorNeonGreen)
 
-	alertStyle = lipgloss.NewStyle().
+	styleAlert = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(colorAlertPink)
 
-	modalBoxStyle = lipgloss.NewStyle().
+	styleWarning = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(colorWarningGold)
+
+	styleMuted = lipgloss.NewStyle().
+			Foreground(colorTextMuted)
+
+	styleLight = lipgloss.NewStyle().
+			Foreground(colorTextLight)
+
+	styleCyan = lipgloss.NewStyle().
+			Foreground(colorCyberCyan)
+
+	styleGreen = lipgloss.NewStyle().
+			Foreground(colorNeonGreen)
+
+	styleScrollTrack = lipgloss.NewStyle().
+				Foreground(colorScrollTrack)
+
+	styleSelected = lipgloss.NewStyle().
+			Background(colorSelectedBg)
+
+	styleModalBox = lipgloss.NewStyle().
 			Border(lipgloss.DoubleBorder()).
 			BorderForeground(colorAlertPink).
 			Padding(1, 2).
 			Width(68)
 
-	searchBoxStyle = lipgloss.NewStyle().
+	styleSearchBox = lipgloss.NewStyle().
 			Border(lipgloss.DoubleBorder()).
 			BorderForeground(colorCyberCyan).
 			Padding(1, 2).
 			Width(72)
 
-	inspectionCardStyle = lipgloss.NewStyle().
+	styleInspectionCard = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
 				BorderForeground(colorCyberCyan).
 				Padding(1, 2).
@@ -101,7 +123,7 @@ type targetStat struct {
 	Pct      int
 }
 
-// SIEMModel holds the state for the 6-panel SOC cockpit with Kill Chain, Entropy sparklines & GeoIP radar.
+// SIEMModel holds state for the 60 FPS optimized 6-panel SOC cockpit.
 type SIEMModel struct {
 	server         *CentralServer
 	storage        *StorageEngine
@@ -123,12 +145,10 @@ type SIEMModel struct {
 	statusPrompt   string
 	isPaused       bool
 
-	// Entropy Tracker
+	// Entropy & Kill Chain
 	recentEntropies []float64
 	avgEntropy      float64
-
-	// Kill Chain Stage Hit Counters
-	killChainHits map[string]int
+	killChainHits   map[string]int
 
 	// Threat Hunting Search
 	searchQuery    string
@@ -144,7 +164,7 @@ type SIEMModel struct {
 
 	inspectEvent *StoredEvent
 
-	// Async event queue buffer
+	// Async Ring Buffer Queue
 	mu          sync.Mutex
 	eventBuffer []*StoredEvent
 
@@ -153,7 +173,7 @@ type SIEMModel struct {
 	inputIP string
 }
 
-// NewSIEMModel creates a new 6-panel TUI dashboard model.
+// NewSIEMModel creates a high-performance 6-panel TUI model with ring-buffered slices.
 func NewSIEMModel(server *CentralServer, storage *StorageEngine) *SIEMModel {
 	m := &SIEMModel{
 		server:          server,
@@ -164,16 +184,16 @@ func NewSIEMModel(server *CentralServer, storage *StorageEngine) *SIEMModel {
 		targetMap:       make(map[string]int),
 		killChainHits:   make(map[string]int),
 		rateHistory:     make([]int, 20),
-		recentEntropies: make([]float64, 0, 50),
+		recentEntropies: make([]float64, 0, 30),
+		events:          make([]*StoredEvent, 0, 150),
+		incidents:       make([]*StoredEvent, 0, 150),
 	}
 
-	// Initialize default core techniques
 	defaultCore := []string{"T1190", "T1059.004", "T1203", "T1078", "T1053.003", "T1548.001", "T1027", "T1070.003", "T1562.001", "T1110.001", "T1003.008", "T1552.001", "T1595.002", "T1082", "T1087.001", "T1046", "T1071.001", "T1041", "T1567"}
 	for _, t := range defaultCore {
 		m.mitreMap[t] = 0
 	}
 
-	// Load historical stats, incidents and bans from DB
 	if stats, err := storage.GetMITREStats(); err == nil {
 		for _, s := range stats {
 			m.mitreMap[s.TechniqueID] = s.Count
@@ -189,14 +209,14 @@ func NewSIEMModel(server *CentralServer, storage *StorageEngine) *SIEMModel {
 		m.soarActions = actions
 	}
 
-	// Background worker reading events into memory buffer
+	// Async non-blocking subscriber
 	go func() {
 		sub := server.SubscribeEvents()
 		for ev := range sub {
 			m.mu.Lock()
 			m.eventBuffer = append(m.eventBuffer, ev)
-			if len(m.eventBuffer) > 3000 {
-				m.eventBuffer = m.eventBuffer[1500:]
+			if len(m.eventBuffer) > 2000 {
+				m.eventBuffer = m.eventBuffer[1000:]
 			}
 			m.mu.Unlock()
 		}
@@ -210,42 +230,41 @@ func (m *SIEMModel) Init() tea.Cmd {
 }
 
 func (m *SIEMModel) tickCmd() tea.Cmd {
-	return tea.Tick(80*time.Millisecond, func(t time.Time) tea.Msg {
+	// 50ms = 20 FPS steady rate without UI stuttering
+	return tea.Tick(50*time.Millisecond, func(t time.Time) tea.Msg {
 		return tickMsg(t)
 	})
 }
 
-// lookupGeoThreatActor resolves enriched threat actor intelligence.
 func lookupGeoThreatActor(ip string) (flag, org, class string) {
 	if strings.HasPrefix(ip, "185.220.") || strings.HasPrefix(ip, "185.222.") || strings.HasPrefix(ip, "104.244.") {
-		return "🇩🇪", "Tor Project / Exit Node", "Tor Anonymizer"
+		return "🇩🇪", "Tor Project", "Tor Exit"
 	} else if strings.HasPrefix(ip, "161.35.") || strings.HasPrefix(ip, "164.92.") || strings.HasPrefix(ip, "159.65.") {
-		return "🇩🇪", "DigitalOcean / Host Europe", "Vulnerability Scanner"
+		return "🇩🇪", "DigitalOcean", "Scanner"
 	} else if strings.HasPrefix(ip, "45.154.") || strings.HasPrefix(ip, "194.26.") || strings.HasPrefix(ip, "193.106.") {
-		return "🇷🇺", "Selectel / Miran AS", "Exploit Prober"
+		return "🇷🇺", "Selectel", "Exploiter"
 	} else if strings.HasPrefix(ip, "43.135.") || strings.HasPrefix(ip, "119.28.") || strings.HasPrefix(ip, "124.222.") {
-		return "🇨🇳", "Tencent Cloud / Alibaba", "Automated Crawler"
+		return "🇨🇳", "Tencent Cloud", "Crawler"
 	} else if strings.HasPrefix(ip, "176.") || strings.HasPrefix(ip, "88.") || strings.HasPrefix(ip, "212.") || strings.HasPrefix(ip, "78.") {
-		return "🇹🇷", "Turkcell / Superonline", "Residential WAN"
+		return "🇹🇷", "Turkcell/ISP", "WAN User"
 	} else if strings.HasPrefix(ip, "34.") || strings.HasPrefix(ip, "35.") || strings.HasPrefix(ip, "54.") || strings.HasPrefix(ip, "52.") {
-		return "🇺🇸", "Amazon AWS / Google Cloud", "Cloud Infrastructure"
+		return "🇺🇸", "AWS/GCP Cloud", "Cloud Host"
 	} else if strings.HasPrefix(ip, "198.51.100.") || strings.HasPrefix(ip, "203.0.113.") {
-		return "🧪", "CoPSeC RedTeam / Test", "Threat Emulation"
+		return "🧪", "RedTeam Lab", "Threat Test"
 	}
-	return "🌐", "Global Public ASN", "Unknown Threat Actor"
+	return "🌐", "Public WAN", "Unknown"
 }
 
 func extractTarget(rawLine string) string {
 	parts := strings.Fields(rawLine)
 	for _, p := range parts {
 		if strings.HasPrefix(p, "/") {
-			// Strip query parameters for clean grouping
 			idx := strings.Index(p, "?")
 			if idx != -1 {
 				p = p[:idx]
 			}
-			if len(p) > 22 {
-				return p[:22]
+			if len(p) > 20 {
+				return p[:20]
 			}
 			return p
 		}
@@ -263,7 +282,6 @@ func (m *SIEMModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 
 	case tea.KeyMsg:
-		// Modal interaction
 		if m.mode != modalNone {
 			switch msg.String() {
 			case "esc":
@@ -311,7 +329,6 @@ func (m *SIEMModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		// Normal navigation & shortcuts
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m, tea.Quit
@@ -330,14 +347,14 @@ func (m *SIEMModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.statusPrompt = "🔍 Search filter cleared. Resumed live stream."
 			}
 		case "up", "k":
-			if m.activeTab == 2 { // Critical Incidents
+			if m.activeTab == 2 {
 				if m.selectedIncIndex > 0 {
 					m.selectedIncIndex--
 					if m.selectedIncIndex < m.incScrollOffset {
 						m.incScrollOffset = m.selectedIncIndex
 					}
 				}
-			} else { // Live Stream
+			} else {
 				if m.selectedLogIndex > 0 {
 					m.selectedLogIndex--
 					if m.selectedLogIndex < m.logScrollOffset {
@@ -346,11 +363,11 @@ func (m *SIEMModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		case "down", "j":
-			if m.activeTab == 2 { // Critical Incidents
+			if m.activeTab == 2 {
 				if m.selectedIncIndex < len(m.incidents)-1 {
 					m.selectedIncIndex++
 				}
-			} else { // Live Stream
+			} else {
 				currentList := m.getCurrentEventsList()
 				if m.selectedLogIndex < len(currentList)-1 {
 					m.selectedLogIndex++
@@ -400,16 +417,18 @@ func (m *SIEMModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tickMsg:
-		// Drain in-memory event buffer in batch without blocking UI loop
 		m.mu.Lock()
 		if len(m.eventBuffer) > 0 {
-			var entSum float64
 			for _, ev := range m.eventBuffer {
 				if !m.isPaused && !m.isFilterActive {
 					m.events = append([]*StoredEvent{ev}, m.events...)
 					if m.selectedLogIndex > 0 {
 						m.selectedLogIndex++
 						m.logScrollOffset++
+					}
+					// Fixed-size Ring Buffer: max 150 items
+					if len(m.events) > 150 {
+						m.events = m.events[:150]
 					}
 				}
 				if ev.ThreatScore >= 50 {
@@ -418,13 +437,12 @@ func (m *SIEMModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.selectedIncIndex++
 						m.incScrollOffset++
 					}
-					if len(m.incidents) > 60 {
-						m.incidents = m.incidents[:60]
+					if len(m.incidents) > 80 {
+						m.incidents = m.incidents[:80]
 					}
 				}
 				if ev.MitreTechniqueID != "" {
 					m.mitreMap[ev.MitreTechniqueID]++
-					// Map to kill chain
 					if strings.HasPrefix(ev.MitreTechniqueID, "T1595") || strings.HasPrefix(ev.MitreTechniqueID, "T1590") {
 						m.killChainHits["Recon"]++
 					} else if strings.HasPrefix(ev.MitreTechniqueID, "T1190") {
@@ -438,16 +456,13 @@ func (m *SIEMModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 
-				// Track hot targets
 				target := extractTarget(ev.RawLine)
 				m.targetMap[target]++
 				m.totalTargetReq++
 
-				// Track entropy
 				ent := CalculateShannonEntropy(ev.RawLine)
-				entSum += ent
 				m.recentEntropies = append(m.recentEntropies, ent)
-				if len(m.recentEntropies) > 50 {
+				if len(m.recentEntropies) > 30 {
 					m.recentEntropies = m.recentEntropies[1:]
 				}
 
@@ -480,9 +495,6 @@ func (m *SIEMModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			m.eventBuffer = nil
-			if len(m.events) > 100 {
-				m.events = m.events[:100]
-			}
 		}
 		m.mu.Unlock()
 
@@ -564,7 +576,7 @@ func (m *SIEMModel) View() string {
 		return "Initializing CoPSeC Enterprise Cyber-Defense Cockpit..."
 	}
 
-	// 1. Strict Grid Math Calculation
+	// 1. Precise Grid Dimensions
 	leftWidth := int(float64(m.width) * 0.23)
 	if leftWidth < 24 {
 		leftWidth = 24
@@ -582,12 +594,11 @@ func (m *SIEMModel) View() string {
 		centerWidth = 30
 	}
 
-	mainHeight := m.height - 5
+	mainHeight := m.height - 4
 	if mainHeight < 16 {
 		mainHeight = 16
 	}
 
-	// Vertical splits
 	topHeight := int(float64(mainHeight) * 0.52)
 	if topHeight < 6 {
 		topHeight = 6
@@ -597,66 +608,50 @@ func (m *SIEMModel) View() string {
 		bottomHeight = 6
 	}
 
-	// 2. Top Banner
-	banner := headerStyle.Render("⚡ CoPSeC ENTERPRISE CYBER-DEFENSE COCKPIT") + " " +
-		matrixTitleStyle.Render("v2.5 [ULTIMATE SOC/SOAR & MITRE]")
+	// 2. Top Header Banner
+	banner := styleHeader.Render("⚡ CoPSeC ENTERPRISE CYBER-DEFENSE COCKPIT") + " " +
+		styleMatrixTitle.Render("v2.5 [HIGH-PERFORMANCE SOC/SOAR]")
 
-	// 3. Left Column: Top Fleet Matrix + Bottom SOAR Jail & Mitigations
-	leftTopContent := m.renderFleetPanel(leftWidth-2, topHeight-2)
-	leftTopStyle := basePanelStyle
+	// 3. Left Column: Fleet Matrix + SOAR Jail
+	leftTopStyle := styleBasePanel
 	if m.activeTab == 0 {
-		leftTopStyle = activePanelStyle
+		leftTopStyle = styleActivePanel
 	}
-	leftTopPanel := leftTopStyle.Width(leftWidth).Height(topHeight).MaxHeight(topHeight).Render(leftTopContent)
-
-	leftBottomContent := m.renderJailPanel(leftWidth-2, bottomHeight-2)
-	leftBottomPanel := basePanelStyle.Width(leftWidth).Height(bottomHeight).MaxHeight(bottomHeight).Render(leftBottomContent)
-
+	leftTopPanel := leftTopStyle.Width(leftWidth).Height(topHeight).MaxHeight(topHeight).Render(m.renderFleetPanel(leftWidth-2, topHeight-2))
+	leftBottomPanel := styleBasePanel.Width(leftWidth).Height(bottomHeight).MaxHeight(bottomHeight).Render(m.renderJailPanel(leftWidth-2, bottomHeight-2))
 	leftColumn := lipgloss.JoinVertical(lipgloss.Left, leftTopPanel, leftBottomPanel)
 
-	// 4. Center Column: Top Raw Stream + Bottom Critical Incidents
-	centerTopContent := m.renderThreatStream(centerWidth-2, topHeight-2)
-	topStyle := basePanelStyle
+	// 4. Center Column: Live Stream + Critical Incidents
+	topStyle := styleBasePanel
 	if m.activeTab == 1 {
-		topStyle = activePanelStyle
+		topStyle = styleActivePanel
 	}
-	centerTopPanel := topStyle.Width(centerWidth).Height(topHeight).MaxHeight(topHeight).Render(centerTopContent)
+	centerTopPanel := topStyle.Width(centerWidth).Height(topHeight).MaxHeight(topHeight).Render(m.renderThreatStream(centerWidth-2, topHeight-2))
 
-	centerBottomContent := m.renderIncidentStream(centerWidth-2, bottomHeight-2)
-	bottomStyle := basePanelStyle
+	bottomStyle := styleBasePanel
 	if m.activeTab == 2 {
-		bottomStyle = activePanelStyle
+		bottomStyle = styleActivePanel
 	}
-	centerBottomPanel := bottomStyle.Width(centerWidth).Height(bottomHeight).MaxHeight(bottomHeight).Render(centerBottomContent)
-
+	centerBottomPanel := bottomStyle.Width(centerWidth).Height(bottomHeight).MaxHeight(bottomHeight).Render(m.renderIncidentStream(centerWidth-2, bottomHeight-2))
 	centerColumn := lipgloss.JoinVertical(lipgloss.Left, centerTopPanel, centerBottomPanel)
 
-	// 5. Right Column: Top Enterprise MITRE Heatmap + Bottom Geo Threat Radar & Actors
-	rightTopContent := m.renderMITREPanel(rightWidth-2, topHeight-2)
-	rightTopStyle := basePanelStyle
+	// 5. Right Column: Enterprise MITRE + Geo Threat Radar
+	rightTopStyle := styleBasePanel
 	if m.activeTab == 3 {
-		rightTopStyle = activePanelStyle
+		rightTopStyle = styleActivePanel
 	}
-	rightTopPanel := rightTopStyle.Width(rightWidth).Height(topHeight).MaxHeight(topHeight).Render(rightTopContent)
-
-	rightBottomContent := m.renderThreatIntelPanel(rightWidth-2, bottomHeight-2)
-	rightBottomPanel := basePanelStyle.Width(rightWidth).Height(bottomHeight).MaxHeight(bottomHeight).Render(rightBottomContent)
-
+	rightTopPanel := rightTopStyle.Width(rightWidth).Height(topHeight).MaxHeight(topHeight).Render(m.renderMITREPanel(rightWidth-2, topHeight-2))
+	rightBottomPanel := styleBasePanel.Width(rightWidth).Height(bottomHeight).MaxHeight(bottomHeight).Render(m.renderThreatIntelPanel(rightWidth-2, bottomHeight-2))
 	rightColumn := lipgloss.JoinVertical(lipgloss.Left, rightTopPanel, rightBottomPanel)
 
-	// Horizontal Join for the 3 main columns
+	// 6. Horizontal Join
 	middleRow := lipgloss.JoinHorizontal(lipgloss.Top, leftColumn, centerColumn, rightColumn)
 
-	// 6. Hot Targets Ticker
-	hotTargetsContent := m.renderHotTargetsTicker(m.width - 2)
-
-	// 7. Bottom Bar: Metrics & Controls
+	// 7. Clean Single-line Bottom Status Bar
 	bottomContent := m.renderBottomPanel(m.width - 2)
-	bottomPanel := lipgloss.NewStyle().Width(m.width).Render(bottomContent)
 
-	baseView := lipgloss.JoinVertical(lipgloss.Left, banner, middleRow, hotTargetsContent, bottomPanel)
+	baseView := lipgloss.JoinVertical(lipgloss.Left, banner, middleRow, bottomContent)
 
-	// Overlay Modals
 	if m.mode == modalLogDetail {
 		return m.renderInspectionModal(baseView)
 	} else if m.mode == modalSearch {
@@ -684,19 +679,19 @@ func renderMiniBar(pct float64, width int) string {
 
 func (m *SIEMModel) renderFleetPanel(width, maxLines int) string {
 	var b strings.Builder
-	b.WriteString(matrixTitleStyle.Render("🌐 FLEET MATRIX & TELEMETRY") + "\n")
-	b.WriteString(lipgloss.NewStyle().Foreground(colorTextMuted).Render(strings.Repeat("─", width)) + "\n")
+	b.WriteString(styleMatrixTitle.Render("🌐 FLEET MATRIX & TELEMETRY") + "\n")
+	b.WriteString(styleMuted.Render(strings.Repeat("─", width)) + "\n")
 
 	if len(m.nodes) == 0 {
-		b.WriteString(lipgloss.NewStyle().Foreground(colorTextMuted).Render("No edge nodes connected.\n(gRPC 0.0.0.0:50051)"))
+		b.WriteString(styleMuted.Render("No edge nodes connected.\n(gRPC 0.0.0.0:8443)"))
 		return b.String()
 	}
 
 	for _, n := range m.nodes {
 		isOnline := time.Since(n.LastSeen) <= 20*time.Second
-		statusBadge := lipgloss.NewStyle().Foreground(colorNeonGreen).Render("🟢")
+		statusBadge := styleGreen.Render("🟢")
 		if !isOnline {
-			statusBadge = alertStyle.Render("🔴")
+			statusBadge = styleAlert.Render("🔴")
 		}
 
 		nodeName := truncateString(n.NodeID, width-4)
@@ -705,21 +700,21 @@ func (m *SIEMModel) renderFleetPanel(width, maxLines int) string {
 
 		b.WriteString(fmt.Sprintf("%s %s\n", statusBadge, lipgloss.NewStyle().Bold(true).Foreground(colorCyberCyan).Render(nodeName)))
 		b.WriteString(fmt.Sprintf(" CPU:[%s]%0.0f%% RAM:[%s]%0.0fM\n",
-			lipgloss.NewStyle().Foreground(colorNeonGreen).Render(cpuBar), n.CPUUsage,
-			lipgloss.NewStyle().Foreground(colorCyberCyan).Render(ramBar), n.MemoryUsage))
-		b.WriteString(fmt.Sprintf(" 🛡️ Bans:%d | Ping: ~12ms | Buff: Clean\n", n.ActiveBansCount))
-		b.WriteString(fmt.Sprintf(" 🔌 Ports: 22, 80, 443 | ⏱ Up: %ds\n", n.UptimeSeconds))
+			styleGreen.Render(cpuBar), n.CPUUsage,
+			styleCyan.Render(ramBar), n.MemoryUsage))
+		b.WriteString(fmt.Sprintf(" 🛡️ Bans:%d | Ping:~12ms | Buff:OK\n", n.ActiveBansCount))
+		b.WriteString(fmt.Sprintf(" 🔌 Ports:22,80,443 | ⏱ Up:%ds\n", n.UptimeSeconds))
 	}
 	return b.String()
 }
 
 func (m *SIEMModel) renderJailPanel(width, maxLines int) string {
 	var b strings.Builder
-	b.WriteString(alertStyle.Render("🛡 SOAR JAIL & MITIGATIONS") + "\n")
-	b.WriteString(lipgloss.NewStyle().Foreground(colorTextMuted).Render(strings.Repeat("─", width)) + "\n")
+	b.WriteString(styleAlert.Render("🛡 SOAR JAIL & MITIGATIONS") + "\n")
+	b.WriteString(styleMuted.Render(strings.Repeat("─", width)) + "\n")
 
 	if len(m.activeBans) == 0 {
-		b.WriteString(lipgloss.NewStyle().Foreground(colorTextMuted).Render("No active IP isolations.\nAll perimeter guards idle.\n"))
+		b.WriteString(styleMuted.Render("No active IP isolations.\nAll perimeter guards idle.\n"))
 	} else {
 		limit := maxLines - 3
 		if limit <= 0 {
@@ -741,15 +736,14 @@ func (m *SIEMModel) renderJailPanel(width, maxLines int) string {
 				reason = reason[:10]
 			}
 
-			line := fmt.Sprintf("🚫 %-14s %s %s", truncateString(ban.IP, 14), lipgloss.NewStyle().Foreground(colorWarningGold).Render(reason), remStr)
+			line := fmt.Sprintf("🚫 %-14s %s %s", truncateString(ban.IP, 14), styleWarning.Render(reason), remStr)
 			b.WriteString(truncateString(line, width) + "\n")
 		}
 	}
 
-	// Recent SOAR Actions
 	if len(m.soarActions) > 0 {
 		act := m.soarActions[0]
-		b.WriteString(lipgloss.NewStyle().Foreground(colorNeonGreen).Render(fmt.Sprintf("[ACK] %s %s (%dn)", act.ActionType, truncateString(act.TargetIP, 11), act.NodesCount)))
+		b.WriteString(styleGreen.Render(fmt.Sprintf("[ACK] %s %s (%dn)", act.ActionType, truncateString(act.TargetIP, 11), act.NodesCount)))
 	}
 	return b.String()
 }
@@ -762,7 +756,6 @@ func (m *SIEMModel) renderThreatStream(width, maxLines int) string {
 		pauseTag = " [PAUSED]"
 	}
 
-	// Velocity sparkline for header
 	var spark strings.Builder
 	for _, val := range m.rateHistory[len(m.rateHistory)-6:] {
 		if val == 0 {
@@ -776,11 +769,11 @@ func (m *SIEMModel) renderThreatStream(width, maxLines int) string {
 		}
 	}
 
-	entBadge := fmt.Sprintf("Ent: %0.2fb", m.avgEntropy)
+	entBadge := fmt.Sprintf("Ent:%0.2fb", m.avgEntropy)
 	if m.avgEntropy > 5.0 {
-		entBadge = alertStyle.Render(fmt.Sprintf("Ent: %0.2fb (HIGH)", m.avgEntropy))
+		entBadge = styleAlert.Render(fmt.Sprintf("Ent:%0.2fb (HIGH)", m.avgEntropy))
 	} else {
-		entBadge = lipgloss.NewStyle().Foreground(colorCyberCyan).Render(entBadge)
+		entBadge = styleCyan.Render(entBadge)
 	}
 
 	currentList := m.getCurrentEventsList()
@@ -790,20 +783,20 @@ func (m *SIEMModel) renderThreatStream(width, maxLines int) string {
 	}
 
 	header := fmt.Sprintf("%s %s [%s | Peak:%d | %s]%s",
-		headerStyle.Render(title),
-		lipgloss.NewStyle().Foreground(colorNeonGreen).Render(spark.String()),
-		lipgloss.NewStyle().Foreground(colorNeonGreen).Render(fmt.Sprintf("EPS: %d", eps)),
+		styleHeader.Render(title),
+		styleGreen.Render(spark.String()),
+		styleGreen.Render(fmt.Sprintf("EPS:%d", eps)),
 		m.peakEPS,
 		entBadge,
-		alertStyle.Render(pauseTag))
+		styleAlert.Render(pauseTag))
 	b.WriteString(truncateString(header, width) + "\n")
-	b.WriteString(lipgloss.NewStyle().Foreground(colorTextMuted).Render(strings.Repeat("─", width)) + "\n")
+	b.WriteString(styleMuted.Render(strings.Repeat("─", width)) + "\n")
 
 	if len(currentList) == 0 {
 		if m.isFilterActive {
-			b.WriteString(lipgloss.NewStyle().Foreground(colorWarningGold).Render("No log entries match active query filter. [Esc] to Clear.\n"))
+			b.WriteString(styleWarning.Render("No log entries match active query filter. [Esc] to Clear.\n"))
 		} else {
-			b.WriteString(lipgloss.NewStyle().Foreground(colorTextMuted).Render("Listening for edge node stream events...\n"))
+			b.WriteString(styleMuted.Render("Listening for edge node stream events...\n"))
 		}
 		return b.String()
 	}
@@ -813,7 +806,6 @@ func (m *SIEMModel) renderThreatStream(width, maxLines int) string {
 		visibleItems = 3
 	}
 
-	// Adjust viewport scroll offset
 	if m.selectedLogIndex < m.logScrollOffset {
 		m.logScrollOffset = m.selectedLogIndex
 	} else if m.selectedLogIndex >= m.logScrollOffset+visibleItems {
@@ -835,11 +827,11 @@ func (m *SIEMModel) renderThreatStream(width, maxLines int) string {
 			srcIcon = "⚡ SYS"
 		}
 
-		scoreBadge := lipgloss.NewStyle().Foreground(colorNeonGreen).Render(fmt.Sprintf("[%d]", ev.ThreatScore))
+		scoreBadge := styleGreen.Render(fmt.Sprintf("[%d]", ev.ThreatScore))
 		if ev.ThreatScore >= 80 {
-			scoreBadge = alertStyle.Render(fmt.Sprintf("[CRIT %d]", ev.ThreatScore))
+			scoreBadge = styleAlert.Render(fmt.Sprintf("[CRIT %d]", ev.ThreatScore))
 		} else if ev.ThreatScore >= 50 {
-			scoreBadge = lipgloss.NewStyle().Bold(true).Foreground(colorWarningGold).Render(fmt.Sprintf("[WARN %d]", ev.ThreatScore))
+			scoreBadge = styleWarning.Render(fmt.Sprintf("[WARN %d]", ev.ThreatScore))
 		}
 
 		prefix := "  "
@@ -847,24 +839,24 @@ func (m *SIEMModel) renderThreatStream(width, maxLines int) string {
 			prefix = "▶ "
 		}
 
-		scrollChar := lipgloss.NewStyle().Foreground(colorScrollTrack).Render("│")
+		scrollChar := styleScrollTrack.Render("│")
 		if len(currentList) > visibleItems {
 			thumbPos := int(float64(m.selectedLogIndex) / float64(len(currentList)-1) * float64(visibleItems-1))
 			if i == thumbPos {
-				scrollChar = lipgloss.NewStyle().Foreground(colorCyberCyan).Render("█")
+				scrollChar = styleCyan.Render("█")
 			}
 		}
 
 		contentWidth := width - 3
 		line1 := fmt.Sprintf("%s%s %s %s 🎯 %s 🏷 %s",
 			prefix,
-			lipgloss.NewStyle().Foreground(colorTextMuted).Render(timeStr),
+			styleMuted.Render(timeStr),
 			scoreBadge,
-			lipgloss.NewStyle().Foreground(colorCyberCyan).Render(srcIcon),
+			styleCyan.Render(srcIcon),
 			lipgloss.NewStyle().Bold(true).Foreground(colorTextLight).Render(ev.ClientIP),
-			lipgloss.NewStyle().Foreground(colorWarningGold).Render(ev.MitreTechniqueID),
+			styleWarning.Render(ev.MitreTechniqueID),
 		)
-		line2 := fmt.Sprintf("    %s", lipgloss.NewStyle().Foreground(colorTextMuted).Render(truncateString(ev.RawLine, contentWidth-4)))
+		line2 := fmt.Sprintf("    %s", styleMuted.Render(truncateString(ev.RawLine, contentWidth-4)))
 
 		formatted1 := truncateString(line1, contentWidth)
 		formatted2 := truncateString(line2, contentWidth)
@@ -872,8 +864,8 @@ func (m *SIEMModel) renderThreatStream(width, maxLines int) string {
 		padding2 := strings.Repeat(" ", max(0, contentWidth-lipgloss.Width(formatted2)))
 
 		if m.activeTab == 1 && idx == m.selectedLogIndex {
-			b.WriteString(lipgloss.NewStyle().Background(colorSelectedBg).Render(formatted1+padding1) + " " + scrollChar + "\n")
-			b.WriteString(lipgloss.NewStyle().Background(colorSelectedBg).Render(formatted2+padding2) + " " + scrollChar + "\n")
+			b.WriteString(styleSelected.Render(formatted1+padding1) + " " + scrollChar + "\n")
+			b.WriteString(styleSelected.Render(formatted2+padding2) + " " + scrollChar + "\n")
 		} else {
 			b.WriteString(formatted1 + padding1 + " " + scrollChar + "\n")
 			b.WriteString(formatted2 + padding2 + " " + scrollChar + "\n")
@@ -884,11 +876,11 @@ func (m *SIEMModel) renderThreatStream(width, maxLines int) string {
 
 func (m *SIEMModel) renderIncidentStream(width, maxLines int) string {
 	var b strings.Builder
-	b.WriteString(alertStyle.Render("🔥 CRITICAL INCIDENTS (THREAT >= 50)") + "\n")
-	b.WriteString(lipgloss.NewStyle().Foreground(colorTextMuted).Render(strings.Repeat("─", width)) + "\n")
+	b.WriteString(styleAlert.Render("🔥 CRITICAL INCIDENTS (THREAT >= 50)") + "\n")
+	b.WriteString(styleMuted.Render(strings.Repeat("─", width)) + "\n")
 
 	if len(m.incidents) == 0 {
-		b.WriteString(lipgloss.NewStyle().Foreground(colorTextMuted).Render("No critical incidents logged. Threat perimeter secure.\n"))
+		b.WriteString(styleMuted.Render("No critical incidents logged. Threat perimeter secure.\n"))
 		return b.String()
 	}
 
@@ -911,9 +903,9 @@ func (m *SIEMModel) renderIncidentStream(width, maxLines int) string {
 
 		ev := m.incidents[idx]
 		timeStr := time.UnixMilli(ev.TimestampMs).Format("15:04:05")
-		scoreBadge := alertStyle.Render(fmt.Sprintf("[CRIT %d]", ev.ThreatScore))
+		scoreBadge := styleAlert.Render(fmt.Sprintf("[CRIT %d]", ev.ThreatScore))
 		if ev.ThreatScore < 70 {
-			scoreBadge = lipgloss.NewStyle().Bold(true).Foreground(colorWarningGold).Render(fmt.Sprintf("[WARN %d]", ev.ThreatScore))
+			scoreBadge = styleWarning.Render(fmt.Sprintf("[WARN %d]", ev.ThreatScore))
 		}
 
 		prefix := "  "
@@ -921,24 +913,24 @@ func (m *SIEMModel) renderIncidentStream(width, maxLines int) string {
 			prefix = "▶ "
 		}
 
-		scrollChar := lipgloss.NewStyle().Foreground(colorScrollTrack).Render("│")
+		scrollChar := styleScrollTrack.Render("│")
 		if len(m.incidents) > visibleItems {
 			thumbPos := int(float64(m.selectedIncIndex) / float64(len(m.incidents)-1) * float64(visibleItems-1))
 			if i == thumbPos {
-				scrollChar = lipgloss.NewStyle().Foreground(colorAlertPink).Render("█")
+				scrollChar = styleAlert.Render("█")
 			}
 		}
 
 		contentWidth := width - 3
 		line1 := fmt.Sprintf("%s%s %s 🎯 %s 🏷 %s (%s)",
 			prefix,
-			lipgloss.NewStyle().Foreground(colorTextMuted).Render(timeStr),
+			styleMuted.Render(timeStr),
 			scoreBadge,
 			lipgloss.NewStyle().Bold(true).Foreground(colorAlertPink).Render(ev.ClientIP),
-			lipgloss.NewStyle().Foreground(colorWarningGold).Render(ev.MitreTechniqueID),
-			lipgloss.NewStyle().Foreground(colorCyberCyan).Render(truncateString(ev.RuleID, 16)),
+			styleWarning.Render(ev.MitreTechniqueID),
+			styleCyan.Render(truncateString(ev.RuleID, 16)),
 		)
-		line2 := fmt.Sprintf("    %s", lipgloss.NewStyle().Foreground(colorTextLight).Render(truncateString(ev.RawLine, contentWidth-4)))
+		line2 := fmt.Sprintf("    %s", styleLight.Render(truncateString(ev.RawLine, contentWidth-4)))
 
 		formatted1 := truncateString(line1, contentWidth)
 		formatted2 := truncateString(line2, contentWidth)
@@ -946,8 +938,8 @@ func (m *SIEMModel) renderIncidentStream(width, maxLines int) string {
 		padding2 := strings.Repeat(" ", max(0, contentWidth-lipgloss.Width(formatted2)))
 
 		if m.activeTab == 2 && idx == m.selectedIncIndex {
-			b.WriteString(lipgloss.NewStyle().Background(colorSelectedBg).Render(formatted1+padding1) + " " + scrollChar + "\n")
-			b.WriteString(lipgloss.NewStyle().Background(colorSelectedBg).Render(formatted2+padding2) + " " + scrollChar + "\n")
+			b.WriteString(styleSelected.Render(formatted1+padding1) + " " + scrollChar + "\n")
+			b.WriteString(styleSelected.Render(formatted2+padding2) + " " + scrollChar + "\n")
 		} else {
 			b.WriteString(formatted1 + padding1 + " " + scrollChar + "\n")
 			b.WriteString(formatted2 + padding2 + " " + scrollChar + "\n")
@@ -958,15 +950,14 @@ func (m *SIEMModel) renderIncidentStream(width, maxLines int) string {
 
 func (m *SIEMModel) renderMITREPanel(width, maxLines int) string {
 	var b strings.Builder
-	b.WriteString(matrixTitleStyle.Render("🛡 ENTERPRISE MITRE INTEL") + "\n")
-	b.WriteString(lipgloss.NewStyle().Foreground(colorTextMuted).Render(strings.Repeat("─", width)) + "\n")
+	b.WriteString(styleMatrixTitle.Render("🛡 ENTERPRISE MITRE INTEL") + "\n")
+	b.WriteString(styleMuted.Render(strings.Repeat("─", width)) + "\n")
 
-	// Cyber Kill Chain Progress Bar
 	renderKillStage := func(name string, hits int) string {
 		if hits > 0 {
-			return fmt.Sprintf("[%s %s]", name, alertStyle.Render("█"))
+			return fmt.Sprintf("[%s %s]", name, styleAlert.Render("█"))
 		}
-		return fmt.Sprintf("[%s %s]", name, lipgloss.NewStyle().Foreground(colorTextMuted).Render("░"))
+		return fmt.Sprintf("[%s %s]", name, styleMuted.Render("░"))
 	}
 	killChainStr := fmt.Sprintf("%s➔%s➔%s➔%s➔%s",
 		renderKillStage("Recon", m.killChainHits["Recon"]),
@@ -1029,8 +1020,8 @@ func (m *SIEMModel) renderMITREPanel(width, maxLines int) string {
 
 		row := fmt.Sprintf("%-6s %-12s %s%s %2d",
 			lipgloss.NewStyle().Bold(true).Foreground(color).Render(st.ID),
-			lipgloss.NewStyle().Foreground(colorTextLight).Render(techName),
-			lipgloss.NewStyle().Foreground(colorAlertPink).Render(filled),
+			styleLight.Render(techName),
+			styleAlert.Render(filled),
 			lipgloss.NewStyle().Foreground(colorPanelBorder).Render(empty),
 			st.Count)
 		b.WriteString(truncateString(row, width) + "\n")
@@ -1041,8 +1032,8 @@ func (m *SIEMModel) renderMITREPanel(width, maxLines int) string {
 
 func (m *SIEMModel) renderThreatIntelPanel(width, maxLines int) string {
 	var b strings.Builder
-	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorWarningGold).Render("🌐 GEOGRAPHIC THREAT RADAR & ACTORS") + "\n")
-	b.WriteString(lipgloss.NewStyle().Foreground(colorTextMuted).Render(strings.Repeat("─", width)) + "\n")
+	b.WriteString(styleWarning.Render("🌐 GEOGRAPHIC THREAT RADAR & ACTORS") + "\n")
+	b.WriteString(styleMuted.Render(strings.Repeat("─", width)) + "\n")
 
 	var attackers []*attackerIntel
 	for _, at := range m.attackerMap {
@@ -1053,7 +1044,7 @@ func (m *SIEMModel) renderThreatIntelPanel(width, maxLines int) string {
 	})
 
 	if len(attackers) == 0 {
-		b.WriteString(lipgloss.NewStyle().Foreground(colorTextMuted).Render("No threat actors logged yet\n"))
+		b.WriteString(styleMuted.Render("No threat actors logged yet\n"))
 	} else {
 		limit := maxLines / 2
 		if limit <= 0 {
@@ -1065,12 +1056,12 @@ func (m *SIEMModel) renderThreatIntelPanel(width, maxLines int) string {
 			}
 			row1 := fmt.Sprintf("%s %-15s [%s Hits]",
 				at.Flag,
-				lipgloss.NewStyle().Bold(true).Foreground(colorAlertPink).Render(at.IP),
-				lipgloss.NewStyle().Foreground(colorNeonGreen).Render(strconv.Itoa(at.Count)))
+				styleAlert.Render(at.IP),
+				styleGreen.Render(strconv.Itoa(at.Count)))
 			row2 := fmt.Sprintf("   └ %s / %s 🎯 %s",
-				lipgloss.NewStyle().Foreground(colorCyberCyan).Render(truncateString(at.Org, 16)),
-				lipgloss.NewStyle().Foreground(colorWarningGold).Render(truncateString(at.Class, 12)),
-				lipgloss.NewStyle().Foreground(colorTextMuted).Render(at.TopTarget))
+				styleCyan.Render(truncateString(at.Org, 14)),
+				styleWarning.Render(truncateString(at.Class, 10)),
+				styleMuted.Render(at.TopTarget))
 			b.WriteString(truncateString(row1, width) + "\n")
 			b.WriteString(truncateString(row2, width) + "\n")
 		}
@@ -1079,56 +1070,28 @@ func (m *SIEMModel) renderThreatIntelPanel(width, maxLines int) string {
 	return b.String()
 }
 
-func (m *SIEMModel) renderHotTargetsTicker(width int) string {
-	if m.totalTargetReq == 0 || len(m.targetMap) == 0 {
-		line := "🎯 HOT TARGETS: Monitoring incoming perimeter endpoints..."
-		return lipgloss.NewStyle().Foreground(colorTextMuted).Render(truncateString(line, width))
-	}
-
-	var stats []targetStat
-	for endp, count := range m.targetMap {
-		pct := int((float64(count) / float64(m.totalTargetReq)) * 100.0)
-		stats = append(stats, targetStat{Endpoint: endp, Count: count, Pct: pct})
-	}
-	sort.Slice(stats, func(i, j int) bool {
-		return stats[i].Count > stats[j].Count
-	})
-
-	var items []string
-	for i, st := range stats {
-		if i >= 4 {
-			break
-		}
-		items = append(items, fmt.Sprintf("%s (%s%%)",
-			lipgloss.NewStyle().Bold(true).Foreground(colorCyberCyan).Render(st.Endpoint),
-			lipgloss.NewStyle().Foreground(colorNeonGreen).Render(strconv.Itoa(st.Pct))))
-	}
-
-	line := "🎯 HOT TARGETS: " + strings.Join(items, " | ")
-	return truncateString(line, width)
-}
-
 func (m *SIEMModel) renderBottomPanel(width int) string {
 	eps := m.server.GetEPS()
 	total := m.server.GetTotalEvents()
 
-	threatIndex := lipgloss.NewStyle().Bold(true).Foreground(colorNeonGreen).Render("🟢 LOW")
+	threatIndex := styleGreen.Render("🟢 LOW")
 	if m.peakEPS > 40 || eps > 20 {
-		threatIndex = alertStyle.Render("🔴 CRITICAL")
+		threatIndex = styleAlert.Render("🔴 CRITICAL")
 	} else if m.peakEPS > 10 || eps > 5 {
-		threatIndex = lipgloss.NewStyle().Bold(true).Foreground(colorWarningGold).Render("🟡 ELEVATED")
+		threatIndex = styleWarning.Render("🟡 ELEVATED")
 	}
 
-	shortcuts := lipgloss.NewStyle().Foreground(colorCyberCyan).Render("[/] Search  |  [B] Ban  |  [U] Unban  |  [Space] Pause  |  [Tab] Focus  |  [Enter] Inspect  |  [Q] Quit")
-	rateDisplay := lipgloss.NewStyle().Bold(true).Foreground(colorNeonGreen).Render(fmt.Sprintf("EPS:[%d] Peak:[%d] Total:[%s] Threat:[%s]", eps, m.peakEPS, strconv.FormatUint(total, 10), threatIndex))
+	shortcuts := styleCyan.Render("[/] Search | [B] Ban | [U] Unban | [Space] Pause | [Tab] Focus | [Enter] Inspect | [Q] Quit")
+	rateDisplay := fmt.Sprintf("[EPS: %d | Peak: %d | Total: %s | Threat: %s]",
+		eps, m.peakEPS, strconv.FormatUint(total, 10), threatIndex)
 
 	status := m.statusPrompt
 	if status != "" {
-		status = alertStyle.Render(" " + status)
+		status = styleAlert.Render(" " + status)
 	}
 
-	line1 := fmt.Sprintf("%s   %s%s", shortcuts, rateDisplay, status)
-	return truncateString(line1, width)
+	line := fmt.Sprintf("%s    %s%s", shortcuts, styleGreen.Render(rateDisplay), status)
+	return truncateString(line, width)
 }
 
 func (m *SIEMModel) renderSearchModalOverlay(baseView string) string {
@@ -1136,13 +1099,13 @@ func (m *SIEMModel) renderSearchModalOverlay(baseView string) string {
 	prompt := "Syntax: ip:1.2.3.4  |  mitre:T1190  |  score:>70  |  src:nginx  |  q:keyword"
 
 	content := fmt.Sprintf("%s\n\n%s\n\n> %s█\n\n%s",
-		headerStyle.Render(title),
-		lipgloss.NewStyle().Foreground(colorTextMuted).Render(prompt),
-		lipgloss.NewStyle().Bold(true).Foreground(colorNeonGreen).Render(m.inputSearch),
-		lipgloss.NewStyle().Foreground(colorTextMuted).Render("[Enter] Execute Query   [Esc] Cancel / Clear Filter"),
+		styleHeader.Render(title),
+		styleMuted.Render(prompt),
+		styleGreen.Render(m.inputSearch),
+		styleMuted.Render("[Enter] Execute Query   [Esc] Cancel / Clear Filter"),
 	)
 
-	modalBox := searchBoxStyle.Render(content)
+	modalBox := styleSearchBox.Render(content)
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modalBox,
 		lipgloss.WithWhitespaceChars(" "),
 		lipgloss.WithWhitespaceForeground(colorDarkBg),
@@ -1158,13 +1121,13 @@ func (m *SIEMModel) renderModalOverlay(baseView string) string {
 	}
 
 	content := fmt.Sprintf("%s\n\n%s\n\n> %s█\n\n%s",
-		alertStyle.Render(title),
-		lipgloss.NewStyle().Foreground(colorTextLight).Render(prompt),
-		lipgloss.NewStyle().Bold(true).Foreground(colorCyberCyan).Render(m.inputIP),
-		lipgloss.NewStyle().Foreground(colorTextMuted).Render("[Enter] Confirm Action   [Esc] Cancel"),
+		styleAlert.Render(title),
+		styleLight.Render(prompt),
+		styleCyan.Render(m.inputIP),
+		styleMuted.Render("[Enter] Confirm Action   [Esc] Cancel"),
 	)
 
-	modalBox := modalBoxStyle.Render(content)
+	modalBox := styleModalBox.Render(content)
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modalBox,
 		lipgloss.WithWhitespaceChars(" "),
 		lipgloss.WithWhitespaceForeground(colorDarkBg),
@@ -1221,23 +1184,23 @@ func (m *SIEMModel) renderInspectionModal(baseView string) string {
 		"🧠 %s:\n"+
 		"%s\n\n"+
 		"%s",
-		lipgloss.NewStyle().Bold(true).Foreground(colorCyberCyan).Render("FORENSIC INCIDENT INSPECTION"),
-		lipgloss.NewStyle().Foreground(colorTextLight).Render(timeStr),
-		lipgloss.NewStyle().Foreground(colorNeonGreen).Render(ev.NodeID),
-		lipgloss.NewStyle().Foreground(colorCyberCyan).Render(sourceLabel),
-		alertStyle.Render(scoreLabel),
-		lipgloss.NewStyle().Foreground(colorWarningGold).Render(tactic),
-		lipgloss.NewStyle().Bold(true).Foreground(colorCyberCyan).Render(ev.MitreTechniqueID),
+		styleHeader.Render("FORENSIC INCIDENT INSPECTION"),
+		styleLight.Render(timeStr),
+		styleGreen.Render(ev.NodeID),
+		styleCyan.Render(sourceLabel),
+		styleAlert.Render(scoreLabel),
+		styleWarning.Render(tactic),
+		styleCyan.Render(ev.MitreTechniqueID),
 		techName,
-		lipgloss.NewStyle().Bold(true).Foreground(colorAlertPink).Render(ev.ClientIP),
-		lipgloss.NewStyle().Bold(true).Foreground(colorWarningGold).Render("DECODED PAYLOAD"),
-		lipgloss.NewStyle().Foreground(colorTextLight).Render(decodedPayload),
-		lipgloss.NewStyle().Bold(true).Foreground(colorNeonGreen).Render("AI INTEL & INTENT"),
-		lipgloss.NewStyle().Foreground(colorTextMuted).Render(aiIntelText),
-		lipgloss.NewStyle().Foreground(colorTextMuted).Render("[Esc / Enter] Close Inspection Modal"),
+		styleAlert.Render(ev.ClientIP),
+		styleWarning.Render("DECODED PAYLOAD"),
+		styleLight.Render(decodedPayload),
+		styleGreen.Render("AI INTEL & INTENT"),
+		styleMuted.Render(aiIntelText),
+		styleMuted.Render("[Esc / Enter] Close Inspection Modal"),
 	)
 
-	card := inspectionCardStyle.Render(content)
+	card := styleInspectionCard.Render(content)
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, card,
 		lipgloss.WithWhitespaceChars(" "),
 		lipgloss.WithWhitespaceForeground(colorDarkBg),
