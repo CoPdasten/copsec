@@ -605,17 +605,15 @@ func (m *SIEMModel) View() string {
 		return "Initializing CoPSeC Enterprise Cyber-Defense Cockpit..."
 	}
 
-	// 1. Column Width Calculations
-	leftWidth := int(float64(m.width) * 0.23)
-	if leftWidth < 24 {
-		leftWidth = 24
-	} else if leftWidth > 32 {
-		leftWidth = 32
+	// 1. Column Width Calculations (24% Left, 46% Center, 30% Right)
+	leftWidth := int(float64(m.width) * 0.24)
+	if leftWidth < 28 {
+		leftWidth = 28
 	}
 
-	rightWidth := int(float64(m.width) * 0.29)
-	if rightWidth < 30 {
-		rightWidth = 30
+	rightWidth := int(float64(m.width) * 0.30)
+	if rightWidth < 36 {
+		rightWidth = 36
 	}
 
 	centerWidth := m.width - leftWidth - rightWidth - 6
@@ -738,9 +736,9 @@ func (m *SIEMModel) renderFleetPanel(width, maxLines int) string {
 			statusBadge = styleAlert.Render("🔴")
 		}
 
-		nodeName := hardTruncate(n.NodeID, max(4, width-4))
-		cpuBar := renderMiniBar(n.CPUUsage, 4)
-		ramBar := renderMiniBar(n.MemoryUsage/256.0*100.0, 4)
+		nodeName := hardTruncate(n.NodeID, max(4, width-3))
+		cpuBar := renderMiniBar(n.CPUUsage, 5)
+		ramBar := renderMiniBar(n.MemoryUsage/256.0*100.0, 5)
 
 		row1 := fmt.Sprintf("%s %s", statusBadge, lipgloss.NewStyle().Bold(true).Foreground(colorCyberCyan).Render(nodeName))
 		b.WriteString(hardTruncate(row1, width) + "\n")
@@ -758,7 +756,7 @@ func (m *SIEMModel) renderFleetPanel(width, maxLines int) string {
 			break
 		}
 
-		row3 := fmt.Sprintf(" 🛡️ Bans:%d | Ping:~12ms", n.ActiveBansCount)
+		row3 := fmt.Sprintf(" 🛡️ Bans:%d | Ping:~12ms | Buff:OK", n.ActiveBansCount)
 		b.WriteString(hardTruncate(row3, width) + "\n")
 		linesWritten++
 	}
@@ -788,11 +786,11 @@ func (m *SIEMModel) renderJailPanel(width, maxLines int) string {
 			}
 
 			reason := ban.Reason
-			if len(reason) > 8 {
-				reason = reason[:8]
+			if len(reason) > 12 {
+				reason = reason[:12]
 			}
 
-			line := fmt.Sprintf("🚫 %-12s %s %s", hardTruncate(ban.IP, 12), styleWarning.Render(reason), remStr)
+			line := fmt.Sprintf("🚫 %-15s %s %s", hardTruncate(ban.IP, 15), styleWarning.Render(reason), remStr)
 			b.WriteString(hardTruncate(line, width) + "\n")
 			linesWritten++
 		}
@@ -800,7 +798,7 @@ func (m *SIEMModel) renderJailPanel(width, maxLines int) string {
 
 	if linesWritten < maxLines && len(m.soarActions) > 0 {
 		act := m.soarActions[0]
-		ackLine := fmt.Sprintf("[ACK] %s %s (%dn)", act.ActionType, hardTruncate(act.TargetIP, 10), act.NodesCount)
+		ackLine := fmt.Sprintf("[ACK] %s %s (%dn)", act.ActionType, hardTruncate(act.TargetIP, 14), act.NodesCount)
 		b.WriteString(hardTruncate(styleGreen.Render(ackLine), width))
 	}
 	return b.String()
@@ -1056,14 +1054,14 @@ func (m *SIEMModel) renderMITREPanel(width, maxLines int) string {
 
 		barLen := 0
 		if st.Count > 0 {
-			barLen = min(st.Count/2+1, 4)
+			barLen = min(st.Count/2+1, 5)
 		}
 		filled := strings.Repeat("█", barLen)
-		empty := strings.Repeat("░", 4-barLen)
+		empty := strings.Repeat("░", 5-barLen)
 
 		techName := st.Name
-		if len(techName) > 10 {
-			techName = techName[:10]
+		if len(techName) > 15 {
+			techName = techName[:15]
 		}
 
 		color := colorCyberCyan
@@ -1073,7 +1071,7 @@ func (m *SIEMModel) renderMITREPanel(width, maxLines int) string {
 			color = colorWarningGold
 		}
 
-		row := fmt.Sprintf("%-6s %-10s %s%s %2d",
+		row := fmt.Sprintf("%-6s %-15s %s%s %2d",
 			lipgloss.NewStyle().Bold(true).Foreground(color).Render(st.ID),
 			styleLight.Render(techName),
 			styleAlert.Render(filled),
@@ -1107,7 +1105,7 @@ func (m *SIEMModel) renderThreatIntelPanel(width, maxLines int) string {
 			if linesWritten >= maxLines {
 				break
 			}
-			row1 := fmt.Sprintf("%s %-14s [%s]",
+			row1 := fmt.Sprintf("%s %-16s [%s Hits]",
 				at.Flag,
 				styleAlert.Render(at.IP),
 				styleGreen.Render(strconv.Itoa(at.Count)))
@@ -1117,9 +1115,10 @@ func (m *SIEMModel) renderThreatIntelPanel(width, maxLines int) string {
 			if linesWritten >= maxLines {
 				break
 			}
-			row2 := fmt.Sprintf("   └ %s/%s",
-				styleCyan.Render(hardTruncate(at.Org, 12)),
-				styleWarning.Render(hardTruncate(at.Class, 8)))
+			row2 := fmt.Sprintf("   └ %s / %s 🎯 %s",
+				styleCyan.Render(hardTruncate(at.Org, 14)),
+				styleWarning.Render(hardTruncate(at.Class, 10)),
+				styleMuted.Render(at.TopTarget))
 			b.WriteString(hardTruncate(row2, width) + "\n")
 			linesWritten++
 		}
