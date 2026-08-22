@@ -120,13 +120,7 @@ func (c *MultiLogCollector) runPipeline(ctx context.Context, wg *sync.WaitGroup)
 			}
 			atomic.AddUint64(&c.totalLinesRead, 1)
 
-			// Phase 1 Fast-Path Short-Circuit Filter
-			drop, _ := c.filter.ShouldDrop(entry)
-			if drop {
-				atomic.AddUint64(&c.totalLinesDropped, 1)
-				continue
-			}
-
+			// All logs are forwarded to Controller gRPC pipeline (Zero Fast-Path Drop)
 			atomic.AddUint64(&c.totalLinesPassed, 1)
 			c.dispatch(entry)
 		}

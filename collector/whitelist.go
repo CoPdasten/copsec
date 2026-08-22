@@ -144,25 +144,8 @@ func (f *PreRoutingFilter) IsFastPathWhitelisted(ip net.IP) bool {
 }
 
 // ShouldDrop evaluates whether a LogEntry must be dropped immediately.
-// Returns (drop=true, reason) if it should be discarded without regex evaluation.
+// In unified central inspection mode, all logs are passed to Controller.
 func (f *PreRoutingFilter) ShouldDrop(entry LogEntry) (bool, string) {
-	// 1. Extract IP & Pre-Routing Whitelist check
-	ip := ExtractIP(entry.Line)
-	if ip != nil && f.IsFastPathWhitelisted(ip) {
-		return true, "whitelisted_ip"
-	}
-
-	// 2. Nginx/Web HTTP Status Code filter (Phase 1 rule: skip 200 OK / non-suspicious status)
-	if entry.Source == "nginx" || strings.Contains(entry.Line, "HTTP/") {
-		status := ExtractHTTPStatus(entry.Line)
-		if status > 0 {
-			// If status is 200 OK or not in [400, 403, 404, 500], drop to prevent False Positive bans
-			if !f.allowedCodes[status] {
-				return true, "benign_http_status_" + strconv.Itoa(status)
-			}
-		}
-	}
-
 	return false, ""
 }
 
