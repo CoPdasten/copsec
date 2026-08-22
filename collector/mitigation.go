@@ -139,11 +139,33 @@ func removeNginxDenyRule(ip string) error {
 	return nil
 }
 
+// isProtectedIP checks if an IP belongs to the local machine, cluster interconnect, or protected CIDRs.
+func isProtectedIP(ipStr string) bool {
+	ipStr = strings.TrimSpace(ipStr)
+	if ipStr == "" || ipStr == "127.0.0.1" || ipStr == "::1" || ipStr == "localhost" {
+		return true
+	}
+	// Cluster nodes, Controller public IP & Tailscale interconnect (100.64.0.0/10)
+	if ipStr == "37.59.108.186" || strings.HasPrefix(ipStr, "100.") {
+		return true
+	}
+	parsed := net.ParseIP(ipStr)
+	if parsed != nil {
+		return parsed.IsLoopback() || parsed.IsPrivate() || parsed.IsUnspecified()
+	}
+	return false
+}
+
 // ExecuteBan executes Hybrid L3/L4 iptables + Kernel Socket Killer + L7 Nginx WAF isolation.
 func ExecuteBan(targetIP string, timeoutSeconds int) error {
 	targetIP = strings.TrimSpace(targetIP)
 	if targetIP == "" {
 		return fmt.Errorf("empty target ip")
+	}
+
+	if isProtectedIP(targetIP) {
+		log.Printf("[SOAR_SAFEGUARD] 🛡️ Refusing to ban protected/self IP: %s", targetIP)
+		return nil
 	}
 
 	ip := net.ParseIP(targetIP)

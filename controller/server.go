@@ -294,19 +294,26 @@ func (s *CentralServer) processEvent(nodeID string, event *copsecproto.LogEvent)
 	}
 }
 
-// isInternalIP returns true if the IP is loopback, private, unspecified, or CGNAT.
-func isInternalIP(ipStr string) bool {
-	ip := net.ParseIP(strings.TrimSpace(ipStr))
+// isProtectedIP returns true if the IP belongs to loopback, private networks, Controller public IP, or cluster interconnects.
+func isProtectedIP(ipStr string) bool {
+	ipStr = strings.TrimSpace(ipStr)
+	if ipStr == "" || ipStr == "127.0.0.1" || ipStr == "::1" || ipStr == "localhost" {
+		return true
+	}
+	if ipStr == "37.59.108.186" || strings.HasPrefix(ipStr, "100.") {
+		return true
+	}
+	ip := net.ParseIP(ipStr)
 	if ip == nil {
 		return true
 	}
-	return ip.IsLoopback() || ip.IsPrivate() || ip.IsUnspecified() || strings.HasPrefix(ipStr, "100.64.")
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsUnspecified()
 }
 
 // checkAutonomousBanPolicy evaluates static critical scores (>=50) and correlation spike windows.
 func (s *CentralServer) checkAutonomousBanPolicy(event *StoredEvent) {
 	ip := strings.TrimSpace(event.ClientIP)
-	if ip == "" || isInternalIP(ip) {
+	if ip == "" || isProtectedIP(ip) {
 		return
 	}
 
