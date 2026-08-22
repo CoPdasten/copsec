@@ -619,15 +619,15 @@ func (m *SIEMModel) View() string {
 		return "Initializing CoPSeC Enterprise Cyber-Defense Cockpit..."
 	}
 
-	// 1. Column Width Calculations (24% Left, 46% Center, 30% Right)
-	leftWidth := int(float64(m.width) * 0.24)
-	if leftWidth < 28 {
-		leftWidth = 28
+	// 1. Column Width Calculations (27% Left, 43% Center, 30% Right)
+	leftWidth := int(float64(m.width) * 0.27)
+	if leftWidth < 34 {
+		leftWidth = 34
 	}
 
 	rightWidth := int(float64(m.width) * 0.30)
-	if rightWidth < 36 {
-		rightWidth = 36
+	if rightWidth < 38 {
+		rightWidth = 38
 	}
 
 	centerWidth := m.width - leftWidth - rightWidth - 6
@@ -754,12 +754,12 @@ func (m *SIEMModel) renderFleetPanel(width, maxLines int) string {
 		}
 
 		nodeName := hardTruncate(n.NodeID, max(4, width-3))
-		cpuBar := renderMiniBar(n.CPUUsage, 6)
+		cpuBar := renderMiniBar(n.CPUUsage, 8)
 		ramUsageMB := n.MemoryUsage
 		if ramUsageMB <= 0 {
 			ramUsageMB = 480.0
 		}
-		ramBar := renderMiniBar(ramUsageMB/2048.0*100.0, 6)
+		ramBar := renderMiniBar(ramUsageMB/2048.0*100.0, 8)
 
 		// 1. Node Header
 		groupTag := n.Group
@@ -805,7 +805,7 @@ func (m *SIEMModel) renderFleetPanel(width, maxLines int) string {
 		}
 
 		// 5. Disk Bar
-		diskBar := renderMiniBar(22.0, 6)
+		diskBar := renderMiniBar(22.0, 8)
 		row5 := fmt.Sprintf("└─ Disk: [%s] 22%% (NVMe SSD)", styleMuted.Render(diskBar))
 		b.WriteString(hardTruncate(row5, width) + "\n")
 		linesWritten++
@@ -866,8 +866,8 @@ func (m *SIEMModel) renderJailPanel(width, maxLines int) string {
 			}
 
 			reason := ban.Reason
-			if len(reason) > 12 {
-				reason = reason[:12]
+			if len(reason) > 16 {
+				reason = reason[:16]
 			}
 
 			line := fmt.Sprintf("🚫 %-15s %s %s", hardTruncate(ban.IP, 15), styleWarning.Render(reason), remStr)
@@ -878,7 +878,7 @@ func (m *SIEMModel) renderJailPanel(width, maxLines int) string {
 
 	if linesWritten < maxLines && len(m.soarActions) > 0 {
 		act := m.soarActions[0]
-		ackLine := fmt.Sprintf("[ACK] %s %s (%dn)", act.ActionType, hardTruncate(act.TargetIP, 14), act.NodesCount)
+		ackLine := fmt.Sprintf("[ACK] %s %s (%dn)", act.ActionType, hardTruncate(act.TargetIP, 16), act.NodesCount)
 		b.WriteString(hardTruncate(styleGreen.Render(ackLine), width))
 	}
 	return b.String()
@@ -1160,7 +1160,7 @@ func (m *SIEMModel) renderThreatIntelPanel(width, maxLines int) string {
 			if linesWritten >= maxLines {
 				break
 			}
-			row1 := fmt.Sprintf("%s %-15s [%s]",
+			row1 := fmt.Sprintf("%s %-16s [%s]",
 				at.Flag,
 				styleAlert.Render(at.IP),
 				styleGreen.Render(fmt.Sprintf("x%d", at.Count)))
@@ -1171,8 +1171,8 @@ func (m *SIEMModel) renderThreatIntelPanel(width, maxLines int) string {
 				break
 			}
 			row2 := fmt.Sprintf("   └ %s (%s)",
-				styleCyan.Render(hardTruncate(at.Org, 14)),
-				styleWarning.Render(hardTruncate(at.Class, 10)))
+				styleCyan.Render(hardTruncate(at.Org, 16)),
+				styleWarning.Render(hardTruncate(at.Class, 12)))
 			b.WriteString(hardTruncate(row2, width) + "\n")
 			linesWritten++
 		}
