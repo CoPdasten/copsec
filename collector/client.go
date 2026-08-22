@@ -156,6 +156,27 @@ func (c *ControllerClient) closeConnection() {
 	}
 }
 
+func sanitizeLogEvent(nodeID string, raw *copsecproto.LogEvent) *copsecproto.LogEvent {
+	if raw == nil {
+		return nil
+	}
+	evNodeID := raw.NodeId
+	if evNodeID == "" {
+		evNodeID = nodeID
+	}
+	return &copsecproto.LogEvent{
+		NodeId:           evNodeID,
+		Source:           raw.Source,
+		RawLine:          raw.RawLine,
+		ClientIp:         raw.ClientIp,
+		StatusCode:       raw.StatusCode,
+		TimestampMs:      raw.TimestampMs,
+		RuleId:           raw.RuleId,
+		MitreTechniqueId: raw.MitreTechniqueId,
+		ThreatScore:      raw.ThreatScore,
+	}
+}
+
 // flushOfflineBuffer sends accumulated offline records to the controller.
 func (c *ControllerClient) flushOfflineBuffer(ctx context.Context, client copsecproto.CopsecStreamServiceClient) {
 	pending := c.buffer.Size()
@@ -183,11 +204,22 @@ func (c *ControllerClient) flushOfflineBuffer(ctx context.Context, client copsec
 			return
 		}
 
-		for _, event := range batch {
-			if err := stream.Send(event); err != nil {
+		var sentCount int
+		for _, rawEvent := range batch {
+			cleanEvent := sanitizeLogEvent(c.identity.GetNodeID(), rawEvent)
+			if cleanEvent == nil {
+				continue
+			}
+			if err := stream.Send(cleanEvent); err != nil {
 				log.Printf("[WARN] Buffer stream interrupted: %v", err)
 				return
 			}
+			sentCount++
+		}
+
+		if sentCount == 0 {
+			_ = c.buffer.Ack(ids)
+			continue
 		}
 
 		ack, err := stream.CloseAndRecv()
@@ -217,9 +249,13 @@ func (c *ControllerClient) streamLive(ctx context.Context, client copsecproto.Co
 			return nil
 
 		case event := <-c.incomingChan:
-			if err := stream.Send(event); err != nil {
+			cleanEvent := sanitizeLogEvent(c.identity.GetNodeID(), event)
+			if cleanEvent == nil {
+				continue
+			}
+			if err := stream.Send(cleanEvent); err != nil {
 				// Failed to send live: store in offline buffer
-				_ = c.buffer.Enqueue(event)
+				_ = c.buffer.Enqueue(cleanEvent)
 				return err
 			}
 		}

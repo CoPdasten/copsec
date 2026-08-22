@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	copsecproto "github.com/copsec/collector/proto"
 	"google.golang.org/grpc"
@@ -141,6 +143,7 @@ func TestOfflineBufferFIFO(t *testing.T) {
 
 // Mock gRPC Server implementation for integration testing
 type mockCopsecServer struct {
+	copsecproto.UnimplementedCopsecStreamServiceServer
 	mu           sync.Mutex
 	receivedLogs []*copsecproto.LogEvent
 }
@@ -149,9 +152,12 @@ func (s *mockCopsecServer) StreamEvents(stream grpc.ClientStreamingServer[copsec
 	for {
 		event, err := stream.Recv()
 		if err == io.EOF {
+			s.mu.Lock()
+			count := uint64(len(s.receivedLogs))
+			s.mu.Unlock()
 			return stream.SendAndClose(&copsecproto.StreamAck{
 				Success:        true,
-				ProcessedCount: uint64(len(s.receivedLogs)),
+				ProcessedCount: count,
 				Message:        "OK",
 			})
 		}
@@ -172,7 +178,23 @@ func (s *mockCopsecServer) SyncCommands(stream grpc.BidiStreamingServer[copsecpr
 	return nil
 }
 
-func TestGrpcClientLiveAndOfflineBuffer(t *testing.T) {
+func TestGrpcClientFlushOfflineBufferLive(t *testing.T) {
+	// Start Mock gRPC Server on random port
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Failed to listen: %v", err)
+	}
+	defer lis.Close()
+
+	grpcServer := grpc.NewServer()
+	mockSrv := &mockCopsecServer{}
+	copsecproto.RegisterCopsecStreamServiceServer(grpcServer, mockSrv)
+
+	go func() {
+		_ = grpcServer.Serve(lis)
+	}()
+	defer grpcServer.Stop()
+
 	tmpDir := t.TempDir()
 	bufPath := filepath.Join(tmpDir, "buffer.db")
 	idPath := filepath.Join(tmpDir, "node.json")
@@ -181,22 +203,44 @@ func TestGrpcClientLiveAndOfflineBuffer(t *testing.T) {
 	buf, _ := NewOfflineBuffer(bufPath)
 	defer buf.Close()
 
-	// 1. Test offline buffering when controller is down
+	// Enqueue test events to disk buffer
+	for i := 1; i <= 5; i++ {
+		ev := &copsecproto.LogEvent{
+			Source:      "nginx",
+			RawLine:     fmt.Sprintf("GET /admin-%d HTTP/1.1 404", i),
+			ClientIp:    "198.51.100.1",
+			StatusCode:  404,
+			TimestampMs: time.Now().UnixMilli(),
+		}
+		_ = buf.Enqueue(ev)
+	}
+
 	client := NewControllerClient(GrpcClientConfig{
-		ServerAddress: "127.0.0.1:54321", // Non-existent port
+		ServerAddress: lis.Addr().String(),
+		MaxBatchSize:  10,
 	}, idMgr, buf)
 
-	eventOffline := &copsecproto.LogEvent{
-		Source:     "ssh",
-		RawLine:    "Failed password for root from 198.51.100.22 port 22",
-		ClientIp:   "198.51.100.22",
-		StatusCode: 0,
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	conn, streamClient, err := client.connect(ctx)
+	if err != nil {
+		t.Fatalf("Failed to connect to mock gRPC server: %v", err)
+	}
+	defer conn.Close()
+
+	// Flush buffer to server (tests serialization and avoids opaqueInitHook segfault)
+	client.flushOfflineBuffer(ctx, streamClient)
+
+	if buf.Size() != 0 {
+		t.Errorf("Expected buffer to be fully drained, remaining: %d", buf.Size())
 	}
 
-	// Directly enqueue into buffer
-	_ = buf.Enqueue(eventOffline)
-	if buf.Size() != 1 {
-		t.Errorf("Expected 1 offline buffered item, got %d", buf.Size())
+	mockSrv.mu.Lock()
+	receivedCount := len(mockSrv.receivedLogs)
+	mockSrv.mu.Unlock()
+
+	if receivedCount != 5 {
+		t.Errorf("Expected 5 received logs on server, got %d", receivedCount)
 	}
-	_ = client
 }
