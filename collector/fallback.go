@@ -8,7 +8,6 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
@@ -202,11 +201,13 @@ func (f *FallbackEngine) handleEmergencyCommand(text string) {
 			return
 		}
 		ip := parts[1]
-		_ = exec.Command("iptables", "-I", "INPUT", "-s", ip, "-j", "DROP").Run()
+		success, out := ExecuteSOARBan(ip, 86400)
 		f.mu.Lock()
-		f.bannedIPs[ip] = time.Now().Unix()
+		if success {
+			f.bannedIPs[ip] = time.Now().Unix()
+		}
 		f.mu.Unlock()
-		f.replyMessage(fmt.Sprintf("🚫 *[EDGE DIRECT BAN]* `%s` adresi VDS üzerinde başarıyla engellendi.", ip))
+		f.replyMessage(fmt.Sprintf("🚫 *[EDGE DIRECT BAN]* `%s`\n%s", ip, out))
 
 	case "/unban":
 		if len(parts) < 2 || net.ParseIP(parts[1]) == nil {
@@ -214,11 +215,11 @@ func (f *FallbackEngine) handleEmergencyCommand(text string) {
 			return
 		}
 		ip := parts[1]
-		_ = exec.Command("iptables", "-D", "INPUT", "-s", ip, "-j", "DROP").Run()
+		_, out := ExecuteSOARUnban(ip)
 		f.mu.Lock()
 		delete(f.bannedIPs, ip)
 		f.mu.Unlock()
-		f.replyMessage(fmt.Sprintf("🔓 *[EDGE DIRECT UNBAN]* `%s` engel kuralı VDS üzerinden kaldırıldı.", ip))
+		f.replyMessage(fmt.Sprintf("🔓 *[EDGE DIRECT UNBAN]* `%s`\n%s", ip, out))
 
 	case "/whitelist", "/wl":
 		if len(parts) < 2 || net.ParseIP(parts[1]) == nil {
@@ -226,7 +227,7 @@ func (f *FallbackEngine) handleEmergencyCommand(text string) {
 			return
 		}
 		ip := parts[1]
-		_ = exec.Command("iptables", "-D", "INPUT", "-s", ip, "-j", "DROP").Run()
+		_, _ = ExecuteSOARUnban(ip)
 		f.mu.Lock()
 		delete(f.bannedIPs, ip)
 		if f.whitelistFilter != nil {
@@ -361,17 +362,11 @@ func (f *FallbackEngine) InspectOffline(rawLine, source string) {
 }
 
 func (f *FallbackEngine) executeLocalBan(ipStr string) {
-	checkErr := exec.Command("iptables", "-C", "INPUT", "-s", ipStr, "-j", "DROP").Run()
-	if checkErr == nil {
-		log.Printf("[FALLBACK_SOAR] IP %s is already isolated in local iptables", ipStr)
-		return
-	}
-
-	out, err := exec.Command("iptables", "-I", "INPUT", "-s", ipStr, "-j", "DROP").CombinedOutput()
-	if err == nil {
-		log.Printf("[FALLBACK_SOAR] 🚫 Autonomous local iptables DROP executed for %s", ipStr)
+	success, msg := ExecuteSOARBan(ipStr, 86400)
+	if success {
+		log.Printf("[FALLBACK_SOAR] 🚫 Autonomous local ban executed for %s (%s)", ipStr, msg)
 	} else {
-		log.Printf("[FALLBACK_SOAR] Failed to ban IP %s: %v (%s)", ipStr, err, string(out))
+		log.Printf("[FALLBACK_SOAR] Failed to ban IP %s: %s", ipStr, msg)
 	}
 }
 

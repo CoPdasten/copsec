@@ -384,54 +384,10 @@ func (c *ControllerClient) executeSOARCommand(cmd *copsecproto.SOARCommand, stre
 
 	switch cmd.ActionType {
 	case "BAN_IP":
-		if net.ParseIP(targetIP) == nil {
-			output = fmt.Sprintf("Rejected: invalid IP address '%s'", targetIP)
-			break
-		}
-
-		// Try copsec-cli first, fallback to iptables
-		out, err := exec.Command("copsec-cli", "ban", targetIP, fmt.Sprintf("%d", cmd.DurationSeconds)).CombinedOutput()
-		if err == nil {
-			success = true
-			output = string(out)
-		} else {
-			// Check if already dropped in iptables
-			checkErr := exec.Command("iptables", "-C", "INPUT", "-s", targetIP, "-j", "DROP").Run()
-			if checkErr == nil {
-				success = true
-				output = fmt.Sprintf("IP %s is already banned in iptables", targetIP)
-			} else {
-				// Insert drop rule at top of INPUT chain
-				iptOut, iptErr := exec.Command("iptables", "-I", "INPUT", "-s", targetIP, "-j", "DROP").CombinedOutput()
-				if iptErr == nil {
-					success = true
-					output = fmt.Sprintf("Successfully banned IP %s via iptables", targetIP)
-				} else {
-					output = fmt.Sprintf("Failed to ban IP %s: %v (%s)", targetIP, iptErr, string(iptOut))
-				}
-			}
-		}
+		success, output = ExecuteSOARBan(targetIP, cmd.DurationSeconds)
 
 	case "UNBAN_IP":
-		if net.ParseIP(targetIP) == nil {
-			output = fmt.Sprintf("Rejected: invalid IP address '%s'", targetIP)
-			break
-		}
-
-		out, err := exec.Command("copsec-cli", "unban", targetIP).CombinedOutput()
-		if err == nil {
-			success = true
-			output = string(out)
-		} else {
-			// Remove from iptables
-			iptOut, iptErr := exec.Command("iptables", "-D", "INPUT", "-s", targetIP, "-j", "DROP").CombinedOutput()
-			if iptErr == nil {
-				success = true
-				output = fmt.Sprintf("Successfully unbanned IP %s via iptables", targetIP)
-			} else {
-				output = fmt.Sprintf("Failed to unban IP %s: %v (%s)", targetIP, iptErr, string(iptOut))
-			}
-		}
+		success, output = ExecuteSOARUnban(targetIP)
 
 	case "WHITELIST_IP":
 		if net.ParseIP(targetIP) == nil {
