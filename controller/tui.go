@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -1073,20 +1072,8 @@ func (m *SIEMModel) renderMITREPanel(width, maxLines int) string {
 	b.WriteString(hardTruncate(styleMatrixTitle.Render("🛡 ENTERPRISE MITRE INTEL"), width) + "\n")
 	b.WriteString(styleMuted.Render(strings.Repeat("─", max(2, width))) + "\n")
 
-	renderKillStage := func(name string, hits int) string {
-		if hits > 0 {
-			return fmt.Sprintf("[%s%s]", name, styleAlert.Render("█"))
-		}
-		return fmt.Sprintf("[%s%s]", name, styleMuted.Render("░"))
-	}
-	killChainStr := fmt.Sprintf("%s➔%s➔%s➔%s➔%s",
-		renderKillStage("Rec", m.killChainHits["Recon"]),
-		renderKillStage("Ini", m.killChainHits["Initial"]),
-		renderKillStage("Exe", m.killChainHits["Execution"]),
-		renderKillStage("Per", m.killChainHits["Persist"]),
-		renderKillStage("Exf", m.killChainHits["Exfil"]),
-	)
-	b.WriteString(hardTruncate(killChainStr, width) + "\n")
+	colHeader := fmt.Sprintf("%-10s %-16s %s", styleMuted.Render("[ID]"), styleMuted.Render("[Technique Name]"), styleMuted.Render("[Hits]"))
+	b.WriteString(hardTruncate(colHeader, width) + "\n")
 
 	linesWritten := 3
 	analyzer := m.server.GetAnalyzer()
@@ -1114,18 +1101,6 @@ func (m *SIEMModel) renderMITREPanel(width, maxLines int) string {
 			break
 		}
 
-		barLen := 0
-		if st.Count > 0 {
-			barLen = min(st.Count/2+1, 5)
-		}
-		filled := strings.Repeat("█", barLen)
-		empty := strings.Repeat("░", 5-barLen)
-
-		techName := st.Name
-		if len(techName) > 15 {
-			techName = techName[:15]
-		}
-
 		color := colorCyberCyan
 		if st.Count >= 20 {
 			color = colorAlertPink
@@ -1133,12 +1108,11 @@ func (m *SIEMModel) renderMITREPanel(width, maxLines int) string {
 			color = colorWarningGold
 		}
 
-		row := fmt.Sprintf("%-6s %-15s %s%s %2d",
+		nameWidth := max(8, width-18)
+		row := fmt.Sprintf("%-10s %-16s %s",
 			lipgloss.NewStyle().Bold(true).Foreground(color).Render(st.ID),
-			styleLight.Render(techName),
-			styleAlert.Render(filled),
-			lipgloss.NewStyle().Foreground(colorPanelBorder).Render(empty),
-			st.Count)
+			styleLight.Render(hardTruncate(st.Name, nameWidth)),
+			styleAlert.Render(fmt.Sprintf("(x%d)", st.Count)))
 		b.WriteString(hardTruncate(row, width) + "\n")
 		linesWritten++
 	}
@@ -1167,20 +1141,19 @@ func (m *SIEMModel) renderThreatIntelPanel(width, maxLines int) string {
 			if linesWritten >= maxLines {
 				break
 			}
-			row1 := fmt.Sprintf("%s %-16s [%s Hits]",
+			row1 := fmt.Sprintf("%s %-15s [%s]",
 				at.Flag,
 				styleAlert.Render(at.IP),
-				styleGreen.Render(strconv.Itoa(at.Count)))
+				styleGreen.Render(fmt.Sprintf("x%d", at.Count)))
 			b.WriteString(hardTruncate(row1, width) + "\n")
 			linesWritten++
 
 			if linesWritten >= maxLines {
 				break
 			}
-			row2 := fmt.Sprintf("   └ %s / %s 🎯 %s",
+			row2 := fmt.Sprintf("   └ %s (%s)",
 				styleCyan.Render(hardTruncate(at.Org, 14)),
-				styleWarning.Render(hardTruncate(at.Class, 10)),
-				styleMuted.Render(at.TopTarget))
+				styleWarning.Render(hardTruncate(at.Class, 10)))
 			b.WriteString(hardTruncate(row2, width) + "\n")
 			linesWritten++
 		}
