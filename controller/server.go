@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -39,6 +40,7 @@ type CentralServer struct {
 	storage              *StorageEngine
 	analyzer             *RuleEngine
 	telegramBot          *TelegramSOARBot
+	aiEngine             *AIEngine
 	nodes                map[string]*NodeSession
 	eventSubChan         chan *StoredEvent
 
@@ -52,6 +54,7 @@ func NewCentralServer(storage *StorageEngine, analyzer *RuleEngine) *CentralServ
 	srv := &CentralServer{
 		storage:      storage,
 		analyzer:     analyzer,
+		aiEngine:     NewAIEngine(),
 		nodes:        make(map[string]*NodeSession),
 		eventSubChan: make(chan *StoredEvent, 4096),
 	}
@@ -74,6 +77,13 @@ func (s *CentralServer) SetTelegramBot(bot *TelegramSOARBot) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.telegramBot = bot
+}
+
+// SetAIEngine overrides or updates the AI engine.
+func (s *CentralServer) SetAIEngine(ai *AIEngine) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.aiEngine = ai
 }
 
 // SubscribeEvents returns the channel receiving real-time events for TUI / Telegram.
@@ -197,11 +207,26 @@ func (s *CentralServer) StreamEvents(stream grpc.ClientStreamingServer[copsecpro
 		// Persist to embedded SQLite
 		_ = s.storage.InsertEvent(stored)
 
-		// Trigger instant Telegram SOAR alert if ThreatScore >= 50
+		// Trigger AI Threat Intelligence analysis for severe incidents
 		s.mu.RLock()
+		ai := s.aiEngine
 		bot := s.telegramBot
 		s.mu.RUnlock()
-		if bot != nil && stored.ThreatScore >= 50 {
+
+		if ai != nil && (stored.ThreatScore >= 65 || strings.Contains(stored.RuleID, "anomaly") || strings.Contains(stored.RuleID, "rce") || strings.Contains(stored.RuleID, "sqli")) {
+			go func(event *StoredEvent) {
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				intel := ai.AnalyzeIntent(ctx, event)
+				summary := fmt.Sprintf("• Intent: %s\n• Root Cause: %s\n• Mitigation: %s", intel.AttackerIntent, intel.RootCause, intel.Mitigation)
+				event.AIAnalysis = summary
+				_ = s.storage.UpdateEventAI(event.ID, summary)
+
+				if bot != nil && event.ThreatScore >= 50 {
+					bot.ProcessEvent(event)
+				}
+			}(stored)
+		} else if bot != nil && stored.ThreatScore >= 50 {
 			go bot.ProcessEvent(stored)
 		}
 

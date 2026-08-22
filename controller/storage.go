@@ -24,6 +24,7 @@ type StoredEvent struct {
 	RuleID           string `json:"rule_id"`
 	MitreTechniqueID string `json:"mitre_technique_id"`
 	ThreatScore      int    `json:"threat_score"`
+	AIAnalysis       string `json:"ai_analysis,omitempty"`
 }
 
 // MITREStat summarizes technique occurrences.
@@ -86,7 +87,8 @@ func (s *StorageEngine) initSchema() error {
 		timestamp_ms INTEGER NOT NULL,
 		rule_id TEXT DEFAULT '',
 		mitre_technique_id TEXT DEFAULT '',
-		threat_score INTEGER DEFAULT 0
+		threat_score INTEGER DEFAULT 0,
+		ai_analysis TEXT DEFAULT ''
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp_ms DESC);
@@ -111,9 +113,9 @@ func (s *StorageEngine) InsertEvent(ev *StoredEvent) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	query := `INSERT INTO events (node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score)
-	          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	res, err := s.db.Exec(query, ev.NodeID, ev.Source, ev.RawLine, ev.ClientIP, ev.StatusCode, ev.TimestampMs, ev.RuleID, ev.MitreTechniqueID, ev.ThreatScore)
+	query := `INSERT INTO events (node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis)
+	          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	res, err := s.db.Exec(query, ev.NodeID, ev.Source, ev.RawLine, ev.ClientIP, ev.StatusCode, ev.TimestampMs, ev.RuleID, ev.MitreTechniqueID, ev.ThreatScore, ev.AIAnalysis)
 	if err != nil {
 		return err
 	}
@@ -122,12 +124,22 @@ func (s *StorageEngine) InsertEvent(ev *StoredEvent) error {
 	return nil
 }
 
+// UpdateEventAI updates the AI analysis field for a stored incident.
+func (s *StorageEngine) UpdateEventAI(eventID int64, aiAnalysis string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	query := `UPDATE events SET ai_analysis = ? WHERE id = ?`
+	_, err := s.db.Exec(query, aiAnalysis, eventID)
+	return err
+}
+
 // GetRecentEvents retrieves the latest events.
 func (s *StorageEngine) GetRecentEvents(limit int) ([]*StoredEvent, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	query := `SELECT id, node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score
+	query := `SELECT id, node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis
 	          FROM events ORDER BY timestamp_ms DESC LIMIT ?`
 	rows, err := s.db.Query(query, limit)
 	if err != nil {
@@ -138,7 +150,7 @@ func (s *StorageEngine) GetRecentEvents(limit int) ([]*StoredEvent, error) {
 	var results []*StoredEvent
 	for rows.Next() {
 		ev := &StoredEvent{}
-		if err := rows.Scan(&ev.ID, &ev.NodeID, &ev.Source, &ev.RawLine, &ev.ClientIP, &ev.StatusCode, &ev.TimestampMs, &ev.RuleID, &ev.MitreTechniqueID, &ev.ThreatScore); err == nil {
+		if err := rows.Scan(&ev.ID, &ev.NodeID, &ev.Source, &ev.RawLine, &ev.ClientIP, &ev.StatusCode, &ev.TimestampMs, &ev.RuleID, &ev.MitreTechniqueID, &ev.ThreatScore, &ev.AIAnalysis); err == nil {
 			results = append(results, ev)
 		}
 	}
@@ -151,7 +163,7 @@ func (s *StorageEngine) GetMITREStats() ([]MITREStat, error) {
 	defer s.mu.RUnlock()
 
 	query := `SELECT mitre_technique_id, COUNT(*) as cnt FROM events
-	          WHERE mitre_technique_id != '' GROUP BY mitre_technique_id ORDER BY cnt DESC LIMIT 10`
+	          WHERE mitre_technique_id != '' GROUP BY mitre_technique_id ORDER BY cnt DESC LIMIT 20`
 	rows, err := s.db.Query(query)
 	if err != nil {
 		return nil, err

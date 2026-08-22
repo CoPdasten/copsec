@@ -1,52 +1,195 @@
 {
   "rules": [
     {
-      "id": "t1190-exploit-sqli",
+      "id": "t1595-001-port-scan-probing",
+      "category": "reconnaissance",
+      "regex": "(?i)(Nmap\\s+Plugin|masscan|zmap|unicornscan|banner_grab)",
+      "status_codes": [400, 403, 404, 500],
+      "mitre_tactic": "Reconnaissance",
+      "mitre_tactic_id": "TA0043",
+      "mitre_technique_id": "T1595.001",
+      "mitre_technique_name": "Port Scanning / Probing",
+      "threat_score": 50
+    },
+    {
+      "id": "t1595-002-vulnerability-scanner-agents",
+      "category": "reconnaissance",
+      "regex": "(?i)(sqlmap/|nikto/|nuclei|acunetix|gobuster/|dirsearch|dirbuster|wpscan|openvas|arachni|nessus|burpcollaborator|ffuf|katana)",
+      "status_codes": [400, 403, 404, 500],
+      "mitre_tactic": "Reconnaissance",
+      "mitre_tactic_id": "TA0043",
+      "mitre_technique_id": "T1595.002",
+      "mitre_technique_name": "Active Vulnerability Scan",
+      "threat_score": 60
+    },
+    {
+      "id": "t1590-network-topology-gather",
+      "category": "reconnaissance",
+      "regex": "(?i)(/traceroute|/whois|/dns-query|/api/network-map|/server-status|/server-info)",
+      "status_codes": [400, 403, 404, 500],
+      "mitre_tactic": "Reconnaissance",
+      "mitre_tactic_id": "TA0043",
+      "mitre_technique_id": "T1590",
+      "mitre_technique_name": "Gather Network Info",
+      "threat_score": 45
+    },
+    {
+      "id": "t1589-gather-identity-credentials",
+      "category": "reconnaissance",
+      "regex": "(?i)(/api/users/export|/employees\\.csv|/company-directory|/ldap-search)",
+      "status_codes": [400, 403, 404, 500],
+      "mitre_tactic": "Reconnaissance",
+      "mitre_tactic_id": "TA0043",
+      "mitre_technique_id": "T1589",
+      "mitre_technique_name": "Gather Victim Identity",
+      "threat_score": 55
+    },
+    {
+      "id": "t1190-sqli-union-error",
       "category": "web",
-      "regex": "(?i)(union\\s+select|select\\s+.*\\s+from|concat\\s*\\(|'\\s*--|%27%20or%20|or\\s+1=1|waitfor\\s+delay|sleep\\s*\\(|extractvalue\\s*\\(|updatexml\\s*\\()",
+      "regex": "(?i)(union\\s+select|select\\s+.*\\s+from|concat\\s*\\(|group_concat\\(|extractvalue\\s*\\(|updatexml\\s*\\()",
       "status_codes": [400, 403, 404, 500],
       "mitre_tactic": "Initial Access",
       "mitre_tactic_id": "TA0001",
       "mitre_technique_id": "T1190",
-      "mitre_technique_name": "Exploit Public-Facing App",
+      "mitre_technique_name": "Exploit Public-Facing App: SQLi",
+      "threat_score": 85
+    },
+    {
+      "id": "t1190-sqli-blind-timebased",
+      "category": "web",
+      "regex": "(?i)(waitfor\\s+delay|sleep\\s*\\(|pg_sleep\\s*\\(|benchmark\\s*\\(|or\\s+1=1|'\\s*--|%27%20or%20)",
+      "status_codes": [400, 403, 404, 500],
+      "mitre_tactic": "Initial Access",
+      "mitre_tactic_id": "TA0001",
+      "mitre_technique_id": "T1190",
+      "mitre_technique_name": "Exploit Public-Facing App: Blind SQLi",
       "threat_score": 80
     },
     {
-      "id": "t1190-exploit-rce-log4j-spring",
+      "id": "t1190-rce-log4j-jndi",
       "category": "web",
-      "regex": "(?i)(\\$\\{jndi:(ldap|rmi|dns|corba|iiop|http):|class\\.module\\.classLoader|struts|ognl|ctx\\.environment)",
+      "regex": "(?i)(\\$\\{jndi:(ldap|rmi|dns|corba|iiop|http):|\\$\\{lower:\\$\\{lower:jndi\\}\\})",
       "status_codes": [400, 403, 404, 500],
       "mitre_tactic": "Initial Access",
       "mitre_tactic_id": "TA0001",
       "mitre_technique_id": "T1190",
-      "mitre_technique_name": "Exploit Public-Facing App",
+      "mitre_technique_name": "Log4j RCE (CVE-2021-44228)",
       "threat_score": 95
     },
     {
-      "id": "t1059-unix-shell-execution",
-      "category": "rce",
+      "id": "t1190-rce-spring4shell",
+      "category": "web",
+      "regex": "(?i)(class\\.module\\.classLoader|pipeline\\.first\\.pattern|tomcatWebappClassLoader)",
+      "status_codes": [400, 403, 404, 500],
+      "mitre_tactic": "Initial Access",
+      "mitre_tactic_id": "TA0001",
+      "mitre_technique_id": "T1190",
+      "mitre_technique_name": "Spring4Shell RCE (CVE-2022-22965)",
+      "threat_score": 95
+    },
+    {
+      "id": "t1190-rce-xxe-injection",
+      "category": "web",
+      "regex": "(?i)(<!ENTITY\\s+.*SYSTEM|<!DOCTYPE\\s+.*SYSTEM|SYSTEM\\s+[\"']file:///|SYSTEM\\s+[\"']expect://)",
+      "status_codes": [400, 403, 404, 500],
+      "mitre_tactic": "Initial Access",
+      "mitre_tactic_id": "TA0001",
+      "mitre_technique_id": "T1190",
+      "mitre_technique_name": "XML External Entity (XXE)",
+      "threat_score": 80
+    },
+    {
+      "id": "t1190-rce-insecure-deserialization",
+      "category": "web",
+      "regex": "(?i)(ysoserial|rO0ABX|java\\.lang\\.Runtime|org\\.apache\\.commons\\.collections|com\\.mchange\\.v2\\.c3p0)",
+      "status_codes": [400, 403, 404, 500],
+      "mitre_tactic": "Initial Access",
+      "mitre_tactic_id": "TA0001",
+      "mitre_technique_id": "T1190",
+      "mitre_technique_name": "Insecure Deserialization RCE",
+      "threat_score": 90
+    },
+    {
+      "id": "t1190-path-traversal-lfi",
+      "category": "web",
+      "regex": "(?i)(\\.\\./\\.\\./|%2e%2e%2f|%252e%252e%252f|/etc/passwd|/proc/self/environ|php://filter|php://input)",
+      "status_codes": [400, 403, 404, 500],
+      "mitre_tactic": "Initial Access",
+      "mitre_tactic_id": "TA0001",
+      "mitre_technique_id": "T1190",
+      "mitre_technique_name": "Path Traversal & LFI",
+      "threat_score": 75
+    },
+    {
+      "id": "t1190-xss-stored-reflected",
+      "category": "web",
+      "regex": "(?i)(<script[^>]*>|javascript\\s*:|onload\\s*=|onerror\\s*=|document\\.cookie|<img\\s+src=x)",
+      "status_codes": [400, 403, 404, 500],
+      "mitre_tactic": "Initial Access",
+      "mitre_tactic_id": "TA0001",
+      "mitre_technique_id": "T1190",
+      "mitre_technique_name": "Cross-Site Scripting (XSS)",
+      "threat_score": 65
+    },
+    {
+      "id": "t1190-prototype-pollution",
+      "category": "web",
+      "regex": "(?i)(__proto__|constructor\\.prototype|Object\\.prototype)",
+      "status_codes": [400, 403, 404, 500],
+      "mitre_tactic": "Initial Access",
+      "mitre_tactic_id": "TA0001",
+      "mitre_technique_id": "T1190",
+      "mitre_technique_name": "Prototype Pollution",
+      "threat_score": 70
+    },
+    {
+      "id": "t1190-ssrf-internal-probe",
+      "category": "web",
+      "regex": "(?i)(127\\.0\\.0\\.1:8080|localhost:2375|169\\.254\\.169\\.254|http://0\\.0\\.0\\.0|http://127\\.0\\.0\\.1)",
+      "status_codes": [400, 403, 404, 500],
+      "mitre_tactic": "Initial Access",
+      "mitre_tactic_id": "TA0001",
+      "mitre_technique_id": "T1190",
+      "mitre_technique_name": "Server-Side Request Forgery",
+      "threat_score": 80
+    },
+    {
+      "id": "t1059-004-unix-shell-execution",
+      "category": "execution",
       "regex": "(?i)(/bin/(sh|bash|zsh|dash)|curl\\s+https?://.*\\|\\s*(sh|bash)|wget\\s+https?://.*\\|\\s*(sh|bash)|;\\s*(cat|id|whoami|sh|bash|python|perl|php)\\s+|\\|\\s*(cat|id|whoami)\\s*|`whoami`|\\$\\(whoami\\))",
       "status_codes": [400, 403, 404, 500],
       "mitre_tactic": "Execution",
       "mitre_tactic_id": "TA0002",
       "mitre_technique_id": "T1059.004",
-      "mitre_technique_name": "Command Execution",
+      "mitre_technique_name": "Unix Shell Execution",
       "threat_score": 90
     },
     {
+      "id": "t1059-006-python-perl-oneliners",
+      "category": "execution",
+      "regex": "(?i)(python[23]?\\s+-c\\s+['\"].*import\\s+(os|socket|subprocess)|perl\\s+-e\\s+['\"].*socket|ruby\\s+-e\\s+['\"].*TCPSocket)",
+      "status_codes": [400, 403, 404, 500],
+      "mitre_tactic": "Execution",
+      "mitre_tactic_id": "TA0002",
+      "mitre_technique_id": "T1059.006",
+      "mitre_technique_name": "Scripting Interpreter One-Liners",
+      "threat_score": 85
+    },
+    {
       "id": "t1203-client-exploitation-ssti",
-      "category": "web",
+      "category": "execution",
       "regex": "(?i)(\\{\\{\\s*(7\\*7|config|self|request|class|mro).*\\}\\}|\\$\\{\\s*(7\\*7|application).*\\})",
       "status_codes": [400, 403, 404, 500],
       "mitre_tactic": "Execution",
       "mitre_tactic_id": "TA0002",
       "mitre_technique_id": "T1203",
-      "mitre_technique_name": "Client Exploitation (SSTI)",
+      "mitre_technique_name": "Server-Side Template Injection",
       "threat_score": 75
     },
     {
       "id": "t1078-valid-accounts-ssh-root",
-      "category": "ssh",
+      "category": "persistence",
       "regex": "(?i)(Accepted (password|publickey) for root from)",
       "mitre_tactic": "Persistence",
       "mitre_tactic_id": "TA0003",
@@ -55,48 +198,58 @@
       "threat_score": 50
     },
     {
-      "id": "t1053-cron-persistence",
-      "category": "system",
+      "id": "t1053-003-cron-tampering",
+      "category": "persistence",
       "regex": "(?i)(crontab\\s+-e|/etc/cron\\.(d|daily|hourly|monthly|weekly)/[a-zA-Z0-9_-]+|/var/spool/cron/crontabs/[a-zA-Z0-9_-]+)",
       "mitre_tactic": "Persistence",
       "mitre_tactic_id": "TA0003",
       "mitre_technique_id": "T1053.003",
-      "mitre_technique_name": "Cron Persistence",
+      "mitre_technique_name": "Cron Job Persistence",
       "threat_score": 70
     },
     {
-      "id": "t1548-abuse-elevation-sudoers",
+      "id": "t1548-001-setuid-sudoers-abuse",
       "category": "privilege-escalation",
       "regex": "(?i)(chmod\\s+(\\+s|[0-7]?[421]7[0-7]{2})\\s+|/etc/sudoers\\s+|visudo\\s+|setfacl\\s+-m\\s+)",
       "mitre_tactic": "Privilege Escalation",
       "mitre_tactic_id": "TA0004",
       "mitre_technique_id": "T1548.001",
-      "mitre_technique_name": "Setuid/Sudoers Abuse",
+      "mitre_technique_name": "Setuid / Sudoers Abuse",
       "threat_score": 85
     },
     {
-      "id": "t1027-obfuscated-encoded-payload",
+      "id": "t1543-002-systemd-service-creation",
+      "category": "persistence",
+      "regex": "(?i)(/etc/systemd/system/[a-zA-Z0-9_-]+\\.service|systemctl\\s+enable\\s+[a-zA-Z0-9_-]+\\.service)",
+      "mitre_tactic": "Persistence",
+      "mitre_tactic_id": "TA0003",
+      "mitre_technique_id": "T1543.002",
+      "mitre_technique_name": "Systemd Service Creation",
+      "threat_score": 75
+    },
+    {
+      "id": "t1027-obfuscated-payload",
       "category": "defense-evasion",
       "regex": "(?i)(%25[0-9a-f]{2}|\\\\x[0-9a-f]{2}|\\\\u00[0-9a-f]{2}|base64_decode\\s*\\(|eval\\s*\\(|String\\.fromCharCode|gzinflate\\s*\\()",
       "status_codes": [400, 403, 404, 500],
       "mitre_tactic": "Defense Evasion",
       "mitre_tactic_id": "TA0005",
       "mitre_technique_id": "T1027",
-      "mitre_technique_name": "Obfuscated Payload",
+      "mitre_technique_name": "Obfuscated / Encoded Payload",
       "threat_score": 65
     },
     {
-      "id": "t1070-clear-command-history",
+      "id": "t1070-003-clear-command-history",
       "category": "defense-evasion",
       "regex": "(?i)(history\\s+-c|unset\\s+HISTFILE|export\\s+HISTSIZE=0|rm\\s+.*\\.(bash|zsh)_history|rm\\s+-rf\\s+/var/log/)",
       "mitre_tactic": "Defense Evasion",
       "mitre_tactic_id": "TA0005",
       "mitre_technique_id": "T1070.003",
-      "mitre_technique_name": "Clear History/Logs",
+      "mitre_technique_name": "Clear History / Logs",
       "threat_score": 90
     },
     {
-      "id": "t1562-impair-defenses-disable-tools",
+      "id": "t1562-001-impair-defenses-tools",
       "category": "defense-evasion",
       "regex": "(?i)(systemctl\\s+(stop|disable)\\s+(ufw|iptables|firewalld|copsec|auditd)|iptables\\s+-F|nft\\s+flush\\s+ruleset|killall\\s+(syslogd|auditd|copsec))",
       "mitre_tactic": "Defense Evasion",
@@ -106,66 +259,76 @@
       "threat_score": 95
     },
     {
-      "id": "t1110-password-brute-forcing",
+      "id": "t1222-002-linux-chmod-777",
+      "category": "defense-evasion",
+      "regex": "(?i)(chmod\\s+(-R\\s+)?(777|666|a\\+rwx)\\s+/|chown\\s+-R\\s+root:root\\s+/tmp)",
+      "mitre_tactic": "Defense Evasion",
+      "mitre_tactic_id": "TA0005",
+      "mitre_technique_id": "T1222.002",
+      "mitre_technique_name": "Linux File Permission Tampering",
+      "threat_score": 70
+    },
+    {
+      "id": "t1110-001-password-brute-force",
       "category": "credential-access",
       "regex": "(?i)(Failed password for (invalid user )?[a-zA-Z0-9_.-]+ from \\d+\\.\\d+\\.\\d+\\.\\d+|Invalid user [a-zA-Z0-9_.-]+ from \\d+\\.\\d+\\.\\d+\\.\\d+|pam_unix\\(sshd:auth\\): authentication failure)",
       "mitre_tactic": "Credential Access",
       "mitre_tactic_id": "TA0006",
       "mitre_technique_id": "T1110.001",
-      "mitre_technique_name": "Password Brute Force",
+      "mitre_technique_name": "Password Brute Force (SSH)",
       "threat_score": 60
     },
     {
-      "id": "t1003-os-credential-dumping",
+      "id": "t1110-003-password-spraying",
+      "category": "credential-access",
+      "regex": "(?i)(/wp-login\\.php.*401|/xmlrpc\\.php.*401|/admin/login.*401|/owa/auth.*401)",
+      "status_codes": [400, 401, 403, 404, 500],
+      "mitre_tactic": "Credential Access",
+      "mitre_tactic_id": "TA0006",
+      "mitre_technique_id": "T1110.003",
+      "mitre_technique_name": "Password Spraying (Web)",
+      "threat_score": 60
+    },
+    {
+      "id": "t1003-008-os-credential-dumping",
       "category": "credential-access",
       "regex": "(?i)(cat\\s+/etc/shadow|/etc/security/opasswd|/var/lib/sss/db|gcore\\s+|mimikatz|secretsdump)",
       "mitre_tactic": "Credential Access",
       "mitre_tactic_id": "TA0006",
       "mitre_technique_id": "T1003.008",
-      "mitre_technique_name": "OS Credential Dumping",
+      "mitre_technique_name": "OS Credential Dumping (/etc/shadow)",
       "threat_score": 90
     },
     {
-      "id": "t1552-unsecured-credentials-config",
+      "id": "t1552-001-unsecured-credentials-files",
       "category": "credential-access",
       "regex": "(?i)(/\\.env|/wp-config\\.php|/\\.git/config|/id_rsa|/id_ed25519|/\\.aws/credentials|/database\\.yml|/settings\\.py)",
       "status_codes": [400, 403, 404, 500],
       "mitre_tactic": "Credential Access",
       "mitre_tactic_id": "TA0006",
       "mitre_technique_id": "T1552.001",
-      "mitre_technique_name": "Unsecured Credentials",
+      "mitre_technique_name": "Credentials in Files / Keys",
       "threat_score": 70
     },
     {
-      "id": "t1595-vulnerability-scanning",
-      "category": "discovery",
-      "regex": "(?i)(sqlmap/|nikto/|nuclei|acunetix|gobuster/|dirsearch|dirbuster|wpscan|masscan/|zgrab|openvas|arachni)",
-      "status_codes": [400, 403, 404, 500],
-      "mitre_tactic": "Reconnaissance",
-      "mitre_tactic_id": "TA0043",
-      "mitre_technique_id": "T1595.002",
-      "mitre_technique_name": "Active Vulnerability Scan",
-      "threat_score": 55
-    },
-    {
-      "id": "t1082-system-information-discovery",
+      "id": "t1082-system-info-discovery",
       "category": "discovery",
       "regex": "(?i)(uname\\s+-a|cat\\s+/proc/version|lscpu|lsb_release\\s+-a|cat\\s+/etc/os-release|hostnamectl)",
       "mitre_tactic": "Discovery",
       "mitre_tactic_id": "TA0007",
       "mitre_technique_id": "T1082",
-      "mitre_technique_name": "System Info Discovery",
+      "mitre_technique_name": "System Information Discovery",
       "threat_score": 50
     },
     {
-      "id": "t1087-account-discovery-local",
+      "id": "t1087-001-account-discovery-local",
       "category": "discovery",
       "regex": "(?i)(/etc/passwd\\b|getent\\s+passwd|cat\\s+/etc/group|compgen\\s+-u)",
       "status_codes": [400, 403, 404, 500],
       "mitre_tactic": "Discovery",
       "mitre_tactic_id": "TA0007",
       "mitre_technique_id": "T1087.001",
-      "mitre_technique_name": "Account Discovery",
+      "mitre_technique_name": "Local Account Discovery",
       "threat_score": 60
     },
     {
@@ -179,14 +342,24 @@
       "threat_score": 50
     },
     {
-      "id": "t1071-c2-malicious-user-agents",
+      "id": "t1071-001-reverse-shell-c2",
+      "category": "command-and-control",
+      "regex": "(?i)(bash\\s+-i\\s+>&\\s+/dev/tcp/|nc\\s+(-e|/bin/sh|/bin/bash)|socat\\s+exec:.*tcp:|mknod\\s+.*p)",
+      "mitre_tactic": "Command and Control",
+      "mitre_tactic_id": "TA0011",
+      "mitre_technique_id": "T1071.001",
+      "mitre_technique_name": "Reverse Shell C2 Channel",
+      "threat_score": 95
+    },
+    {
+      "id": "t1071-001-c2-malicious-user-agents",
       "category": "command-and-control",
       "regex": "(?i)(CobaltStrike|Metasploit|Empire/|Havoc|Sliver|PoshC2|Covenant|Mythic|BruteRatel)",
       "status_codes": [400, 403, 404, 500],
       "mitre_tactic": "Command and Control",
       "mitre_tactic_id": "TA0011",
       "mitre_technique_id": "T1071.001",
-      "mitre_technique_name": "C2 Web Protocols",
+      "mitre_technique_name": "C2 Framework User-Agents",
       "threat_score": 90
     },
     {
@@ -197,7 +370,7 @@
       "mitre_tactic": "Exfiltration",
       "mitre_tactic_id": "TA0010",
       "mitre_technique_id": "T1041",
-      "mitre_technique_name": "Exfiltration Over C2",
+      "mitre_technique_name": "Exfiltration Over C2 Channel",
       "threat_score": 85
     },
     {
@@ -208,7 +381,7 @@
       "mitre_tactic": "Exfiltration",
       "mitre_tactic_id": "TA0010",
       "mitre_technique_id": "T1567",
-      "mitre_technique_name": "Cloud Metadata Exfil",
+      "mitre_technique_name": "Cloud Metadata Exfiltration",
       "threat_score": 80
     }
   ]

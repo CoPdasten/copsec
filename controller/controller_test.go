@@ -42,9 +42,33 @@ func TestRuleEngineAnalysis(t *testing.T) {
 		t.Errorf("Expected tailscaled log to be flagged as noisy")
 	}
 
+	// 5. Shannon Entropy Calculation
+	highEntropy := `/?data=V2hhdCBpZiB5b3UgY2FuIGRvIGV2ZXJ5dGhpbmcgdG8gcGFzcwordGhlIGZpbHRlcg==`
+	entropy := CalculateShannonEntropy(highEntropy)
+	if entropy < 4.0 {
+		t.Errorf("Expected entropy > 4.0 for base64 string, got: %f", entropy)
+	}
+
 	name, tactic := engine.GetTechniqueMeta("T1190")
 	if name == "" || tactic == "" {
 		t.Errorf("Expected technique meta for T1190, got: name=%s, tactic=%s", name, tactic)
+	}
+}
+
+func TestAIEngineLocalHeuristic(t *testing.T) {
+	ai := NewAIEngine()
+
+	evSQLi := &StoredEvent{
+		Source:           "nginx",
+		RawLine:          "GET /search?q=1%27%20UNION%20SELECT%20username,password%20FROM%20users-- HTTP/1.1",
+		ClientIP:         "198.51.100.99",
+		MitreTechniqueID: "T1190",
+		ThreatScore:      85,
+	}
+
+	intel := ai.AnalyzeIntent(context.Background(), evSQLi)
+	if intel.AttackerIntent == "" || intel.Mitigation == "" || intel.ConfidenceScore < 70 {
+		t.Errorf("Expected valid AI Threat Intel, got: %+v", intel)
 	}
 }
 

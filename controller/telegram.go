@@ -73,6 +73,11 @@ func (b *TelegramSOARBot) ProcessEvent(ev *StoredEvent) {
 		severityEmoji = "🚨"
 	}
 
+	aiSection := ""
+	if ev.AIAnalysis != "" {
+		aiSection = fmt.Sprintf("\n\n🧠 *AI Threat Intel:*\n%s", ev.AIAnalysis)
+	}
+
 	text := fmt.Sprintf("%s *CoPSeC Threat Incident*\n\n"+
 		"🖥 *Node:* `%s`\n"+
 		"🌐 *Source:* `%s`\n"+
@@ -81,11 +86,12 @@ func (b *TelegramSOARBot) ProcessEvent(ev *StoredEvent) {
 		"🏷 *MITRE:* `%s`\n"+
 		"⚡ *Threat Score:* `%d/100`\n"+
 		"⏱ *Time:* `%s`\n\n"+
-		"📜 *Payload:*\n`%s`",
+		"📜 *Payload:*\n`%s`%s",
 		severityEmoji,
 		ev.NodeID, ev.Source, ev.ClientIP, ev.RuleID, ev.MitreTechniqueID,
 		ev.ThreatScore, time.UnixMilli(ev.TimestampMs).Format("15:04:05"),
-		truncateString(ev.RawLine, 140))
+		truncateString(ev.RawLine, 140),
+		aiSection)
 
 	// Interactive Inline Buttons
 	buttons := [][]map[string]string{

@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"log"
+	"math"
 	"net/url"
 	"os"
 	"regexp"
@@ -40,7 +41,7 @@ type RulesConfigFile struct {
 	} `json:"rules"`
 }
 
-// RuleEngine inspects incoming log lines against compiled detection rules.
+// RuleEngine inspects incoming log lines against compiled detection rules & entropy anomaly scores.
 type RuleEngine struct {
 	mu          sync.RWMutex
 	rules       []RuleDefinition
@@ -152,7 +153,7 @@ func (e *RuleEngine) loadDefaults() {
 		{"t1087-account-discovery", "T1087.001", "Account Discovery", "Discovery", `(?i)(/etc/passwd\b|getent\s+passwd|cat\s+/etc/group)`, 60},
 		{"t1046-network-service-discovery", "T1046", "Network Service Discovery", "Discovery", `(?i)(nmap\s+-|masscan\s+-|netstat\s+-tulpn)`, 50},
 		{"t1071-c2-malicious-user-agents", "T1071.001", "C2 Web Protocols", "Command and Control", `(?i)(CobaltStrike|Metasploit|Empire/|Havoc|Sliver)`, 90},
-		{"t1041-exfiltration-c2-channel", "T1041", "Exfiltration Over C2", "Exfiltration", `(?i)(POST\s+/upload.*\.tar\.gz|POST\s+/api/exfil)`, 85},
+		{"t1041-exfiltration-c2-channel", "T1041", "Exfiltration Over C2", "Exfiltration", `(?i)(POST\s+/upload.*\\.tar\\.gz|POST\s+/api/exfil)`, 85},
 		{"t1567-cloud-metadata-exfiltration", "T1567", "Cloud Metadata Exfil", "Exfiltration", `(?i)(169\.254\.169\.254|metadata\.google\.internal)`, 80},
 	}
 
@@ -187,6 +188,25 @@ func (e *RuleEngine) GetTechniqueMeta(techID string) (name, tactic string) {
 		tactic = "Threat Intel"
 	}
 	return name, tactic
+}
+
+// CalculateShannonEntropy measures data randomness in strings.
+func CalculateShannonEntropy(input string) float64 {
+	if len(input) == 0 {
+		return 0.0
+	}
+	charCounts := make(map[rune]int)
+	for _, char := range input {
+		charCounts[char]++
+	}
+
+	total := float64(len(input))
+	entropy := 0.0
+	for _, count := range charCounts {
+		p := float64(count) / total
+		entropy -= p * math.Log2(p)
+	}
+	return entropy
 }
 
 var hexEscapeRegex = regexp.MustCompile(`\\x([0-9a-fA-F]{2})`)
@@ -245,7 +265,7 @@ func IsNoisyLog(rawLine string) bool {
 	return false
 }
 
-// Analyze inspects the raw log line and returns rule matching details.
+// Analyze inspects the raw log line and returns rule matching details + Shannon entropy anomalies.
 func (e *RuleEngine) Analyze(rawLine string, statusCode int, source string) (ruleID, techID string, score int, matched bool) {
 	if IsNoisyLog(rawLine) {
 		return "", "", 0, false
@@ -256,15 +276,14 @@ func (e *RuleEngine) Analyze(rawLine string, statusCode int, source string) (rul
 
 	normalized := NormalizePayload(rawLine)
 
+	// 1. Signature Inspection
 	for _, r := range e.rules {
-		// Category targeting
 		if source == "ssh" && r.Category != "ssh" && r.Category != "credential-access" && r.Category != "privilege-escalation" {
 			if r.Category == "web" || r.Category == "exfiltration" {
 				continue
 			}
 		}
 
-		// Check status code constraints if defined
 		if len(r.StatusCodes) > 0 && statusCode > 0 {
 			statusMatch := false
 			for _, code := range r.StatusCodes {
@@ -281,6 +300,12 @@ func (e *RuleEngine) Analyze(rawLine string, statusCode int, source string) (rul
 		if r.CompiledRegex.MatchString(normalized) || r.CompiledRegex.MatchString(rawLine) {
 			return r.ID, r.MitreTechniqueID, r.ThreatScore, true
 		}
+	}
+
+	// 2. Heuristic Shannon Entropy Anomaly Inspection
+	entropy := CalculateShannonEntropy(normalized)
+	if entropy > 4.6 && len(normalized) > 30 && (statusCode == 400 || statusCode == 403 || statusCode == 404 || statusCode == 500) {
+		return "heuristic-high-entropy-anomaly", "T1027", 65, true
 	}
 
 	return "", "", 0, false

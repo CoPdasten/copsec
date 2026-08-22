@@ -633,6 +633,11 @@ func (m *SIEMModel) renderDetailModalOverlay(baseView string) string {
 		techName, tactic = analyzer.GetTechniqueMeta(ev.MitreTechniqueID)
 	}
 
+	aiSection := ""
+	if ev.AIAnalysis != "" {
+		aiSection = fmt.Sprintf("\n🧠  AI Threat Intelligence:\n%s\n", lipgloss.NewStyle().Foreground(colorNeonGreen).Render(ev.AIAnalysis))
+	}
+
 	content := fmt.Sprintf("🔍 %s\n\n"+
 		"🖥  Node ID:         %s\n"+
 		"🌐  Source:          %s\n"+
@@ -641,7 +646,8 @@ func (m *SIEMModel) renderDetailModalOverlay(baseView string) string {
 		"🛡  MITRE Tactic:    %s\n"+
 		"⚡  Threat Score:    %d/100\n"+
 		"⏱  Timestamp:       %s\n\n"+
-		"📜  Raw Log Payload:\n%s\n\n"+
+		"📜  Raw Log Payload:\n%s\n"+
+		"%s\n"+
 		"%s",
 		lipgloss.NewStyle().Bold(true).Foreground(colorCyberCyan).Render("SECURITY INCIDENT FORENSIC INSPECTION"),
 		lipgloss.NewStyle().Foreground(colorTextLight).Render(ev.NodeID),
@@ -653,6 +659,7 @@ func (m *SIEMModel) renderDetailModalOverlay(baseView string) string {
 		ev.ThreatScore,
 		time.UnixMilli(ev.TimestampMs).Format("2006-01-02 15:04:05.000"),
 		lipgloss.NewStyle().Foreground(colorTextLight).Render(ev.RawLine),
+		aiSection,
 		lipgloss.NewStyle().Foreground(colorTextMuted).Render("[Esc / Enter] Close Inspection Modal"),
 	)
 
