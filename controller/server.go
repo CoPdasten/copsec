@@ -32,17 +32,22 @@ type NodeSession struct {
 	CommandChan     chan *copsecproto.SOARCommand
 }
 
-// CentralServer implements the gRPC CopsecStreamService with threat analysis, auto-auth & fleet dispatch.
+// CentralServer implements the gRPC CopsecStreamService with threat analysis, auto-auth & autonomous SOAR.
 type CentralServer struct {
 	copsecproto.UnimplementedCopsecStreamServiceServer
 
-	mu                   sync.RWMutex
-	storage              *StorageEngine
-	analyzer             *RuleEngine
-	telegramBot          *TelegramSOARBot
-	aiEngine             *AIEngine
-	nodes                map[string]*NodeSession
-	eventSubChan         chan *StoredEvent
+	mu           sync.RWMutex
+	storage      *StorageEngine
+	analyzer     *RuleEngine
+	telegramBot  *TelegramSOARBot
+	aiEngine     *AIEngine
+	nodes        map[string]*NodeSession
+	eventSubChan chan *StoredEvent
+
+	// Autonomous Auto-Ban Tracker
+	autoBanMu  sync.Mutex
+	ipHistory  map[string][]int64
+	autoBanned map[string]int64
 
 	totalEventsProcessed uint64
 	currentEPS           uint64
@@ -57,6 +62,8 @@ func NewCentralServer(storage *StorageEngine, analyzer *RuleEngine) *CentralServ
 		aiEngine:     NewAIEngine(),
 		nodes:        make(map[string]*NodeSession),
 		eventSubChan: make(chan *StoredEvent, 4096),
+		ipHistory:    make(map[string][]int64),
+		autoBanned:   make(map[string]int64),
 	}
 
 	// EPS Calculator ticker
@@ -72,28 +79,11 @@ func NewCentralServer(storage *StorageEngine, analyzer *RuleEngine) *CentralServ
 	return srv
 }
 
-// SetTelegramBot wires the SOAR alert bot.
+// SetTelegramBot configures the telegram alert bot.
 func (s *CentralServer) SetTelegramBot(bot *TelegramSOARBot) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.telegramBot = bot
-}
-
-// SetAIEngine overrides or updates the AI engine.
-func (s *CentralServer) SetAIEngine(ai *AIEngine) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.aiEngine = ai
-}
-
-// SubscribeEvents returns the channel receiving real-time events for TUI / Telegram.
-func (s *CentralServer) SubscribeEvents() <-chan *StoredEvent {
-	return s.eventSubChan
-}
-
-// GetEPS returns the live events per second throughput.
-func (s *CentralServer) GetEPS() uint64 {
-	return atomic.LoadUint64(&s.currentEPS)
 }
 
 // GetAnalyzer returns the rule engine instance.
@@ -103,28 +93,35 @@ func (s *CentralServer) GetAnalyzer() *RuleEngine {
 	return s.analyzer
 }
 
-// GetTotalEvents returns total processed events count.
-func (s *CentralServer) GetTotalEvents() uint64 {
-	return atomic.LoadUint64(&s.totalEventsProcessed)
+// SubscribeEvents returns a receive-only channel for live stream consumers.
+func (s *CentralServer) SubscribeEvents() <-chan *StoredEvent {
+	return s.eventSubChan
 }
 
-// authenticate extracts and validates x-node-id and x-api-key from incoming gRPC context metadata.
+// authenticate validates headers and maintains active edge node sessions.
 func (s *CentralServer) authenticate(ctx context.Context) (string, error) {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
-		return "", status.Errorf(codes.Unauthenticated, "metadata is missing")
+		return "", status.Errorf(codes.Unauthenticated, "metadata missing")
 	}
 
 	nodeIDs := md.Get("x-node-id")
 	apiKeys := md.Get("x-api-key")
-	if len(nodeIDs) == 0 || len(apiKeys) == 0 || nodeIDs[0] == "" || apiKeys[0] == "" {
-		return "", status.Errorf(codes.Unauthenticated, "x-node-id and x-api-key are required")
+
+	if len(nodeIDs) == 0 || len(apiKeys) == 0 {
+		return "", status.Errorf(codes.Unauthenticated, "missing node credentials")
 	}
 
 	nodeID := nodeIDs[0]
 	apiKey := apiKeys[0]
 
+	if !strings.HasPrefix(nodeID, "node-vps-") || len(apiKey) < 8 {
+		return "", status.Errorf(codes.Unauthenticated, "invalid credentials format")
+	}
+
 	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	session, exists := s.nodes[nodeID]
 	if !exists {
 		session = &NodeSession{
@@ -138,102 +135,179 @@ func (s *CentralServer) authenticate(ctx context.Context) (string, error) {
 	} else {
 		session.LastSeen = time.Now()
 	}
-	s.mu.Unlock()
 
 	return nodeID, nil
 }
 
-// StreamEvents handles the high-throughput log ingestion stream from edge nodes.
-func (s *CentralServer) StreamEvents(stream grpc.ClientStreamingServer[copsecproto.LogEvent, copsecproto.StreamAck]) error {
+// StreamEvents handles high-velocity event ingestion from edge collectors.
+func (s *CentralServer) StreamEvents(stream copsecproto.CopsecStreamService_StreamEventsServer) error {
 	nodeID, err := s.authenticate(stream.Context())
 	if err != nil {
 		return err
 	}
 
-	var batchCount uint64
+	var count uint64
 	for {
 		event, err := stream.Recv()
-		if errors.Is(err, io.EOF) {
+		if err == io.EOF {
 			return stream.SendAndClose(&copsecproto.StreamAck{
 				Success:        true,
-				ProcessedCount: batchCount,
-				Message:        "Batch processed successfully",
+				ProcessedCount: count,
+				Message:        "All events ingested successfully",
 			})
 		}
 		if err != nil {
 			return err
 		}
 
-		batchCount++
-		atomic.AddUint64(&s.totalEventsProcessed, 1)
-		atomic.AddUint64(&s.epsEventsThisSec, 1)
+		s.processEvent(nodeID, event)
+		count++
+	}
+}
 
-		ruleID := event.RuleId
-		mitreID := event.MitreTechniqueId
-		threatScore := int(event.ThreatScore)
+func (s *CentralServer) processEvent(nodeID string, event *copsecproto.LogEvent) {
+	atomic.AddUint64(&s.totalEventsProcessed, 1)
+	atomic.AddUint64(&s.epsEventsThisSec, 1)
 
-		// Run deep inspection via RuleEngine
-		if s.analyzer != nil {
-			matchedRule, matchedMitre, matchedScore, matched := s.analyzer.Analyze(event.RawLine, int(event.StatusCode), event.Source)
-			if matched {
-				if ruleID == "" {
-					ruleID = matchedRule
-				}
-				if mitreID == "" {
-					mitreID = matchedMitre
-				}
-				if threatScore < matchedScore {
-					threatScore = matchedScore
-				}
+	ruleID := event.RuleId
+	mitreID := event.MitreTechniqueId
+	threatScore := int(event.ThreatScore)
+
+	// Run deep inspection via RuleEngine
+	if s.analyzer != nil {
+		matchedRule, matchedMitre, matchedScore, matched := s.analyzer.Analyze(event.RawLine, int(event.StatusCode), event.Source)
+		if matched {
+			if ruleID == "" {
+				ruleID = matchedRule
+			}
+			if mitreID == "" {
+				mitreID = matchedMitre
+			}
+			if threatScore < matchedScore {
+				threatScore = matchedScore
 			}
 		}
+	}
 
-		stored := &StoredEvent{
-			NodeID:           nodeID,
-			Source:           event.Source,
-			RawLine:          event.RawLine,
-			ClientIP:         event.ClientIp,
-			StatusCode:       int(event.StatusCode),
-			TimestampMs:      event.TimestampMs,
-			RuleID:           ruleID,
-			MitreTechniqueID: mitreID,
-			ThreatScore:      threatScore,
+	stored := &StoredEvent{
+		NodeID:           nodeID,
+		Source:           event.Source,
+		RawLine:          event.RawLine,
+		ClientIP:         event.ClientIp,
+		StatusCode:       int(event.StatusCode),
+		TimestampMs:      event.TimestampMs,
+		RuleID:           ruleID,
+		MitreTechniqueID: mitreID,
+		ThreatScore:      threatScore,
+	}
+
+	if stored.TimestampMs == 0 {
+		stored.TimestampMs = time.Now().UnixMilli()
+	}
+
+	// Persist to embedded SQLite
+	_ = s.storage.InsertEvent(stored)
+
+	// Check Autonomous Auto-Ban Policy
+	s.checkAutonomousBanPolicy(stored)
+
+	// Trigger AI Threat Intelligence analysis for severe incidents
+	s.mu.RLock()
+	ai := s.aiEngine
+	bot := s.telegramBot
+	s.mu.RUnlock()
+
+	if ai != nil && (stored.ThreatScore >= 65 || strings.Contains(stored.RuleID, "anomaly") || strings.Contains(stored.RuleID, "rce") || strings.Contains(stored.RuleID, "sqli")) {
+		go func(ev *StoredEvent) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			intel := ai.AnalyzeIntent(ctx, ev)
+			summary := fmt.Sprintf("• Intent: %s\n• Root Cause: %s\n• Mitigation: %s", intel.AttackerIntent, intel.RootCause, intel.Mitigation)
+			ev.AIAnalysis = summary
+			_ = s.storage.UpdateEventAI(ev.ID, summary)
+
+			if bot != nil && ev.ThreatScore >= 50 {
+				bot.ProcessEvent(ev)
+			}
+		}(stored)
+	} else if bot != nil && stored.ThreatScore >= 50 {
+		go bot.ProcessEvent(stored)
+	}
+
+	// Broadcast to TUI subscriber non-blockingly
+	select {
+	case s.eventSubChan <- stored:
+	default:
+	}
+}
+
+// checkAutonomousBanPolicy evaluates static critical scores and correlation spike windows.
+func (s *CentralServer) checkAutonomousBanPolicy(event *StoredEvent) {
+	ip := strings.TrimSpace(event.ClientIP)
+	if ip == "" || ip == "127.0.0.1" || ip == "::1" || strings.HasPrefix(ip, "100.64.") || strings.HasPrefix(ip, "10.") || strings.HasPrefix(ip, "192.168.") {
+		return
+	}
+	if net.ParseIP(ip) == nil {
+		return
+	}
+
+	s.autoBanMu.Lock()
+	defer s.autoBanMu.Unlock()
+
+	now := time.Now().Unix()
+
+	// Check if already auto-banned within last 1 hour
+	if lastBan, exists := s.autoBanned[ip]; exists && now-lastBan < 3600 {
+		return
+	}
+
+	triggerAutoBan := false
+	banReason := ""
+
+	// Condition 1: Static Critical Threshold (ThreatScore >= 85)
+	if event.ThreatScore >= 85 {
+		triggerAutoBan = true
+		banReason = fmt.Sprintf("Static Critical Threshold (ThreatScore: %d >= 85)", event.ThreatScore)
+	}
+
+	// Condition 2: Correlational Spike / Brute-Force Threshold (>= 3 high-threat events in 60s)
+	if event.ThreatScore >= 50 {
+		history := s.ipHistory[ip]
+		var recent []int64
+		for _, ts := range history {
+			if now-ts <= 60 {
+				recent = append(recent, ts)
+			}
+		}
+		recent = append(recent, now)
+		s.ipHistory[ip] = recent
+
+		if len(recent) >= 3 && !triggerAutoBan {
+			triggerAutoBan = true
+			banReason = fmt.Sprintf("Correlational Spike Threshold (%d attacks in 60s)", len(recent))
+		}
+	}
+
+	if triggerAutoBan {
+		s.autoBanned[ip] = now
+		jailTag := fmt.Sprintf("⚡ AUTO-BAN (%s)", event.MitreTechniqueID)
+		if event.MitreTechniqueID == "" {
+			jailTag = "⚡ AUTO-BAN"
 		}
 
-		if stored.TimestampMs == 0 {
-			stored.TimestampMs = time.Now().UnixMilli()
+		dispatched := s.BroadcastSOARCommand("BAN_IP", ip, 3600)
+		if s.storage != nil {
+			_ = s.storage.RecordBan(ip, jailTag, 3600)
 		}
 
-		// Persist to embedded SQLite
-		_ = s.storage.InsertEvent(stored)
+		log.Printf("[SOAR_AUTOBAN] Autonomous Ban executed for IP %s (Reason: %s, Dispatched: %d nodes)", ip, banReason, dispatched)
 
-		// Trigger AI Threat Intelligence analysis for severe incidents
+		// Dispatch high-priority autonomous Telegram alert
 		s.mu.RLock()
-		ai := s.aiEngine
 		bot := s.telegramBot
 		s.mu.RUnlock()
-
-		if ai != nil && (stored.ThreatScore >= 65 || strings.Contains(stored.RuleID, "anomaly") || strings.Contains(stored.RuleID, "rce") || strings.Contains(stored.RuleID, "sqli")) {
-			go func(event *StoredEvent) {
-				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				defer cancel()
-				intel := ai.AnalyzeIntent(ctx, event)
-				summary := fmt.Sprintf("• Intent: %s\n• Root Cause: %s\n• Mitigation: %s", intel.AttackerIntent, intel.RootCause, intel.Mitigation)
-				event.AIAnalysis = summary
-				_ = s.storage.UpdateEventAI(event.ID, summary)
-
-				if bot != nil && event.ThreatScore >= 50 {
-					bot.ProcessEvent(event)
-				}
-			}(stored)
-		} else if bot != nil && stored.ThreatScore >= 50 {
-			go bot.ProcessEvent(stored)
-		}
-
-		// Broadcast to TUI subscriber non-blockingly
-		select {
-		case s.eventSubChan <- stored:
-		default:
+		if bot != nil {
+			go bot.SendAutoBanAlert(event, banReason, dispatched)
 		}
 	}
 }
@@ -256,13 +330,12 @@ func (s *CentralServer) SendHeartbeat(ctx context.Context, hb *copsecproto.Heart
 	s.mu.Unlock()
 
 	return &copsecproto.HeartbeatResponse{
-		Acknowledged:        true,
-		SyncIntervalSeconds: 3,
+		Acknowledged: true,
 	}, nil
 }
 
-// SyncCommands maintains a long-lived bidirectional stream for real-time SOAR directives.
-func (s *CentralServer) SyncCommands(stream grpc.BidiStreamingServer[copsecproto.CommandAck, copsecproto.SOARCommand]) error {
+// SyncCommands handles bidirectional SOAR dispatch.
+func (s *CentralServer) SyncCommands(stream copsecproto.CopsecStreamService_SyncCommandsServer) error {
 	nodeID, err := s.authenticate(stream.Context())
 	if err != nil {
 		return err
@@ -348,20 +421,30 @@ func (s *CentralServer) GetNodesSnapshot() []NodeSession {
 	return list
 }
 
-// StartGRPCServer binds and serves gRPC requests on targetAddr.
-func StartGRPCServer(addr string, srv *CentralServer) (*grpc.Server, error) {
+// GetEPS returns the calculated events per second.
+func (s *CentralServer) GetEPS() uint64 {
+	return atomic.LoadUint64(&s.currentEPS)
+}
+
+// GetTotalEvents returns the total lifetime ingested count.
+func (s *CentralServer) GetTotalEvents() uint64 {
+	return atomic.LoadUint64(&s.totalEventsProcessed)
+}
+
+// StartGRPCServer initializes the gRPC listener with CopsecStreamServiceServer registration.
+func StartGRPCServer(addr string, server *CentralServer) (*grpc.Server, error) {
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to listen on %s: %w", addr, err)
 	}
 
 	grpcServer := grpc.NewServer()
-	copsecproto.RegisterCopsecStreamServiceServer(grpcServer, srv)
+	copsecproto.RegisterCopsecStreamServiceServer(grpcServer, server)
 
 	go func() {
-		log.Printf("[INFO] Central gRPC Server listening on %s", addr)
+		log.Printf("[INFO] Controller gRPC Server listening on %s", addr)
 		if err := grpcServer.Serve(lis); err != nil && !errors.Is(err, grpc.ErrServerStopped) {
-			log.Printf("[ERROR] gRPC server failed: %v", err)
+			log.Printf("[ERROR] gRPC server error: %v", err)
 		}
 	}()
 

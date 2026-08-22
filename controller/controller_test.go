@@ -174,3 +174,61 @@ func TestCentralServerAuthAndHeartbeat(t *testing.T) {
 		t.Errorf("Expected 1 dispatched command, got %d", dispatched)
 	}
 }
+
+func TestAutonomousAutoBanPolicy(t *testing.T) {
+	tmpDir := t.TempDir()
+	store, _ := NewStorageEngine(filepath.Join(tmpDir, "test.db"))
+	defer store.Close()
+
+	analyzer := NewRuleEngine("")
+	server := NewCentralServer(store, analyzer)
+
+	// 1. Test Static Critical Threshold (ThreatScore >= 85)
+	critEvent := &StoredEvent{
+		NodeID:           "node-vps-test",
+		ClientIP:         "198.51.100.88",
+		ThreatScore:      90,
+		MitreTechniqueID: "T1190",
+		RuleID:           "sqli_union_injection",
+		RawLine:          "GET /search?q=1' UNION SELECT 1,2--",
+	}
+
+	server.checkAutonomousBanPolicy(critEvent)
+
+	bans, err := store.GetActiveBans()
+	if err != nil || len(bans) != 1 || bans[0].IP != "198.51.100.88" {
+		t.Fatalf("Expected auto-ban for 198.51.100.88, got %+v", bans)
+	}
+
+	// 2. Test Correlational Spike Threshold (3x >= 50 within 60s)
+	spikeIP := "198.51.100.99"
+	spikeEvent := &StoredEvent{
+		NodeID:           "node-vps-test",
+		ClientIP:         spikeIP,
+		ThreatScore:      55,
+		MitreTechniqueID: "T1110.001",
+		RuleID:           "ssh_failed_password",
+		RawLine:          "Failed password for invalid user root",
+	}
+
+	// Event 1
+	server.checkAutonomousBanPolicy(spikeEvent)
+	bans, _ = store.GetActiveBans()
+	if len(bans) != 1 { // Still only 1 ban from previous test
+		t.Fatalf("Expected no auto-ban after 1 event, got %d bans", len(bans))
+	}
+
+	// Event 2
+	server.checkAutonomousBanPolicy(spikeEvent)
+	bans, _ = store.GetActiveBans()
+	if len(bans) != 1 {
+		t.Fatalf("Expected no auto-ban after 2 events, got %d bans", len(bans))
+	}
+
+	// Event 3 (Should trigger auto-ban)
+	server.checkAutonomousBanPolicy(spikeEvent)
+	bans, _ = store.GetActiveBans()
+	if len(bans) != 2 {
+		t.Fatalf("Expected 2 auto-bans after 3rd correlated event, got %d bans", len(bans))
+	}
+}

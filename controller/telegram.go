@@ -116,6 +116,48 @@ func (b *TelegramSOARBot) ProcessEvent(ev *StoredEvent) {
 	go b.sendTelegramRequest("sendMessage", payload)
 }
 
+// SendAutoBanAlert dispatches an immediate high-priority alert for autonomous fleet bans.
+func (b *TelegramSOARBot) SendAutoBanAlert(ev *StoredEvent, banReason string, dispatchedNodes int) {
+	if !b.cfg.Enabled || ev == nil {
+		return
+	}
+
+	text := fmt.Sprintf("⚡ *[SOAR AUTONOMOUS MITIGATION EXECUTED]*\n\n"+
+		"🛡 *Action:* `AUTOMATIC FLEET BAN (3600s TTL)`\n"+
+		"🎯 *Offending IP:* `%s`\n"+
+		"🖥 *Triggered On Node:* `%s`\n"+
+		"🚨 *Threat Score:* `%d/100 (CRITICAL)`\n"+
+		"🏷 *MITRE Technique:* `%s`\n"+
+		"📋 *Reason:* `%s`\n"+
+		"🌐 *Fleet Enforcement:* `%d Edge Node(s) Applied iptables DROP`\n\n"+
+		"📜 *Offending Payload:*\n`%s`",
+		ev.ClientIP,
+		ev.NodeID,
+		ev.ThreatScore,
+		ev.MitreTechniqueID,
+		banReason,
+		dispatchedNodes,
+		truncateString(ev.RawLine, 140))
+
+	buttons := [][]map[string]string{
+		{
+			{"text": "🔓 UNBAN IP", "callback_data": fmt.Sprintf("unban:%s", ev.ClientIP)},
+			{"text": "🛡 WHITELIST IP", "callback_data": fmt.Sprintf("whitelist:%s", ev.ClientIP)},
+		},
+	}
+
+	payload := map[string]interface{}{
+		"chat_id":    b.cfg.ChatID,
+		"text":       text,
+		"parse_mode": "Markdown",
+		"reply_markup": map[string]interface{}{
+			"inline_keyboard": buttons,
+		},
+	}
+
+	go b.sendTelegramRequest("sendMessage", payload)
+}
+
 func (b *TelegramSOARBot) sendTelegramRequest(method string, payload interface{}) ([]byte, error) {
 	data, err := json.Marshal(payload)
 	if err != nil {
