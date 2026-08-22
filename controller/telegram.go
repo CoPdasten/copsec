@@ -41,7 +41,7 @@ func NewTelegramSOARBot(cfg TelegramBotConfig, server *CentralServer) *TelegramS
 	return &TelegramSOARBot{
 		cfg:        cfg,
 		server:     server,
-		httpClient: &http.Client{Timeout: 10 * time.Second},
+		httpClient: &http.Client{Timeout: 5 * time.Second},
 	}
 }
 
@@ -61,23 +61,31 @@ func (b *TelegramSOARBot) ProcessEvent(ev *StoredEvent) {
 		return
 	}
 
-	// Alert condition: ThreatScore >= 40 or critical MITRE tag
-	if ev.ThreatScore < 40 && !strings.Contains(ev.RuleID, "rce") && !strings.Contains(ev.RuleID, "sqli") {
+	// Alert condition: ThreatScore >= 50
+	if ev.ThreatScore < 50 {
 		return
 	}
 
-	text := fmt.Sprintf("🚨 *CoPSeC Threat Alert*\n\n"+
+	severityEmoji := "⚠️"
+	if ev.ThreatScore >= 80 {
+		severityEmoji = "🔥"
+	} else if ev.ThreatScore >= 65 {
+		severityEmoji = "🚨"
+	}
+
+	text := fmt.Sprintf("%s *CoPSeC Threat Incident*\n\n"+
 		"🖥 *Node:* `%s`\n"+
 		"🌐 *Source:* `%s`\n"+
 		"🎯 *Target/IP:* `%s`\n"+
 		"🛡 *Rule:* `%s`\n"+
 		"🏷 *MITRE:* `%s`\n"+
-		"⚡ *Threat Score:* `%d`\n"+
+		"⚡ *Threat Score:* `%d/100`\n"+
 		"⏱ *Time:* `%s`\n\n"+
 		"📜 *Payload:*\n`%s`",
+		severityEmoji,
 		ev.NodeID, ev.Source, ev.ClientIP, ev.RuleID, ev.MitreTechniqueID,
 		ev.ThreatScore, time.UnixMilli(ev.TimestampMs).Format("15:04:05"),
-		truncateString(ev.RawLine, 120))
+		truncateString(ev.RawLine, 140))
 
 	// Interactive Inline Buttons
 	buttons := [][]map[string]string{
@@ -122,7 +130,7 @@ func (b *TelegramSOARBot) sendTelegramRequest(method string, payload interface{}
 func (b *TelegramSOARBot) pollCallbacks(ctx context.Context, wg *sync.WaitGroup) {
 	defer wg.Done()
 
-	ticker := time.NewTicker(3 * time.Second)
+	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 
 	for {

@@ -155,9 +155,9 @@ func (s *CentralServer) StreamEvents(stream grpc.ClientStreamingServer[copsecpro
 		mitreID := event.MitreTechniqueId
 		threatScore := int(event.ThreatScore)
 
-		// Run deep inspection via RuleEngine if not already classified by agent
+		// Run deep inspection via RuleEngine
 		if s.analyzer != nil {
-			matchedRule, matchedMitre, matchedScore, matched := s.analyzer.Analyze(event.RawLine, int(event.StatusCode))
+			matchedRule, matchedMitre, matchedScore, matched := s.analyzer.Analyze(event.RawLine, int(event.StatusCode), event.Source)
 			if matched {
 				if ruleID == "" {
 					ruleID = matchedRule
@@ -190,12 +190,12 @@ func (s *CentralServer) StreamEvents(stream grpc.ClientStreamingServer[copsecpro
 		// Persist to embedded SQLite
 		_ = s.storage.InsertEvent(stored)
 
-		// Trigger instant Telegram SOAR alert if ThreatScore >= 70
+		// Trigger instant Telegram SOAR alert if ThreatScore >= 50
 		s.mu.RLock()
 		bot := s.telegramBot
 		s.mu.RUnlock()
-		if bot != nil && stored.ThreatScore >= 70 {
-			bot.ProcessEvent(stored)
+		if bot != nil && stored.ThreatScore >= 50 {
+			go bot.ProcessEvent(stored)
 		}
 
 		// Broadcast to TUI subscriber non-blockingly
@@ -225,7 +225,7 @@ func (s *CentralServer) SendHeartbeat(ctx context.Context, hb *copsecproto.Heart
 
 	return &copsecproto.HeartbeatResponse{
 		Acknowledged:        true,
-		SyncIntervalSeconds: 15,
+		SyncIntervalSeconds: 3,
 	}, nil
 }
 

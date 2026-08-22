@@ -1,514 +1,215 @@
 {
-  "suricata": {
-    "eve_file": "/var/log/suricata/eve.json",
-    "fast_file": "/var/log/suricata/fast.log",
-    "enabled": true,
-    "missing_logs_are_nonfatal": true
-  },
-  "anomaly_mitre": {
-    "OBFUSCATED_PAYLOAD": {
-      "tactic": "Defense Evasion",
-      "technique_id": "T1027",
-      "technique_name": "Obfuscated Files or Information"
-    },
-    "RECON_SCANNER": {
-      "tactic": "Reconnaissance",
-      "technique_id": "T1595.002",
-      "technique_name": "Vulnerability Scanning"
-    },
-    "DECOY_TRAP": {
-      "tactic": "Reconnaissance",
-      "technique_id": "T1595",
-      "technique_name": "Active Scanning"
-    },
-    "DECOY_TRAP_TRIGGERED": {
-      "tactic": "Reconnaissance",
-      "technique_id": "T1595",
-      "technique_name": "Active Scanning"
-    },
-    "SURICATA_ALERT": {
-      "tactic": "Initial Access",
-      "technique_id": "T1190",
-      "technique_name": "Exploit Public-Facing Application"
-    }
-  },
-  "monitored_paths": [
-    "/var/log/",
-    "/var/log/nginx/",
-    "/var/log/apache2/",
-    "/var/log/suricata/"
-  ],
   "rules": [
     {
-      "id": "nginx-web-scan",
-      "name": "Nginx Web Vulnerability Scan",
+      "id": "t1190-exploit-sqli",
       "category": "web",
-      "log_file": "/var/log/apache2/access.log",
-      "log_files": [
-        "/var/log/nginx/access.log",
-        "/var/log/apache2/access.log"
-      ],
-      "regex": "(?i)(/admin|\\.env|wp-login\\.php|config\\.php|\\.git|\\.htaccess|phpmyadmin)",
+      "regex": "(?i)(union\\s+select|select.*from|concat\\(|'--|%27%20or%20|or\\s+1=1|waitfor\\s+delay|sleep\\(|extractvalue\\(|updatexml\\()",
       "status_codes": [400, 403, 404, 500],
-      "action": "ban",
-      "ban_duration": 7200,
-      "max_attempts": 3,
-      "find_time": 60,
-      "mitre_tactic": "Reconnaissance",
-      "mitre_tactic_id": "TA0043",
-      "mitre_technique_id": "T1595.002",
-      "mitre_technique_name": "Vulnerability Scanning",
-      "mitre": {
-        "tactic": "Reconnaissance",
-        "tactic_id": "TA0043",
-        "technique_id": "T1595.002",
-        "technique_name": "Vulnerability Scanning",
-        "url": "https://attack.mitre.org/techniques/T1595/002/"
-      }
-    },
-    {
-      "id": "obfuscated-payload",
-      "name": "Obfuscated Web Payload Attempt",
-      "category": "web",
-      "log_file": "/var/log/apache2/access.log",
-      "log_files": [
-        "/var/log/nginx/access.log",
-        "/var/log/apache2/access.log"
-      ],
-      "regex": "(?i)(%25[0-9a-f]{2}|\\x[0-9a-f]{2}|\\\\u00[0-9a-f]{2}|base64_decode|eval\\s*\\()",
-      "status_codes": [400, 403, 404, 500],
-      "action": "ban",
-      "ban_duration": 86400,
-      "max_attempts": 1,
-      "find_time": 60,
-      "mitre_tactic": "Defense Evasion",
-      "mitre_tactic_id": "TA0005",
-      "mitre_technique_id": "T1027",
-      "mitre_technique_name": "Obfuscated Files or Information",
-      "mitre": {
-        "tactic": "Defense Evasion",
-        "tactic_id": "TA0005",
-        "technique_id": "T1027",
-        "technique_name": "Obfuscated Files or Information",
-        "url": "https://attack.mitre.org/techniques/T1027/"
-      }
-    },
-    {
-      "id": "ssrf-metadata-attempt",
-      "name": "SSRF Cloud Instance Metadata Access",
-      "category": "web",
-      "log_file": "/var/log/apache2/access.log",
-      "log_files": [
-        "/var/log/nginx/access.log",
-        "/var/log/apache2/access.log"
-      ],
-      "regex": "(?i)(169\\.254\\.169\\.254|metadata\\.google|metadata\\.internal|latest/meta-data|latest/api/token)",
-      "status_codes": [400, 403, 404, 500],
-      "action": "ban",
-      "ban_duration": 86400,
-      "max_attempts": 1,
-      "find_time": 60,
-      "mitre_tactic": "Credential Access",
-      "mitre_tactic_id": "TA0006",
-      "mitre_technique_id": "T1552.005",
-      "mitre_technique_name": "Unsecured Credentials: Cloud Instance Metadata API",
-      "mitre": {
-        "tactic": "Credential Access",
-        "tactic_id": "TA0006",
-        "technique_id": "T1552.005",
-        "technique_name": "Unsecured Credentials: Cloud Instance Metadata API",
-        "url": "https://attack.mitre.org/techniques/T1552/005/"
-      }
-    },
-    {
-      "id": "ssh-password-spraying",
-      "name": "SSH Failed Authentication / Password Spraying",
-      "category": "ssh",
-      "log_file": "/var/log/auth.log",
-      "log_files": [
-        "/var/log/auth.log",
-        "/var/log/secure"
-      ],
-      "regex": "(?i)(Failed password for|Invalid user|authentication failure|maximum authentication attempts exceeded|too many authentication failures)",
-      "action": "ban",
-      "ban_duration": 3600,
-      "max_attempts": 3,
-      "find_time": 60,
-      "mitre_tactic": "Credential Access",
-      "mitre_tactic_id": "TA0006",
-      "mitre_technique_id": "T1110.001",
-      "mitre_technique_name": "Password Spraying",
-      "mitre": {
-        "tactic": "Credential Access",
-        "tactic_id": "TA0006",
-        "technique_id": "T1110.001",
-        "technique_name": "Password Spraying",
-        "url": "https://attack.mitre.org/techniques/T1110/001/"
-      }
-    },
-    {
-      "id": "sqli-attempt",
-      "name": "SQL Injection Attack",
-      "category": "web",
-      "log_file": "/var/log/apache2/access.log",
-      "log_files": [
-        "/var/log/nginx/access.log",
-        "/var/log/apache2/access.log"
-      ],
-      "regex": "(?i)(select%20|union%20select|concat\\(|'--|%27%20or%20|or%201=1|sleep\\(|benchmark\\(|;[[:space:]]*(select|insert|update|delete))",
-      "action": "ban",
-      "ban_duration": 86400,
-      "max_attempts": 1,
-      "find_time": 60,
       "mitre_tactic": "Initial Access",
       "mitre_tactic_id": "TA0001",
       "mitre_technique_id": "T1190",
       "mitre_technique_name": "Exploit Public-Facing Application",
-      "mitre": {
-        "tactic": "Initial Access",
-        "tactic_id": "TA0001",
-        "technique_id": "T1190",
-        "technique_name": "Exploit Public-Facing Application",
-        "url": "https://attack.mitre.org/techniques/T1190/"
-      }
+      "threat_score": 80
     },
     {
-      "id": "xss-reflected",
-      "name": "Cross-Site Scripting Reflected",
+      "id": "t1190-exploit-rce-log4j-spring",
       "category": "web",
-      "log_file": "/var/log/apache2/access.log",
-      "log_files": [
-        "/var/log/nginx/access.log",
-        "/var/log/apache2/access.log"
-      ],
-      "regex": "(?i)(<script|javascript:|onerror=|onload=|eval\\(|document\\.cookie|alert\\()",
-      "action": "ban",
-      "ban_duration": 86400,
-      "max_attempts": 1,
-      "find_time": 60,
+      "regex": "(?i)(\\$\\{jndi:(ldap|rmi|dns|corba|iiop|http):|class\\.module\\.classLoader|struts|ognl|ctx\\.environment)",
+      "status_codes": [400, 403, 404, 500],
       "mitre_tactic": "Initial Access",
       "mitre_tactic_id": "TA0001",
-      "mitre_technique_id": "T1189",
-      "mitre_technique_name": "Drive-by Compromise",
-      "mitre": {
-        "tactic": "Initial Access",
-        "tactic_id": "TA0001",
-        "technique_id": "T1189",
-        "technique_name": "Drive-by Compromise",
-        "url": "https://attack.mitre.org/techniques/T1189/"
-      }
+      "mitre_technique_id": "T1190",
+      "mitre_technique_name": "Exploit Public-Facing Application",
+      "threat_score": 95
     },
     {
-      "id": "path-traversal-lfi",
-      "name": "Path Traversal and Local File Inclusion",
-      "category": "lfi",
-      "log_file": "/var/log/apache2/access.log",
-      "log_files": [
-        "/var/log/nginx/access.log",
-        "/var/log/apache2/access.log"
-      ],
-      "regex": "(?i)(\\.\\./|%2e%2e%2f|/etc/passwd|/etc/shadow|/proc/self/(environ|cmdline)|/var/log/auth\\.log)",
-      "action": "ban",
-      "ban_duration": 86400,
-      "max_attempts": 1,
-      "find_time": 60,
-      "mitre_tactic": "Execution",
-      "mitre_tactic_id": "TA0002",
-      "mitre_technique_id": "T1059",
-      "mitre_technique_name": "Command and Scripting Interpreter",
-      "mitre": {
-        "tactic": "Execution",
-        "tactic_id": "TA0002",
-        "technique_id": "T1059",
-        "technique_name": "Command and Scripting Interpreter",
-        "url": "https://attack.mitre.org/techniques/T1059/"
-      }
-    },
-    {
-      "id": "rce-command-injection",
-      "name": "Remote Code Execution / Command Injection",
+      "id": "t1059-unix-shell-execution",
       "category": "rce",
-      "log_file": "/var/log/apache2/access.log",
-      "log_files": [
-        "/var/log/nginx/access.log",
-        "/var/log/apache2/access.log"
-      ],
-      "regex": "(?i)(;[[:space:]]*(cat|id|whoami|sh)|\\|[[:space:]]*id|\\$\\(whoami\\)|&&[[:space:]]*(netstat|ss)|/bin/(sh|bash)|nc[[:space:]].*-e|/dev/tcp/|python[0-9.]*[[:space:]]+-c[[:space:]]+.*socket)",
-      "action": "ban",
-      "ban_duration": 86400,
-      "max_attempts": 1,
-      "find_time": 60,
+      "regex": "(?i)(/bin/(sh|bash|zsh|dash)|curl\\s+.*\\|\\s*(sh|bash)|wget\\s+.*\\|\\s*(sh|bash)|;\\s*(cat|id|whoami|sh|bash|python|perl|php)|\\|\\s*(cat|id|whoami)|`whoami`|\\$\\(whoami\\))",
+      "status_codes": [400, 403, 404, 500],
       "mitre_tactic": "Execution",
       "mitre_tactic_id": "TA0002",
       "mitre_technique_id": "T1059.004",
-      "mitre_technique_name": "Unix Shell",
-      "mitre": {
-        "tactic": "Execution",
-        "tactic_id": "TA0002",
-        "technique_id": "T1059.004",
-        "technique_name": "Unix Shell",
-        "url": "https://attack.mitre.org/techniques/T1059/004/"
-      }
+      "mitre_technique_name": "Command and Scripting Interpreter: Unix Shell",
+      "threat_score": 90
     },
     {
-      "id": "etc-shadow-access",
-      "name": "Credential Access via /etc/shadow or /etc/passwd",
-      "category": "auth",
-      "log_file": "/var/log/auth.log",
-      "log_files": [
-        "/var/log/auth.log",
-        "/var/log/secure"
-      ],
-      "regex": "(?i)(/etc/(shadow|passwd)|cat[[:space:]]+.*(shadow|passwd)|openssl[[:space:]]+passwd)",
-      "action": "ban",
-      "ban_duration": 86400,
-      "max_attempts": 1,
-      "find_time": 60,
-      "mitre_tactic": "Credential Access",
-      "mitre_tactic_id": "TA0006",
-      "mitre_technique_id": "T1003.008",
-      "mitre_technique_name": "OS Credential Dumping: /etc/passwd and /etc/shadow",
-      "mitre": {
-        "tactic": "Credential Access",
-        "tactic_id": "TA0006",
-        "technique_id": "T1003.008",
-        "technique_name": "OS Credential Dumping: /etc/passwd and /etc/shadow",
-        "url": "https://attack.mitre.org/techniques/T1003/008/"
-      }
-    },
-    {
-      "id": "log-clearing-file-deletion",
-      "name": "Indicator Removal: File Deletion and Log Clearing",
-      "category": "auth",
-      "log_file": "/var/log/auth.log",
-      "log_files": [
-        "/var/log/auth.log",
-        "/var/log/secure"
-      ],
-      "regex": "(?i)(rm[[:space:]]+-rf[[:space:]]+/var/log|rm[[:space:]].*/var/log|truncate[[:space:]].*/var/log|shred[[:space:]].*/var/log|history[[:space:]]+-c|\\>/?var/log)",
-      "action": "ban",
-      "ban_duration": 86400,
-      "max_attempts": 1,
-      "find_time": 60,
-      "mitre_tactic": "Defense Evasion",
-      "mitre_tactic_id": "TA0005",
-      "mitre_technique_id": "T1070.004",
-      "mitre_technique_name": "File Deletion",
-      "mitre": {
-        "tactic": "Defense Evasion",
-        "tactic_id": "TA0005",
-        "technique_id": "T1070.004",
-        "technique_name": "File Deletion",
-        "url": "https://attack.mitre.org/techniques/T1070/004/"
-      }
-    },
-    {
-      "id": "disable-firewall-services",
-      "name": "Impair Defenses: Disable Firewall Services",
-      "category": "auth",
-      "log_file": "/var/log/auth.log",
-      "log_files": [
-        "/var/log/auth.log",
-        "/var/log/secure"
-      ],
-      "regex": "(?i)(systemctl[[:space:]]+(stop|disable|mask)[[:space:]]+(ufw|nftables|firewalld|apparmor)|service[[:space:]]+(ufw|nftables|firewalld)[[:space:]]+stop|ufw[[:space:]]+disable)",
-      "action": "ban",
-      "ban_duration": 86400,
-      "max_attempts": 1,
-      "find_time": 60,
-      "mitre_tactic": "Defense Evasion",
-      "mitre_tactic_id": "TA0005",
-      "mitre_technique_id": "T1562.001",
-      "mitre_technique_name": "Impair Defenses: Disable or Modify Tools",
-      "mitre": {
-        "tactic": "Defense Evasion",
-        "tactic_id": "TA0005",
-        "technique_id": "T1562.001",
-        "technique_name": "Impair Defenses: Disable or Modify Tools",
-        "url": "https://attack.mitre.org/techniques/T1562/001/"
-      }
-    },
-    {
-      "id": "cron-persistence-modification",
-      "name": "Scheduled Task / Persistence via Cron",
-      "category": "auth",
-      "log_file": "/var/log/auth.log",
-      "log_files": [
-        "/var/log/auth.log",
-        "/var/log/secure"
-      ],
-      "regex": "(?i)(crontab[[:space:]]+(-e|-l|.*)|/etc/cron\\.(daily|hourly|weekly|monthly)|/var/spool/cron|cron\\.d/)",
-      "action": "ban",
-      "ban_duration": 86400,
-      "max_attempts": 1,
-      "find_time": 60,
-      "mitre_tactic": "Persistence",
-      "mitre_tactic_id": "TA0003",
-      "mitre_technique_id": "T1053.003",
-      "mitre_technique_name": "Scheduled Task/Job: Cron",
-      "mitre": {
-        "tactic": "Persistence",
-        "tactic_id": "TA0003",
-        "technique_id": "T1053.003",
-        "technique_name": "Scheduled Task/Job: Cron",
-        "url": "https://attack.mitre.org/techniques/T1053/003/"
-      }
-    },
-    {
-      "id": "malicious-systemd-service",
-      "name": "Create or Modify System Process: Systemd Service",
-      "category": "auth",
-      "log_file": "/var/log/auth.log",
-      "log_files": [
-        "/var/log/auth.log",
-        "/var/log/secure"
-      ],
-      "regex": "(?i)(systemctl[[:space:]]+(enable|start|link)[[:space:]]+.*\\.service|/etc/systemd/system/.*\\.service|daemon-reload|systemd-run[[:space:]])",
-      "action": "ban",
-      "ban_duration": 86400,
-      "max_attempts": 1,
-      "find_time": 60,
-      "mitre_tactic": "Persistence",
-      "mitre_tactic_id": "TA0003",
-      "mitre_technique_id": "T1543.002",
-      "mitre_technique_name": "Create or Modify System Process: Systemd Service",
-      "mitre": {
-        "tactic": "Persistence",
-        "tactic_id": "TA0003",
-        "technique_id": "T1543.002",
-        "technique_name": "Create or Modify System Process: Systemd Service",
-        "url": "https://attack.mitre.org/techniques/T1543/002/"
-      }
-    },
-    {
-      "id": "suid-sudo-abuse",
-      "name": "Abuse Elevation Control Mechanism: SUID and Sudo",
-      "category": "auth",
-      "log_file": "/var/log/auth.log",
-      "log_files": [
-        "/var/log/auth.log",
-        "/var/log/secure"
-      ],
-      "regex": "(?i)(sudo[[:space:]]+.*(chmod|bash|sh|python|perl)|find[[:space:]]+/.*-perm[[:space:]]+.*4000|chmod[[:space:]]+[ugo+,-]*s|setuid|pkexec)",
-      "action": "ban",
-      "ban_duration": 86400,
-      "max_attempts": 1,
-      "find_time": 60,
-      "mitre_tactic": "Privilege Escalation",
-      "mitre_tactic_id": "TA0004",
-      "mitre_technique_id": "T1548.001",
-      "mitre_technique_name": "Abuse Elevation Control Mechanism: Setuid and Setgid",
-      "mitre": {
-        "tactic": "Privilege Escalation",
-        "tactic_id": "TA0004",
-        "technique_id": "T1548.001",
-        "technique_name": "Abuse Elevation Control Mechanism: Setuid and Setgid",
-        "url": "https://attack.mitre.org/techniques/T1548/001/"
-      }
-    },
-    {
-      "id": "reverse-shell-unix",
-      "name": "Unix Shell Reverse Connection",
-      "category": "auth",
-      "log_file": "/var/log/auth.log",
-      "log_files": [
-        "/var/log/auth.log",
-        "/var/log/secure"
-      ],
-      "regex": "(?i)(/dev/tcp/|nc[[:space:]].*-e|ncat[[:space:]].*-e|bash[[:space:]]+-i|python[0-9.]*[[:space:]]+-c[[:space:]]+.*import[[:space:]]+socket|socat[[:space:]])",
-      "action": "ban",
-      "ban_duration": 86400,
-      "max_attempts": 1,
-      "find_time": 60,
-      "mitre_tactic": "Execution",
-      "mitre_tactic_id": "TA0002",
-      "mitre_technique_id": "T1059.004",
-      "mitre_technique_name": "Unix Shell",
-      "mitre": {
-        "tactic": "Execution",
-        "tactic_id": "TA0002",
-        "technique_id": "T1059.004",
-        "technique_name": "Unix Shell",
-        "url": "https://attack.mitre.org/techniques/T1059/004/"
-      }
-    },
-    {
-      "id": "bad-bot-scanner",
-      "name": "Malicious Web Scanner / Automated Tool",
+      "id": "t1203-client-exploitation-ssti",
       "category": "web",
-      "log_file": "/var/log/apache2/access.log",
-      "log_files": [
-        "/var/log/nginx/access.log",
-        "/var/log/apache2/access.log"
-      ],
-      "regex": "(?i)(sqlmap/1\\.8|sqlmap|nikto/2\\.1\\.6|nikto|go-http-client/1\\.1|nmap scripting engine|gobuster|dirbuster|wpscan|masscan)",
-      "action": "ban",
-      "ban_duration": 172800,
-      "max_attempts": 2,
-      "find_time": 60,
-      "mitre_tactic": "Reconnaissance",
-      "mitre_tactic_id": "TA0043",
-      "mitre_technique_id": "T1595.002",
-      "mitre_technique_name": "Vulnerability Scanning",
-      "mitre": {
-        "tactic": "Reconnaissance",
-        "tactic_id": "TA0043",
-        "technique_id": "T1595.002",
-        "technique_name": "Vulnerability Scanning",
-        "url": "https://attack.mitre.org/techniques/T1595/002/"
-      }
-    },
-    {
-      "id": "xxe-injection",
-      "name": "XML External Entity (XXE) Injection",
-      "category": "web",
-      "log_file": "/var/log/apache2/access.log",
-      "log_files": [
-        "/var/log/nginx/access.log",
-        "/var/log/apache2/access.log"
-      ],
-      "regex": "(?i)(<!entity|<!doctype|system[[:space:]]+\\\"|system[[:space:]]+')",
-      "action": "ban",
-      "ban_duration": 86400,
-      "max_attempts": 1,
-      "find_time": 60,
+      "regex": "(?i)(\\{\\{.*(7\\*7|config|self|request|class|mro).*\\}|\\$\\{.*\\})",
+      "status_codes": [400, 403, 404, 500],
       "mitre_tactic": "Execution",
       "mitre_tactic_id": "TA0002",
       "mitre_technique_id": "T1203",
       "mitre_technique_name": "Exploitation for Client Execution",
-      "mitre": {
-        "tactic": "Execution",
-        "tactic_id": "TA0002",
-        "technique_id": "T1203",
-        "technique_name": "Exploitation for Client Execution",
-        "url": "https://attack.mitre.org/techniques/T1203/"
-      }
+      "threat_score": 75
     },
     {
-      "id": "http-anomalous-method",
-      "name": "HTTP Anomalous / Dangerous Method",
-      "category": "web",
-      "log_file": "/var/log/apache2/access.log",
-      "log_files": [
-        "/var/log/nginx/access.log",
-        "/var/log/apache2/access.log"
-      ],
-      "regex": "(?i)(\\\"(put|delete|trace|track|connect|options)[[:space:]])",
-      "action": "ban",
-      "ban_duration": 14400,
-      "max_attempts": 3,
-      "find_time": 60,
+      "id": "t1078-valid-accounts-ssh-root",
+      "category": "ssh",
+      "regex": "(?i)(Accepted password for root|Accepted publickey for root|session opened for user root by \\(uid=0\\))",
+      "mitre_tactic": "Persistence",
+      "mitre_tactic_id": "TA0003",
+      "mitre_technique_id": "T1078",
+      "mitre_technique_name": "Valid Accounts",
+      "threat_score": 50
+    },
+    {
+      "id": "t1053-cron-persistence",
+      "category": "system",
+      "regex": "(?i)(crontab\\s+-e|/etc/cron\\.(d|daily|hourly|monthly|weekly)/|/var/spool/cron/crontabs)",
+      "mitre_tactic": "Persistence",
+      "mitre_tactic_id": "TA0003",
+      "mitre_technique_id": "T1053.003",
+      "mitre_technique_name": "Scheduled Task/Job: Cron",
+      "threat_score": 70
+    },
+    {
+      "id": "t1548-abuse-elevation-sudoers",
+      "category": "privilege-escalation",
+      "regex": "(?i)(chmod\\s+(\\+s|[0-7]?[421]7[0-7]{2})|/etc/sudoers|visudo|setfacl\\s+-m)",
+      "mitre_tactic": "Privilege Escalation",
+      "mitre_tactic_id": "TA0004",
+      "mitre_technique_id": "T1548.001",
+      "mitre_technique_name": "Abuse Elevation Control Mechanism: Setuid and Setgid",
+      "threat_score": 85
+    },
+    {
+      "id": "t1027-obfuscated-encoded-payload",
+      "category": "defense-evasion",
+      "regex": "(?i)(%25[0-9a-f]{2}|\\\\x[0-9a-f]{2}|\\\\u00[0-9a-f]{2}|base64_decode|eval\\s*\\(|fromCharCode|gzinflate)",
+      "status_codes": [400, 403, 404, 500],
+      "mitre_tactic": "Defense Evasion",
+      "mitre_tactic_id": "TA0005",
+      "mitre_technique_id": "T1027",
+      "mitre_technique_name": "Obfuscated/Encoded Files or Information",
+      "threat_score": 65
+    },
+    {
+      "id": "t1070-clear-command-history",
+      "category": "defense-evasion",
+      "regex": "(?i)(history\\s+-c|unset\\s+HISTFILE|export\\s+HISTSIZE=0|rm\\s+.*\\.(bash|zsh)_history|rm\\s+-rf\\s+/var/log)",
+      "mitre_tactic": "Defense Evasion",
+      "mitre_tactic_id": "TA0005",
+      "mitre_technique_id": "T1070.003",
+      "mitre_technique_name": "Indicator Removal: Clear Command History",
+      "threat_score": 90
+    },
+    {
+      "id": "t1562-impair-defenses-disable-tools",
+      "category": "defense-evasion",
+      "regex": "(?i)(systemctl\\s+(stop|disable)\\s+(ufw|iptables|firewalld|copsec|auditd)|iptables\\s+-F|nft\\s+flush\\s+ruleset|killall\\s+(syslogd|auditd))",
+      "mitre_tactic": "Defense Evasion",
+      "mitre_tactic_id": "TA0005",
+      "mitre_technique_id": "T1562.001",
+      "mitre_technique_name": "Impair Defenses: Disable or Modify Tools",
+      "threat_score": 95
+    },
+    {
+      "id": "t1110-password-brute-forcing",
+      "category": "credential-access",
+      "regex": "(?i)(Failed password for|Invalid user|authentication failure|logins? failed|wp-login\\.php.*401)",
+      "mitre_tactic": "Credential Access",
+      "mitre_tactic_id": "TA0006",
+      "mitre_technique_id": "T1110.001",
+      "mitre_technique_name": "Brute Force: Password Guessing",
+      "threat_score": 60
+    },
+    {
+      "id": "t1003-os-credential-dumping",
+      "category": "credential-access",
+      "regex": "(?i)(/etc/shadow|/etc/security/opasswd|/var/lib/sss/db|gcore\\s+|mimikatz|secretsdump)",
+      "mitre_tactic": "Credential Access",
+      "mitre_tactic_id": "TA0006",
+      "mitre_technique_id": "T1003.008",
+      "mitre_technique_name": "OS Credential Dumping: /etc/passwd and /etc/shadow",
+      "threat_score": 90
+    },
+    {
+      "id": "t1552-unsecured-credentials-config",
+      "category": "credential-access",
+      "regex": "(?i)(\\.env|wp-config\\.php|\\.git/config|id_rsa|id_ed25519|\\.aws/credentials|database\\.yml|settings\\.py)",
+      "status_codes": [400, 403, 404, 500],
+      "mitre_tactic": "Credential Access",
+      "mitre_tactic_id": "TA0006",
+      "mitre_technique_id": "T1552.001",
+      "mitre_technique_name": "Unsecured Credentials: Credentials In Files",
+      "threat_score": 70
+    },
+    {
+      "id": "t1595-vulnerability-scanning",
+      "category": "discovery",
+      "regex": "(?i)(sqlmap|nikto|nuclei|acunetix|gobuster|dirsearch|dirbuster|wpscan|masscan|zgrab|openvas|arachni)",
+      "status_codes": [400, 403, 404, 500],
       "mitre_tactic": "Reconnaissance",
       "mitre_tactic_id": "TA0043",
-      "mitre_technique_id": "T1595",
-      "mitre_technique_name": "Active Scanning",
-      "mitre": {
-        "tactic": "Reconnaissance",
-        "tactic_id": "TA0043",
-        "technique_id": "T1595",
-        "technique_name": "Active Scanning",
-        "url": "https://attack.mitre.org/techniques/T1595/"
-      }
+      "mitre_technique_id": "T1595.002",
+      "mitre_technique_name": "Active Scanning: Vulnerability Scanning",
+      "threat_score": 55
+    },
+    {
+      "id": "t1082-system-information-discovery",
+      "category": "discovery",
+      "regex": "(?i)(uname\\s+-a|cat\\s+/proc/version|lscpu|lsb_release|cat\\s+/etc/os-release|hostnamectl)",
+      "mitre_tactic": "Discovery",
+      "mitre_tactic_id": "TA0007",
+      "mitre_technique_id": "T1082",
+      "mitre_technique_name": "System Information Discovery",
+      "threat_score": 50
+    },
+    {
+      "id": "t1087-account-discovery-local",
+      "category": "discovery",
+      "regex": "(?i)(/etc/passwd|getent\\s+passwd|cat\\s+/etc/group|compgen\\s+-u)",
+      "status_codes": [400, 403, 404, 500],
+      "mitre_tactic": "Discovery",
+      "mitre_tactic_id": "TA0007",
+      "mitre_technique_id": "T1087.001",
+      "mitre_technique_name": "Account Discovery: Local Accounts",
+      "threat_score": 60
+    },
+    {
+      "id": "t1046-network-service-discovery",
+      "category": "discovery",
+      "regex": "(?i)(nmap\\s+|masscan\\s+|netstat\\s+-tulpn|ss\\s+-tulpn|lsof\\s+-i)",
+      "mitre_tactic": "Discovery",
+      "mitre_tactic_id": "TA0007",
+      "mitre_technique_id": "T1046",
+      "mitre_technique_name": "Network Service Discovery",
+      "threat_score": 50
+    },
+    {
+      "id": "t1071-c2-malicious-user-agents",
+      "category": "command-and-control",
+      "regex": "(?i)(CobaltStrike|Metasploit|Empire|Havoc|Sliver|PoshC2|Covenant|Mythic|BruteRatel)",
+      "status_codes": [400, 403, 404, 500],
+      "mitre_tactic": "Command and Control",
+      "mitre_tactic_id": "TA0011",
+      "mitre_technique_id": "T1071.001",
+      "mitre_technique_name": "Application Layer Protocol: Web Protocols",
+      "threat_score": 90
+    },
+    {
+      "id": "t1041-exfiltration-c2-channel",
+      "category": "exfiltration",
+      "regex": "(?i)(POST\\s+/upload.*\\.tar\\.gz|POST\\s+/api/exfil|data=base64)",
+      "status_codes": [400, 403, 404, 500],
+      "mitre_tactic": "Exfiltration",
+      "mitre_tactic_id": "TA0010",
+      "mitre_technique_id": "T1041",
+      "mitre_technique_name": "Exfiltration Over C2 Channel",
+      "threat_score": 85
+    },
+    {
+      "id": "t1567-cloud-metadata-exfiltration",
+      "category": "exfiltration",
+      "regex": "(?i)(169\\.254\\.169\\.254|metadata\\.google\\.internal|latest/meta-data|latest/user-data)",
+      "status_codes": [400, 403, 404, 500],
+      "mitre_tactic": "Exfiltration",
+      "mitre_tactic_id": "TA0010",
+      "mitre_technique_id": "T1567",
+      "mitre_technique_name": "Exfiltration Over Web Service",
+      "threat_score": 80
     }
   ]
 }

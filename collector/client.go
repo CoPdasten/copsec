@@ -40,7 +40,7 @@ type ControllerClient struct {
 // NewControllerClient initializes the hybrid gRPC client.
 func NewControllerClient(cfg GrpcClientConfig, identity *IdentityManager, buffer *OfflineBuffer) *ControllerClient {
 	if cfg.HeartbeatPeriod == 0 {
-		cfg.HeartbeatPeriod = 15 * time.Second
+		cfg.HeartbeatPeriod = 3 * time.Second
 	}
 	if cfg.MaxBatchSize == 0 {
 		cfg.MaxBatchSize = 100

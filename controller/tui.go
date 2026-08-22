@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -13,14 +14,14 @@ import (
 
 // Cyberpunk / Matrix Color Palette
 var (
-	colorNeonGreen  = lipgloss.Color("#00FF66")
-	colorCyberCyan  = lipgloss.Color("#00F0FF")
-	colorAlertPink  = lipgloss.Color("#FF0055")
+	colorNeonGreen   = lipgloss.Color("#00FF66")
+	colorCyberCyan   = lipgloss.Color("#00F0FF")
+	colorAlertPink   = lipgloss.Color("#FF0055")
 	colorWarningGold = lipgloss.Color("#FFB800")
-	colorDarkBg     = lipgloss.Color("#0A0E14")
+	colorDarkBg      = lipgloss.Color("#0A0E14")
 	colorPanelBorder = lipgloss.Color("#1E293B")
-	colorTextMuted  = lipgloss.Color("#64748B")
-	colorTextLight  = lipgloss.Color("#E2E8F0")
+	colorTextMuted   = lipgloss.Color("#64748B")
+	colorTextLight   = lipgloss.Color("#E2E8F0")
 
 	// Panel Styles
 	panelStyle = lipgloss.NewStyle().
@@ -62,6 +63,11 @@ const (
 	modalUnbanIP
 )
 
+type techniqueStat struct {
+	ID    string
+	Count int
+}
+
 // SIEMModel holds the state for the high-performance async Bubbletea dashboard.
 type SIEMModel struct {
 	server       *CentralServer
@@ -80,9 +86,8 @@ type SIEMModel struct {
 	eventBuffer []*StoredEvent
 
 	// Interactive Modal State
-	mode       modalMode
-	inputIP    string
-	inputHours string
+	mode    modalMode
+	inputIP string
 }
 
 // NewSIEMModel creates a new TUI dashboard model with async ingestion.
@@ -92,6 +97,12 @@ func NewSIEMModel(server *CentralServer, storage *StorageEngine) *SIEMModel {
 		storage:     storage,
 		mitreMap:    make(map[string]int),
 		rateHistory: make([]int, 25),
+	}
+
+	// Initialize default core techniques
+	defaultCore := []string{"T1190", "T1059.004", "T1203", "T1078", "T1053.003", "T1548.001", "T1027", "T1070.003", "T1562.001", "T1110.001", "T1003.008", "T1552.001", "T1595.002", "T1082", "T1087.001", "T1046", "T1071.001", "T1041", "T1567"}
+	for _, t := range defaultCore {
+		m.mitreMap[t] = 0
 	}
 
 	// Initialize with historical MITRE stats from DB
@@ -108,7 +119,7 @@ func NewSIEMModel(server *CentralServer, storage *StorageEngine) *SIEMModel {
 			m.mu.Lock()
 			m.eventBuffer = append(m.eventBuffer, ev)
 			if len(m.eventBuffer) > 2000 {
-				m.eventBuffer = m.eventBuffer[1000:] // Drop older in buffer if extreme overflow
+				m.eventBuffer = m.eventBuffer[1000:]
 			}
 			m.mu.Unlock()
 		}
@@ -140,7 +151,6 @@ func (m *SIEMModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "esc":
 				m.mode = modalNone
 				m.inputIP = ""
-				m.inputHours = ""
 			case "enter":
 				m.submitModal()
 			case "backspace":
@@ -239,7 +249,7 @@ func (m *SIEMModel) View() string {
 
 	// 1. Top Banner
 	banner := headerStyle.Render("⚡ CoPSeC DISTRIBUTED MICRO-SIEM/SOAR") + " " +
-		matrixTitleStyle.Render("v2.0 [CYBERPUNK MATRIX]") + "\n"
+		matrixTitleStyle.Render("v2.0 [ENTERPRISE MATRIX]") + "\n"
 
 	// 2. Left Panel: Fleet / Nodes
 	leftContent := m.renderFleetPanel(leftWidth - 2)
@@ -257,8 +267,8 @@ func (m *SIEMModel) View() string {
 	}
 	centerPanel := centerStyle.Width(centerWidth).Height(mainHeight).Render(centerContent)
 
-	// 4. Right Panel: MITRE ATT&CK Matrix
-	rightContent := m.renderMITREPanel(rightWidth - 2)
+	// 4. Right Panel: Dynamic MITRE ATT&CK Heatmap
+	rightContent := m.renderMITREPanel(rightWidth - 2, mainHeight-2)
 	rightStyle := panelStyle
 	if m.activeTab == 2 {
 		rightStyle = activePanelStyle
@@ -292,8 +302,8 @@ func (m *SIEMModel) renderFleetPanel(width int) string {
 	}
 
 	for _, n := range m.nodes {
-		// Auto offline if no heartbeat for > 10 seconds
-		isOnline := time.Since(n.LastSeen) <= 10*time.Second
+		// Online if heartbeat received within 20s
+		isOnline := time.Since(n.LastSeen) <= 20*time.Second
 		statusBadge := lipgloss.NewStyle().Foreground(colorNeonGreen).Render("🟢 ACTIVE")
 		if !isOnline {
 			statusBadge = alertStyle.Render("🔴 OFFLINE")
@@ -356,46 +366,52 @@ func (m *SIEMModel) renderThreatStream(width int) string {
 	return b.String()
 }
 
-func (m *SIEMModel) renderMITREPanel(width int) string {
+func (m *SIEMModel) renderMITREPanel(width, maxLines int) string {
 	var b strings.Builder
-	b.WriteString(matrixTitleStyle.Render("🛡 MITRE ATT&CK HEATMAP") + "\n")
+	b.WriteString(matrixTitleStyle.Render("🛡 ENTERPRISE MITRE HEATMAP") + "\n")
 	b.WriteString(lipgloss.NewStyle().Foreground(colorTextMuted).Render(strings.Repeat("─", width)) + "\n")
 
-	if len(m.mitreMap) == 0 {
-		b.WriteString(lipgloss.NewStyle().Foreground(colorTextMuted).Render("Awaiting technique signatures...\n"))
-		return b.String()
+	// Sort techniques by hit frequency
+	var list []techniqueStat
+	for k, v := range m.mitreMap {
+		list = append(list, techniqueStat{ID: k, Count: v})
+	}
+	sort.Slice(list, func(i, j int) bool {
+		if list[i].Count == list[j].Count {
+			return list[i].ID < list[j].ID
+		}
+		return list[i].Count > list[j].Count
+	})
+
+	limit := maxLines - 3
+	if limit <= 0 {
+		limit = 12
 	}
 
-	// Known core techniques display
-	coreTechniques := []string{"T1190", "T1059.004", "T1595.002", "T1110.001", "T1027", "T1552.005"}
-	for _, tech := range coreTechniques {
-		cnt := m.mitreMap[tech]
-		bars := strings.Repeat("█", min(cnt/2+1, 10))
-		if cnt == 0 {
-			bars = "░"
+	for i, st := range list {
+		if i >= limit {
+			break
 		}
-		b.WriteString(fmt.Sprintf("%-10s %s %d\n",
-			lipgloss.NewStyle().Foreground(colorWarningGold).Render(tech),
-			lipgloss.NewStyle().Foreground(colorAlertPink).Render(bars),
-			cnt))
-	}
 
-	// Extra detected techniques
-	for tech, cnt := range m.mitreMap {
-		isCore := false
-		for _, c := range coreTechniques {
-			if c == tech {
-				isCore = true
-				break
-			}
+		barLen := 0
+		if st.Count > 0 {
+			barLen = min(st.Count/2+1, 8)
 		}
-		if !isCore && cnt > 0 {
-			bars := strings.Repeat("█", min(cnt/2+1, 10))
-			b.WriteString(fmt.Sprintf("%-10s %s %d\n",
-				lipgloss.NewStyle().Foreground(colorCyberCyan).Render(tech),
-				lipgloss.NewStyle().Foreground(colorNeonGreen).Render(bars),
-				cnt))
+		filled := strings.Repeat("█", barLen)
+		empty := strings.Repeat("░", 8-barLen)
+
+		color := colorCyberCyan
+		if st.Count >= 20 {
+			color = colorAlertPink
+		} else if st.Count >= 5 {
+			color = colorWarningGold
 		}
+
+		b.WriteString(fmt.Sprintf("%-10s %s%s %3d\n",
+			lipgloss.NewStyle().Foreground(color).Render(st.ID),
+			lipgloss.NewStyle().Foreground(colorAlertPink).Render(filled),
+			lipgloss.NewStyle().Foreground(colorPanelBorder).Render(empty),
+			st.Count))
 	}
 
 	return b.String()
@@ -428,7 +444,7 @@ func (m *SIEMModel) renderBottomPanel(width int) string {
 	}
 
 	return fmt.Sprintf("%s   %s %s%s\n%s", shortcuts, rateDisplay, graph, status,
-		lipgloss.NewStyle().Foreground(colorTextMuted).Render("CoPSeC Autonomous Defense Core • Pure Zero-Leak Async Architecture"))
+		lipgloss.NewStyle().Foreground(colorTextMuted).Render("CoPSeC Enterprise Threat Defense Core • Pure Zero-Leak Async Architecture"))
 }
 
 func (m *SIEMModel) renderModalOverlay(baseView string) string {

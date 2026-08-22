@@ -15,7 +15,7 @@ func TestRuleEngineAnalysis(t *testing.T) {
 
 	// 1. SQL Injection attempt
 	sqli := `198.51.100.1 - - [22/Aug/2026:12:00:00 +0300] "GET /login?user=admin%27%20or%201=1-- HTTP/1.1" 403`
-	ruleID, techID, score, matched := engine.Analyze(sqli, 403)
+	ruleID, techID, score, matched := engine.Analyze(sqli, 403, "nginx")
 	if !matched || techID != "T1190" || score < 70 {
 		t.Errorf("Expected SQLi match T1190 (score>=70), got: match=%v, rule=%s, tech=%s, score=%d",
 			matched, ruleID, techID, score)
@@ -23,7 +23,7 @@ func TestRuleEngineAnalysis(t *testing.T) {
 
 	// 2. Command Injection / RCE
 	rce := `203.0.113.50 - - [22/Aug/2026:12:00:00 +0300] "GET /cgi-bin/test?cmd=%3B%20id HTTP/1.1" 500`
-	ruleID, techID, score, matched = engine.Analyze(rce, 500)
+	ruleID, techID, score, matched = engine.Analyze(rce, 500, "nginx")
 	if !matched || techID != "T1059.004" || score < 80 {
 		t.Errorf("Expected RCE match T1059.004, got: match=%v, rule=%s, tech=%s, score=%d",
 			matched, ruleID, techID, score)
@@ -31,7 +31,7 @@ func TestRuleEngineAnalysis(t *testing.T) {
 
 	// 3. Status code filtering: 200 OK should not match when restricted to error codes
 	normal := `127.0.0.1 - - [22/Aug/2026:12:00:00 +0300] "GET /index.html HTTP/1.1" 200`
-	_, _, _, matched = engine.Analyze(normal, 200)
+	_, _, _, matched = engine.Analyze(normal, 200, "nginx")
 	if matched {
 		t.Errorf("Expected normal 200 OK traffic to not match, but matched")
 	}

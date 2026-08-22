@@ -44,7 +44,7 @@ func main() {
 	// 3. gRPC Client for Controller Streaming
 	grpcCfg := GrpcClientConfig{
 		ServerAddress:   *controllerAddr,
-		HeartbeatPeriod: 15 * time.Second,
+		HeartbeatPeriod: 3 * time.Second,
 		MaxBatchSize:    100,
 	}
 	controllerClient := NewControllerClient(grpcCfg, identityMgr, offlineBuffer)
