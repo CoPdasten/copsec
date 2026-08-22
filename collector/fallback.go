@@ -283,7 +283,7 @@ func (f *FallbackEngine) replyMessage(text string) {
 	_, _ = f.httpClient.Post(url, "application/json", bytes.NewBuffer(data))
 }
 
-// InspectOffline evaluates a log entry and applies local iptables DROP + Telegram alert if severe.
+// InspectOffline evaluates a log entry and applies local iptables DROP + Telegram streaming pipeline.
 func (f *FallbackEngine) InspectOffline(rawLine, source string) {
 	if !f.IsActive() {
 		return
@@ -306,7 +306,7 @@ func (f *FallbackEngine) InspectOffline(rawLine, source string) {
 		}
 	}
 
-	if !isMatched {
+	if !isMatched || matchedRule.ThreatScore < 50 {
 		return
 	}
 
@@ -320,14 +320,14 @@ func (f *FallbackEngine) InspectOffline(rawLine, source string) {
 	}
 
 	triggerBan := false
-	reason := ""
+	actionTaken := "Monitored / Logged"
 
-	// Static critical condition (>= 80)
-	if matchedRule.ThreatScore >= 80 {
+	// Critical Threshold (>= 85)
+	if matchedRule.ThreatScore >= 85 {
 		triggerBan = true
-		reason = fmt.Sprintf("Critical Threat Score (%d >= 80)", matchedRule.ThreatScore)
-	} else if matchedRule.ThreatScore >= 50 {
-		// Correlational spike condition (>= 3 attacks in 60s)
+		actionTaken = "Local IPTABLES DROP Applied"
+	} else {
+		// Correlational Spike Window (>= 3 attacks in 60s)
 		history := f.ipSpikeHistory[ipStr]
 		var recent []int64
 		for _, ts := range history {
@@ -340,29 +340,27 @@ func (f *FallbackEngine) InspectOffline(rawLine, source string) {
 
 		if len(recent) >= 3 {
 			triggerBan = true
-			reason = fmt.Sprintf("Correlational Spike (%d attacks in 60s)", len(recent))
+			actionTaken = fmt.Sprintf("Correlational Spike (%d attacks in 60s) -> IPTABLES DROP Applied", len(recent))
 		}
 	}
 
-	if !triggerBan {
-		f.mu.Unlock()
-		return
+	if triggerBan {
+		f.bannedIPs[ipStr] = now
 	}
-
-	f.bannedIPs[ipStr] = now
 	f.mu.Unlock()
 
-	// 1. Execute local iptables containment
-	f.executeLocalBan(ipStr)
+	// 1. Execute local containment if ban triggered
+	if triggerBan {
+		f.executeLocalBan(ipStr)
+	}
 
-	// 2. Dispatch direct Telegram alert if configured
+	// 2. Stream WARN (50-84) and CRIT (>=85 or Spike) directly to Telegram
 	if f.telegramToken != "" && f.telegramChatID != "" {
-		go f.sendDirectTelegramAlert(ipStr, matchedRule.Name, matchedRule.MitreID, matchedRule.ThreatScore, reason, rawLine)
+		go f.sendDirectTelegramAlert(ipStr, matchedRule.Name, matchedRule.MitreID, matchedRule.ThreatScore, actionTaken, rawLine, triggerBan)
 	}
 }
 
 func (f *FallbackEngine) executeLocalBan(ipStr string) {
-	// Check duplicate rule
 	checkErr := exec.Command("iptables", "-C", "INPUT", "-s", ipStr, "-j", "DROP").Run()
 	if checkErr == nil {
 		log.Printf("[FALLBACK_SOAR] IP %s is already isolated in local iptables", ipStr)
@@ -377,26 +375,33 @@ func (f *FallbackEngine) executeLocalBan(ipStr string) {
 	}
 }
 
-func (f *FallbackEngine) sendDirectTelegramAlert(ip, ruleName, mitreID string, threatScore int, reason, rawLine string) {
-	text := fmt.Sprintf("🚨 *[EDGE OFFLINE AUTONOMOUS ACTION]*\n\n"+
+func (f *FallbackEngine) sendDirectTelegramAlert(ip, ruleName, mitreID string, threatScore int, actionTaken, rawLine string, isBanned bool) {
+	severityTag := "⚠️ *[EDGE OFFLINE INCIDENT - WARN]*"
+	scoreBadge := fmt.Sprintf("[WARN %d/100]", threatScore)
+	if isBanned || threatScore >= 85 {
+		severityTag = "🔥 *[EDGE OFFLINE INCIDENT - CRITICAL]*"
+		scoreBadge = fmt.Sprintf("[CRIT %d/100]", threatScore)
+	}
+
+	text := fmt.Sprintf("%s\n\n"+
 		"🖥 *Node:* `%s` _(Controller Offline!)_\n"+
-		"🎯 *Target IP:* `%s`\n"+
-		"⚡ *Threat Score:* `%d/100 (CRITICAL)`\n"+
+		"🎯 *Target/IP:* `%s`\n"+
+		"⚡ *Threat Level:* `%s`\n"+
 		"🏷 *MITRE:* `%s`\n"+
 		"🛡 *Rule:* `%s`\n"+
-		"📋 *Reason:* `%s`\n"+
-		"🚫 *Action:* `Local IPTABLES DROP Applied`\n\n"+
+		"📋 *Action Taken:* `%s`\n\n"+
 		"📜 *Payload:*\n`%s`",
+		severityTag,
 		f.nodeID,
 		ip,
-		threatScore,
+		scoreBadge,
 		mitreID,
 		ruleName,
-		reason,
+		actionTaken,
 		truncateString(rawLine, 140))
 
 	f.replyMessage(text)
-	log.Printf("[FALLBACK_TELEGRAM] Direct emergency alert dispatched to Telegram for %s", ip)
+	log.Printf("[FALLBACK_TELEGRAM] Direct incident alert dispatched to Telegram for %s (%s)", ip, scoreBadge)
 }
 
 func truncateString(str string, length int) string {
