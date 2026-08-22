@@ -279,7 +279,7 @@ func (s *CentralServer) processEvent(nodeID string, event *copsecproto.LogEvent)
 					log.Printf("[WARN] Recovered from TUI dispatch panic: %v", r)
 				}
 			}()
-			p.Send(stored)
+			p.Send(LogEventMsg{Event: stored})
 		}()
 	}
 
