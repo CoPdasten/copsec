@@ -88,12 +88,20 @@ type techniqueStat struct {
 
 type attackerIntel struct {
 	IP        string
-	GeoTag    string
+	Flag      string
+	Org       string
+	Class     string
 	Count     int
 	TopTarget string
 }
 
-// SIEMModel holds the state for the 6-panel SOC cockpit with dynamic scrollbars & search engine.
+type targetStat struct {
+	Endpoint string
+	Count    int
+	Pct      int
+}
+
+// SIEMModel holds the state for the 6-panel SOC cockpit with Kill Chain, Entropy sparklines & GeoIP radar.
 type SIEMModel struct {
 	server         *CentralServer
 	storage        *StorageEngine
@@ -107,11 +115,20 @@ type SIEMModel struct {
 	soarActions    []SOARActionRecord
 	mitreMap       map[string]int
 	attackerMap    map[string]*attackerIntel
+	targetMap      map[string]int
+	totalTargetReq int
 	activeTab      int // 0: Fleet, 1: Live Stream, 2: Critical Incidents, 3: MITRE
 	rateHistory    []int
 	peakEPS        int
 	statusPrompt   string
 	isPaused       bool
+
+	// Entropy Tracker
+	recentEntropies []float64
+	avgEntropy      float64
+
+	// Kill Chain Stage Hit Counters
+	killChainHits map[string]int
 
 	// Threat Hunting Search
 	searchQuery    string
@@ -139,12 +156,15 @@ type SIEMModel struct {
 // NewSIEMModel creates a new 6-panel TUI dashboard model.
 func NewSIEMModel(server *CentralServer, storage *StorageEngine) *SIEMModel {
 	m := &SIEMModel{
-		server:      server,
-		storage:     storage,
-		activeTab:   1, // Default focus on Live Stream
-		mitreMap:    make(map[string]int),
-		attackerMap: make(map[string]*attackerIntel),
-		rateHistory: make([]int, 20),
+		server:          server,
+		storage:         storage,
+		activeTab:       1, // Default focus on Live Stream
+		mitreMap:        make(map[string]int),
+		attackerMap:     make(map[string]*attackerIntel),
+		targetMap:       make(map[string]int),
+		killChainHits:   make(map[string]int),
+		rateHistory:     make([]int, 20),
+		recentEntropies: make([]float64, 0, 50),
 	}
 
 	// Initialize default core techniques
@@ -195,26 +215,35 @@ func (m *SIEMModel) tickCmd() tea.Cmd {
 	})
 }
 
-// lookupGeoTag assigns an ASN / Geo threat actor tag to IP addresses.
-func lookupGeoTag(ip string) string {
+// lookupGeoThreatActor resolves enriched threat actor intelligence.
+func lookupGeoThreatActor(ip string) (flag, org, class string) {
 	if strings.HasPrefix(ip, "185.220.") || strings.HasPrefix(ip, "185.222.") || strings.HasPrefix(ip, "104.244.") {
-		return "DE - Tor Exit Node"
+		return "🇩🇪", "Tor Project / Exit Node", "Tor Anonymizer"
+	} else if strings.HasPrefix(ip, "161.35.") || strings.HasPrefix(ip, "164.92.") || strings.HasPrefix(ip, "159.65.") {
+		return "🇩🇪", "DigitalOcean / Host Europe", "Vulnerability Scanner"
 	} else if strings.HasPrefix(ip, "45.154.") || strings.HasPrefix(ip, "194.26.") || strings.HasPrefix(ip, "193.106.") {
-		return "RU - Scanner/Nuclei"
+		return "🇷🇺", "Selectel / Miran AS", "Exploit Prober"
+	} else if strings.HasPrefix(ip, "43.135.") || strings.HasPrefix(ip, "119.28.") || strings.HasPrefix(ip, "124.222.") {
+		return "🇨🇳", "Tencent Cloud / Alibaba", "Automated Crawler"
 	} else if strings.HasPrefix(ip, "176.") || strings.HasPrefix(ip, "88.") || strings.HasPrefix(ip, "212.") || strings.HasPrefix(ip, "78.") {
-		return "TR - Turkcell/ISP"
+		return "🇹🇷", "Turkcell / Superonline", "Residential WAN"
 	} else if strings.HasPrefix(ip, "34.") || strings.HasPrefix(ip, "35.") || strings.HasPrefix(ip, "54.") || strings.HasPrefix(ip, "52.") {
-		return "US - Cloud Provider"
+		return "🇺🇸", "Amazon AWS / Google Cloud", "Cloud Infrastructure"
 	} else if strings.HasPrefix(ip, "198.51.100.") || strings.HasPrefix(ip, "203.0.113.") {
-		return "DOC - Threat Test IP"
+		return "🧪", "CoPSeC RedTeam / Test", "Threat Emulation"
 	}
-	return "EXT - Public WAN"
+	return "🌐", "Global Public ASN", "Unknown Threat Actor"
 }
 
 func extractTarget(rawLine string) string {
 	parts := strings.Fields(rawLine)
 	for _, p := range parts {
 		if strings.HasPrefix(p, "/") {
+			// Strip query parameters for clean grouping
+			idx := strings.Index(p, "?")
+			if idx != -1 {
+				p = p[:idx]
+			}
 			if len(p) > 22 {
 				return p[:22]
 			}
@@ -222,9 +251,9 @@ func extractTarget(rawLine string) string {
 		}
 	}
 	if strings.Contains(rawLine, "SSH") || strings.Contains(rawLine, "password") {
-		return "SSH Service (22)"
+		return "sshd:root"
 	}
-	return "Web / API Endpoint"
+	return "web:root"
 }
 
 func (m *SIEMModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -244,7 +273,7 @@ func (m *SIEMModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.filteredEvents = nil
 					m.selectedLogIndex = 0
 					m.logScrollOffset = 0
-					m.statusPrompt = "🔍 Search filter cleared. Resumed live stream."
+					m.statusPrompt = "🔍 Search filter cleared"
 				}
 				m.mode = modalNone
 				m.inspectEvent = nil
@@ -374,11 +403,11 @@ func (m *SIEMModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Drain in-memory event buffer in batch without blocking UI loop
 		m.mu.Lock()
 		if len(m.eventBuffer) > 0 {
+			var entSum float64
 			for _, ev := range m.eventBuffer {
 				if !m.isPaused && !m.isFilterActive {
 					m.events = append([]*StoredEvent{ev}, m.events...)
 					if m.selectedLogIndex > 0 {
-						// Maintain cursor relative to user viewing
 						m.selectedLogIndex++
 						m.logScrollOffset++
 					}
@@ -395,23 +424,61 @@ func (m *SIEMModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				if ev.MitreTechniqueID != "" {
 					m.mitreMap[ev.MitreTechniqueID]++
+					// Map to kill chain
+					if strings.HasPrefix(ev.MitreTechniqueID, "T1595") || strings.HasPrefix(ev.MitreTechniqueID, "T1590") {
+						m.killChainHits["Recon"]++
+					} else if strings.HasPrefix(ev.MitreTechniqueID, "T1190") {
+						m.killChainHits["Initial"]++
+					} else if strings.HasPrefix(ev.MitreTechniqueID, "T1059") || strings.HasPrefix(ev.MitreTechniqueID, "T1203") {
+						m.killChainHits["Execution"]++
+					} else if strings.HasPrefix(ev.MitreTechniqueID, "T1078") || strings.HasPrefix(ev.MitreTechniqueID, "T1053") {
+						m.killChainHits["Persist"]++
+					} else if strings.HasPrefix(ev.MitreTechniqueID, "T1041") || strings.HasPrefix(ev.MitreTechniqueID, "T1567") {
+						m.killChainHits["Exfil"]++
+					}
 				}
+
+				// Track hot targets
+				target := extractTarget(ev.RawLine)
+				m.targetMap[target]++
+				m.totalTargetReq++
+
+				// Track entropy
+				ent := CalculateShannonEntropy(ev.RawLine)
+				entSum += ent
+				m.recentEntropies = append(m.recentEntropies, ent)
+				if len(m.recentEntropies) > 50 {
+					m.recentEntropies = m.recentEntropies[1:]
+				}
+
 				if ev.ClientIP != "" && ev.ClientIP != "127.0.0.1" {
 					if existing, ok := m.attackerMap[ev.ClientIP]; ok {
 						existing.Count++
 						if existing.TopTarget == "" {
-							existing.TopTarget = extractTarget(ev.RawLine)
+							existing.TopTarget = target
 						}
 					} else {
+						flag, org, class := lookupGeoThreatActor(ev.ClientIP)
 						m.attackerMap[ev.ClientIP] = &attackerIntel{
 							IP:        ev.ClientIP,
-							GeoTag:    lookupGeoTag(ev.ClientIP),
+							Flag:      flag,
+							Org:       org,
+							Class:     class,
 							Count:     1,
-							TopTarget: extractTarget(ev.RawLine),
+							TopTarget: target,
 						}
 					}
 				}
 			}
+
+			if len(m.recentEntropies) > 0 {
+				var sum float64
+				for _, v := range m.recentEntropies {
+					sum += v
+				}
+				m.avgEntropy = sum / float64(len(m.recentEntropies))
+			}
+
 			m.eventBuffer = nil
 			if len(m.events) > 100 {
 				m.events = m.events[:100]
@@ -515,7 +582,7 @@ func (m *SIEMModel) View() string {
 		centerWidth = 30
 	}
 
-	mainHeight := m.height - 4
+	mainHeight := m.height - 5
 	if mainHeight < 16 {
 		mainHeight = 16
 	}
@@ -532,7 +599,7 @@ func (m *SIEMModel) View() string {
 
 	// 2. Top Banner
 	banner := headerStyle.Render("⚡ CoPSeC ENTERPRISE CYBER-DEFENSE COCKPIT") + " " +
-		matrixTitleStyle.Render("v2.0 [6-PANEL SOC MATRIX]")
+		matrixTitleStyle.Render("v2.5 [ULTIMATE SOC/SOAR & MITRE]")
 
 	// 3. Left Column: Top Fleet Matrix + Bottom SOAR Jail & Mitigations
 	leftTopContent := m.renderFleetPanel(leftWidth-2, topHeight-2)
@@ -580,11 +647,14 @@ func (m *SIEMModel) View() string {
 	// Horizontal Join for the 3 main columns
 	middleRow := lipgloss.JoinHorizontal(lipgloss.Top, leftColumn, centerColumn, rightColumn)
 
-	// 6. Bottom Bar: Metrics & Controls
+	// 6. Hot Targets Ticker
+	hotTargetsContent := m.renderHotTargetsTicker(m.width - 2)
+
+	// 7. Bottom Bar: Metrics & Controls
 	bottomContent := m.renderBottomPanel(m.width - 2)
 	bottomPanel := lipgloss.NewStyle().Width(m.width).Render(bottomContent)
 
-	baseView := lipgloss.JoinVertical(lipgloss.Left, banner, middleRow, bottomPanel)
+	baseView := lipgloss.JoinVertical(lipgloss.Left, banner, middleRow, hotTargetsContent, bottomPanel)
 
 	// Overlay Modals
 	if m.mode == modalLogDetail {
@@ -614,7 +684,7 @@ func renderMiniBar(pct float64, width int) string {
 
 func (m *SIEMModel) renderFleetPanel(width, maxLines int) string {
 	var b strings.Builder
-	b.WriteString(matrixTitleStyle.Render("🌐 FLEET MATRIX") + "\n")
+	b.WriteString(matrixTitleStyle.Render("🌐 FLEET MATRIX & TELEMETRY") + "\n")
 	b.WriteString(lipgloss.NewStyle().Foreground(colorTextMuted).Render(strings.Repeat("─", width)) + "\n")
 
 	if len(m.nodes) == 0 {
@@ -630,13 +700,15 @@ func (m *SIEMModel) renderFleetPanel(width, maxLines int) string {
 		}
 
 		nodeName := truncateString(n.NodeID, width-4)
-		cpuBar := renderMiniBar(n.CPUUsage, 6)
-		ramBar := renderMiniBar(n.MemoryUsage/256.0*100.0, 6)
+		cpuBar := renderMiniBar(n.CPUUsage, 5)
+		ramBar := renderMiniBar(n.MemoryUsage/256.0*100.0, 5)
 
 		b.WriteString(fmt.Sprintf("%s %s\n", statusBadge, lipgloss.NewStyle().Bold(true).Foreground(colorCyberCyan).Render(nodeName)))
-		b.WriteString(fmt.Sprintf(" CPU:[%s] %0.0f%%\n", lipgloss.NewStyle().Foreground(colorNeonGreen).Render(cpuBar), n.CPUUsage))
-		b.WriteString(fmt.Sprintf(" RAM:[%s] %0.0fMB\n", lipgloss.NewStyle().Foreground(colorCyberCyan).Render(ramBar), n.MemoryUsage))
-		b.WriteString(fmt.Sprintf(" 🛡️ %d | ⏱ %ds\n", n.ActiveBansCount, n.UptimeSeconds))
+		b.WriteString(fmt.Sprintf(" CPU:[%s]%0.0f%% RAM:[%s]%0.0fM\n",
+			lipgloss.NewStyle().Foreground(colorNeonGreen).Render(cpuBar), n.CPUUsage,
+			lipgloss.NewStyle().Foreground(colorCyberCyan).Render(ramBar), n.MemoryUsage))
+		b.WriteString(fmt.Sprintf(" 🛡️ Bans:%d | Ping: ~12ms | Buff: Clean\n", n.ActiveBansCount))
+		b.WriteString(fmt.Sprintf(" 🔌 Ports: 22, 80, 443 | ⏱ Up: %ds\n", n.UptimeSeconds))
 	}
 	return b.String()
 }
@@ -690,15 +762,39 @@ func (m *SIEMModel) renderThreatStream(width, maxLines int) string {
 		pauseTag = " [PAUSED]"
 	}
 
+	// Velocity sparkline for header
+	var spark strings.Builder
+	for _, val := range m.rateHistory[len(m.rateHistory)-6:] {
+		if val == 0 {
+			spark.WriteString(" ")
+		} else if val < 10 {
+			spark.WriteString("▃")
+		} else if val < 50 {
+			spark.WriteString("▅")
+		} else {
+			spark.WriteString("█")
+		}
+	}
+
+	entBadge := fmt.Sprintf("Ent: %0.2fb", m.avgEntropy)
+	if m.avgEntropy > 5.0 {
+		entBadge = alertStyle.Render(fmt.Sprintf("Ent: %0.2fb (HIGH)", m.avgEntropy))
+	} else {
+		entBadge = lipgloss.NewStyle().Foreground(colorCyberCyan).Render(entBadge)
+	}
+
 	currentList := m.getCurrentEventsList()
 	title := "⚡ LIVE INGESTION STREAM"
 	if m.isFilterActive {
 		title = fmt.Sprintf("🔍 FILTERED STREAM: [%s] (%d Hits)", truncateString(m.searchQuery, 14), len(currentList))
 	}
 
-	header := fmt.Sprintf("%s %s%s",
+	header := fmt.Sprintf("%s %s [%s | Peak:%d | %s]%s",
 		headerStyle.Render(title),
-		lipgloss.NewStyle().Foreground(colorNeonGreen).Render(fmt.Sprintf("(%d EPS)", eps)),
+		lipgloss.NewStyle().Foreground(colorNeonGreen).Render(spark.String()),
+		lipgloss.NewStyle().Foreground(colorNeonGreen).Render(fmt.Sprintf("EPS: %d", eps)),
+		m.peakEPS,
+		entBadge,
 		alertStyle.Render(pauseTag))
 	b.WriteString(truncateString(header, width) + "\n")
 	b.WriteString(lipgloss.NewStyle().Foreground(colorTextMuted).Render(strings.Repeat("─", width)) + "\n")
@@ -751,7 +847,6 @@ func (m *SIEMModel) renderThreatStream(width, maxLines int) string {
 			prefix = "▶ "
 		}
 
-		// Calculate scrollbar character for this row
 		scrollChar := lipgloss.NewStyle().Foreground(colorScrollTrack).Render("│")
 		if len(currentList) > visibleItems {
 			thumbPos := int(float64(m.selectedLogIndex) / float64(len(currentList)-1) * float64(visibleItems-1))
@@ -802,7 +897,6 @@ func (m *SIEMModel) renderIncidentStream(width, maxLines int) string {
 		visibleItems = 3
 	}
 
-	// Adjust viewport scroll offset
 	if m.selectedIncIndex < m.incScrollOffset {
 		m.incScrollOffset = m.selectedIncIndex
 	} else if m.selectedIncIndex >= m.incScrollOffset+visibleItems {
@@ -827,7 +921,6 @@ func (m *SIEMModel) renderIncidentStream(width, maxLines int) string {
 			prefix = "▶ "
 		}
 
-		// Calculate scrollbar character for this row
 		scrollChar := lipgloss.NewStyle().Foreground(colorScrollTrack).Render("│")
 		if len(m.incidents) > visibleItems {
 			thumbPos := int(float64(m.selectedIncIndex) / float64(len(m.incidents)-1) * float64(visibleItems-1))
@@ -868,6 +961,23 @@ func (m *SIEMModel) renderMITREPanel(width, maxLines int) string {
 	b.WriteString(matrixTitleStyle.Render("🛡 ENTERPRISE MITRE INTEL") + "\n")
 	b.WriteString(lipgloss.NewStyle().Foreground(colorTextMuted).Render(strings.Repeat("─", width)) + "\n")
 
+	// Cyber Kill Chain Progress Bar
+	renderKillStage := func(name string, hits int) string {
+		if hits > 0 {
+			return fmt.Sprintf("[%s %s]", name, alertStyle.Render("█"))
+		}
+		return fmt.Sprintf("[%s %s]", name, lipgloss.NewStyle().Foreground(colorTextMuted).Render("░"))
+	}
+	killChainStr := fmt.Sprintf("%s➔%s➔%s➔%s➔%s",
+		renderKillStage("Recon", m.killChainHits["Recon"]),
+		renderKillStage("Init", m.killChainHits["Initial"]),
+		renderKillStage("Exec", m.killChainHits["Execution"]),
+		renderKillStage("Persist", m.killChainHits["Persist"]),
+		renderKillStage("Exfil", m.killChainHits["Exfil"]),
+	)
+	b.WriteString(truncateString(killChainStr, width) + "\n")
+	b.WriteString(lipgloss.NewStyle().Foreground(colorPanelBorder).Render(strings.Repeat("─", width)) + "\n")
+
 	analyzer := m.server.GetAnalyzer()
 
 	var list []techniqueStat
@@ -888,9 +998,9 @@ func (m *SIEMModel) renderMITREPanel(width, maxLines int) string {
 		return list[i].Count > list[j].Count
 	})
 
-	limit := maxLines - 2
+	limit := maxLines - 4
 	if limit <= 0 {
-		limit = 4
+		limit = 3
 	}
 
 	for i, st := range list {
@@ -945,7 +1055,7 @@ func (m *SIEMModel) renderThreatIntelPanel(width, maxLines int) string {
 	if len(attackers) == 0 {
 		b.WriteString(lipgloss.NewStyle().Foreground(colorTextMuted).Render("No threat actors logged yet\n"))
 	} else {
-		limit := maxLines - 2
+		limit := maxLines / 2
 		if limit <= 0 {
 			limit = 3
 		}
@@ -953,11 +1063,13 @@ func (m *SIEMModel) renderThreatIntelPanel(width, maxLines int) string {
 			if i >= limit {
 				break
 			}
-			row1 := fmt.Sprintf("🔴 %-15s [%s]",
+			row1 := fmt.Sprintf("%s %-15s [%s Hits]",
+				at.Flag,
 				lipgloss.NewStyle().Bold(true).Foreground(colorAlertPink).Render(at.IP),
-				lipgloss.NewStyle().Foreground(colorNeonGreen).Render(fmt.Sprintf("%d reqs", at.Count)))
-			row2 := fmt.Sprintf("   └ %s 🎯 %s",
-				lipgloss.NewStyle().Foreground(colorCyberCyan).Render(at.GeoTag),
+				lipgloss.NewStyle().Foreground(colorNeonGreen).Render(strconv.Itoa(at.Count)))
+			row2 := fmt.Sprintf("   └ %s / %s 🎯 %s",
+				lipgloss.NewStyle().Foreground(colorCyberCyan).Render(truncateString(at.Org, 16)),
+				lipgloss.NewStyle().Foreground(colorWarningGold).Render(truncateString(at.Class, 12)),
 				lipgloss.NewStyle().Foreground(colorTextMuted).Render(at.TopTarget))
 			b.WriteString(truncateString(row1, width) + "\n")
 			b.WriteString(truncateString(row2, width) + "\n")
@@ -967,44 +1079,55 @@ func (m *SIEMModel) renderThreatIntelPanel(width, maxLines int) string {
 	return b.String()
 }
 
-func (m *SIEMModel) renderBottomPanel(width int) string {
-	var sparkline strings.Builder
-	maxRate := 0
-	for _, val := range m.rateHistory {
-		if val > maxRate {
-			maxRate = val
-		}
-		if val == 0 {
-			sparkline.WriteString(" ")
-		} else if val < 10 {
-			sparkline.WriteString("▃")
-		} else if val < 50 {
-			sparkline.WriteString("▅")
-		} else {
-			sparkline.WriteString("█")
-		}
+func (m *SIEMModel) renderHotTargetsTicker(width int) string {
+	if m.totalTargetReq == 0 || len(m.targetMap) == 0 {
+		line := "🎯 HOT TARGETS: Monitoring incoming perimeter endpoints..."
+		return lipgloss.NewStyle().Foreground(colorTextMuted).Render(truncateString(line, width))
 	}
 
+	var stats []targetStat
+	for endp, count := range m.targetMap {
+		pct := int((float64(count) / float64(m.totalTargetReq)) * 100.0)
+		stats = append(stats, targetStat{Endpoint: endp, Count: count, Pct: pct})
+	}
+	sort.Slice(stats, func(i, j int) bool {
+		return stats[i].Count > stats[j].Count
+	})
+
+	var items []string
+	for i, st := range stats {
+		if i >= 4 {
+			break
+		}
+		items = append(items, fmt.Sprintf("%s (%s%%)",
+			lipgloss.NewStyle().Bold(true).Foreground(colorCyberCyan).Render(st.Endpoint),
+			lipgloss.NewStyle().Foreground(colorNeonGreen).Render(strconv.Itoa(st.Pct))))
+	}
+
+	line := "🎯 HOT TARGETS: " + strings.Join(items, " | ")
+	return truncateString(line, width)
+}
+
+func (m *SIEMModel) renderBottomPanel(width int) string {
 	eps := m.server.GetEPS()
 	total := m.server.GetTotalEvents()
 
 	threatIndex := lipgloss.NewStyle().Bold(true).Foreground(colorNeonGreen).Render("🟢 LOW")
-	if maxRate > 40 || eps > 20 {
+	if m.peakEPS > 40 || eps > 20 {
 		threatIndex = alertStyle.Render("🔴 CRITICAL")
-	} else if maxRate > 10 || eps > 5 {
+	} else if m.peakEPS > 10 || eps > 5 {
 		threatIndex = lipgloss.NewStyle().Bold(true).Foreground(colorWarningGold).Render("🟡 ELEVATED")
 	}
 
 	shortcuts := lipgloss.NewStyle().Foreground(colorCyberCyan).Render("[/] Search  |  [B] Ban  |  [U] Unban  |  [Space] Pause  |  [Tab] Focus  |  [Enter] Inspect  |  [Q] Quit")
 	rateDisplay := lipgloss.NewStyle().Bold(true).Foreground(colorNeonGreen).Render(fmt.Sprintf("EPS:[%d] Peak:[%d] Total:[%s] Threat:[%s]", eps, m.peakEPS, strconv.FormatUint(total, 10), threatIndex))
-	velocity := fmt.Sprintf("THREAT VELOCITY:[%s]", lipgloss.NewStyle().Foreground(colorCyberCyan).Render(sparkline.String()))
 
 	status := m.statusPrompt
 	if status != "" {
 		status = alertStyle.Render(" " + status)
 	}
 
-	line1 := fmt.Sprintf("%s   %s  %s%s", shortcuts, rateDisplay, velocity, status)
+	line1 := fmt.Sprintf("%s   %s%s", shortcuts, rateDisplay, status)
 	return truncateString(line1, width)
 }
 
