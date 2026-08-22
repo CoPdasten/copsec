@@ -4,14 +4,19 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 )
 
+const NginxBlocklistPath = "/etc/nginx/conf.d/copsec_blocklist.conf"
+
 var (
 	nftInitOnce sync.Once
 	nftInitErr  error
+	blocklistMu sync.Mutex
 )
 
 // EnsureNftablesRules initializes the kernel-compatible inet table and timeout sets.
@@ -68,7 +73,73 @@ func KillActiveTCPConnections(ipStr string) {
 	_ = exec.Command("sudo", "conntrack", "-D", "-d", ipStr).Run()
 }
 
-// ExecuteBan drops all packets at RAW PREROUTING and INPUT, kills all active TCP sockets, and registers in nftables.
+func addNginxDenyRule(ip string) error {
+	dir := filepath.Dir(NginxBlocklistPath)
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		return nil // Nginx configuration directory does not exist, skip safely
+	}
+
+	blocklistMu.Lock()
+	defer blocklistMu.Unlock()
+
+	targetEntry := fmt.Sprintf("deny %s;", ip)
+	content, err := os.ReadFile(NginxBlocklistPath)
+	if err == nil && strings.Contains(string(content), targetEntry) {
+		return nil
+	}
+
+	f, err := os.OpenFile(NginxBlocklistPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err == nil {
+		defer f.Close()
+		_, err = f.WriteString(targetEntry + "\n")
+		return err
+	}
+
+	// Sudo fallback for non-root collector processes
+	echoCmd := fmt.Sprintf("echo '%s' >> %s", targetEntry, NginxBlocklistPath)
+	return exec.Command("sudo", "sh", "-c", echoCmd).Run()
+}
+
+func removeNginxDenyRule(ip string) error {
+	blocklistMu.Lock()
+	defer blocklistMu.Unlock()
+
+	data, err := os.ReadFile(NginxBlocklistPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		// Try reading with sudo
+		out, sudoErr := exec.Command("sudo", "cat", NginxBlocklistPath).CombinedOutput()
+		if sudoErr != nil {
+			return err
+		}
+		data = out
+	}
+
+	var newLines []string
+	targetEntry := fmt.Sprintf("deny %s;", ip)
+	for _, line := range strings.Split(string(data), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" && trimmed != targetEntry {
+			newLines = append(newLines, trimmed)
+		}
+	}
+
+	outData := ""
+	if len(newLines) > 0 {
+		outData = strings.Join(newLines, "\n") + "\n"
+	}
+
+	writeErr := os.WriteFile(NginxBlocklistPath, []byte(outData), 0644)
+	if writeErr != nil {
+		sedCmd := fmt.Sprintf("sed -i '/deny %s;/d' %s", ip, NginxBlocklistPath)
+		return exec.Command("sudo", "sh", "-c", sedCmd).Run()
+	}
+	return nil
+}
+
+// ExecuteBan executes Hybrid L3/L4 iptables + Kernel Socket Killer + L7 Nginx WAF isolation.
 func ExecuteBan(targetIP string, timeoutSeconds int) error {
 	targetIP = strings.TrimSpace(targetIP)
 	if targetIP == "" {
@@ -90,18 +161,16 @@ func ExecuteBan(targetIP string, timeoutSeconds int) error {
 		cmdTool = "ip6tables"
 	}
 
-	// 1. En erken aşamada düşür (RAW PREROUTING - State bakmaksızın anında DROP)
+	// 1. L3 / L4 Katmanı: Doğrudan gelen TCP paketleri için RAW PREROUTING / INPUT & ss-kill
 	_ = exec.Command(cmdTool, "-t", "raw", "-I", "PREROUTING", "1", "-s", targetIP, "-j", "DROP").Run()
 	_ = exec.Command("sudo", cmdTool, "-t", "raw", "-I", "PREROUTING", "1", "-s", targetIP, "-j", "DROP").Run()
 
-	// 2. INPUT zincirine DROP ekle
 	_ = exec.Command(cmdTool, "-I", "INPUT", "1", "-s", targetIP, "-j", "DROP").Run()
 	_ = exec.Command("sudo", cmdTool, "-I", "INPUT", "1", "-s", targetIP, "-j", "DROP").Run()
 
-	// 3. Mevcut tüm TCP/UDP oturumlarını conntrack üzerinden anında sil & Kernel Socket Destruction
 	KillActiveTCPConnections(targetIP)
 
-	// 4. nftables kuralı (varsa)
+	// 2. nftables desteği
 	_ = EnsureNftablesRules()
 	if !isV6 {
 		_ = exec.Command("nft", "add", "element", "inet", "copsec_filter", "ban_list", fmt.Sprintf("{ %s timeout %ds }", targetIP, timeoutSeconds)).Run()
@@ -111,11 +180,19 @@ func ExecuteBan(targetIP string, timeoutSeconds int) error {
 		_ = exec.Command("sudo", "nft", "add", "element", "inet", "copsec_filter", "ban_list_v6", fmt.Sprintf("{ %s timeout %ds }", targetIP, timeoutSeconds)).Run()
 	}
 
-	log.Printf("[SOAR_MITIGATION] 🚫 Severed all TCP sockets & isolated %s via RAW PREROUTING/INPUT/ss-kill for %ds", targetIP, timeoutSeconds)
+	// 3. L7 Katmanı: Nginx Dynamic Blocklist (Cloudflare / Reverse Proxy için)
+	if err := addNginxDenyRule(targetIP); err != nil {
+		log.Printf("[SOAR_MITIGATION] ⚠️ Failed to update nginx blocklist: %v", err)
+	} else {
+		_ = exec.Command("nginx", "-s", "reload").Run()
+		_ = exec.Command("sudo", "nginx", "-s", "reload").Run()
+	}
+
+	log.Printf("[SOAR_MITIGATION] 🚫 [HYBRID BAN] %s blocked via iptables RAW/INPUT + Nginx WAF for %ds", targetIP, timeoutSeconds)
 	return nil
 }
 
-// ExecuteUnban removes the target IP from raw/input firewall chains and nftables sets.
+// ExecuteUnban removes target IP from L3/L4 firewall and L7 Nginx WAF blocklists.
 func ExecuteUnban(targetIP string) error {
 	targetIP = strings.TrimSpace(targetIP)
 	if targetIP == "" {
@@ -147,17 +224,22 @@ func ExecuteUnban(targetIP string) error {
 		_ = exec.Command("sudo", "nft", "delete", "element", "inet", "copsec_filter", "ban_list_v6", fmt.Sprintf("{ %s }", targetIP)).Run()
 	}
 
-	log.Printf("[SOAR_MITIGATION] 🟢 Unbanned %s", targetIP)
+	if err := removeNginxDenyRule(targetIP); err == nil {
+		_ = exec.Command("nginx", "-s", "reload").Run()
+		_ = exec.Command("sudo", "nginx", "-s", "reload").Run()
+	}
+
+	log.Printf("[SOAR_MITIGATION] 🟢 [HYBRID UNBAN] %s removed across L3 iptables & L7 Nginx WAF", targetIP)
 	return nil
 }
 
-// ExecuteSOARBan wraps ExecuteBan for compatibility with legacy client and fallback calls.
+// ExecuteSOARBan wraps ExecuteBan for compatibility.
 func ExecuteSOARBan(ipStr string, durationSec int64) (bool, string) {
 	err := ExecuteBan(ipStr, int(durationSec))
 	if err != nil {
 		return false, err.Error()
 	}
-	return true, fmt.Sprintf("Successfully isolated %s via [RAW PREROUTING/INPUT, TCP-Killer(RST)] for %ds", ipStr, durationSec)
+	return true, fmt.Sprintf("Successfully isolated %s via [HYBRID L3/L4 iptables + L7 Nginx WAF] for %ds", ipStr, durationSec)
 }
 
 // ExecuteSOARUnban wraps ExecuteUnban for compatibility.
