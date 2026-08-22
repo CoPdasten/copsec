@@ -29,6 +29,25 @@ type StoredEvent struct {
 	AIAnalysis       string `json:"ai_analysis,omitempty"`
 }
 
+// ActiveBanRecord represents an IP quarantined in the SOAR Jail.
+type ActiveBanRecord struct {
+	ID              int64  `json:"id"`
+	IP              string `json:"ip"`
+	Reason          string `json:"reason"`
+	BanTimeMs       int64  `json:"ban_time_ms"`
+	DurationSeconds int64  `json:"duration_seconds"`
+	Status          string `json:"status"`
+}
+
+// SOARActionRecord tracks fleet containment operations.
+type SOARActionRecord struct {
+	ID          int64  `json:"id"`
+	ActionType  string `json:"action_type"`
+	TargetIP    string `json:"target_ip"`
+	NodesCount  int    `json:"nodes_count"`
+	TimestampMs int64  `json:"timestamp_ms"`
+}
+
 // MITREStat summarizes technique occurrences.
 type MITREStat struct {
 	TechniqueID string `json:"technique_id"`
@@ -93,6 +112,22 @@ func (s *StorageEngine) initSchema() error {
 	CREATE INDEX IF NOT EXISTS idx_events_threat_score ON events(threat_score DESC);
 	CREATE INDEX IF NOT EXISTS idx_events_node_id ON events(node_id);
 
+	CREATE TABLE IF NOT EXISTS active_bans (
+		ip TEXT PRIMARY KEY,
+		reason TEXT DEFAULT '',
+		ban_time_ms INTEGER NOT NULL,
+		duration_seconds INTEGER DEFAULT 86400,
+		status TEXT DEFAULT 'ACTIVE'
+	);
+
+	CREATE TABLE IF NOT EXISTS soar_actions (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		action_type TEXT NOT NULL,
+		target_ip TEXT NOT NULL,
+		nodes_count INTEGER DEFAULT 1,
+		timestamp_ms INTEGER NOT NULL
+	);
+
 	CREATE TABLE IF NOT EXISTS node_registry (
 		node_id TEXT PRIMARY KEY,
 		api_key TEXT NOT NULL,
@@ -129,6 +164,81 @@ func (s *StorageEngine) UpdateEventAI(eventID int64, aiAnalysis string) error {
 	query := `UPDATE events SET ai_analysis = ? WHERE id = ?`
 	_, err := s.db.Exec(query, aiAnalysis, eventID)
 	return err
+}
+
+// RecordBan saves a banned IP in the jail.
+func (s *StorageEngine) RecordBan(ip, reason string, durationSeconds int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	query := `INSERT OR REPLACE INTO active_bans (ip, reason, ban_time_ms, duration_seconds, status)
+	          VALUES (?, ?, ?, ?, 'ACTIVE')`
+	_, err := s.db.Exec(query, ip, reason, time.Now().UnixMilli(), durationSeconds)
+	return err
+}
+
+// RemoveBan clears an unbanned IP.
+func (s *StorageEngine) RemoveBan(ip string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	query := `DELETE FROM active_bans WHERE ip = ?`
+	_, err := s.db.Exec(query, ip)
+	return err
+}
+
+// GetActiveBans returns currently quarantined IPs.
+func (s *StorageEngine) GetActiveBans() ([]ActiveBanRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	query := `SELECT ip, reason, ban_time_ms, duration_seconds, status FROM active_bans ORDER BY ban_time_ms DESC LIMIT 15`
+	rows, err := s.db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var bans []ActiveBanRecord
+	for rows.Next() {
+		var b ActiveBanRecord
+		if err := rows.Scan(&b.IP, &b.Reason, &b.BanTimeMs, &b.DurationSeconds, &b.Status); err == nil {
+			bans = append(bans, b)
+		}
+	}
+	return bans, nil
+}
+
+// RecordSOARAction records an executed SOAR mitigation command.
+func (s *StorageEngine) RecordSOARAction(actionType, targetIP string, nodesCount int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	query := `INSERT INTO soar_actions (action_type, target_ip, nodes_count, timestamp_ms) VALUES (?, ?, ?, ?)`
+	_, err := s.db.Exec(query, actionType, targetIP, nodesCount, time.Now().UnixMilli())
+	return err
+}
+
+// GetRecentSOARActions retrieves the latest SOAR execution log.
+func (s *StorageEngine) GetRecentSOARActions(limit int) ([]SOARActionRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	query := `SELECT id, action_type, target_ip, nodes_count, timestamp_ms FROM soar_actions ORDER BY timestamp_ms DESC LIMIT ?`
+	rows, err := s.db.Query(query, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var list []SOARActionRecord
+	for rows.Next() {
+		var a SOARActionRecord
+		if err := rows.Scan(&a.ID, &a.ActionType, &a.TargetIP, &a.NodesCount, &a.TimestampMs); err == nil {
+			list = append(list, a)
+		}
+	}
+	return list, nil
 }
 
 // GetRecentEvents retrieves the latest events.

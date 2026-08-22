@@ -85,12 +85,14 @@ type techniqueStat struct {
 	Count  int
 }
 
-type attackerStat struct {
-	IP    string
-	Count int
+type attackerIntel struct {
+	IP        string
+	GeoTag    string
+	Count     int
+	TopTarget string
 }
 
-// SIEMModel holds the state for the dual-window SOC cockpit with search & forensic inspection.
+// SIEMModel holds the state for the 6-panel SOC cockpit with Threat Hunting & GeoIP radar.
 type SIEMModel struct {
 	server       *CentralServer
 	storage      *StorageEngine
@@ -99,10 +101,13 @@ type SIEMModel struct {
 	events       []*StoredEvent
 	incidents    []*StoredEvent
 	nodes        []NodeSession
+	activeBans   []ActiveBanRecord
+	soarActions  []SOARActionRecord
 	mitreMap     map[string]int
-	attackerMap  map[string]int
+	attackerMap  map[string]*attackerIntel
 	activeTab    int
 	rateHistory  []int
+	peakEPS      int
 	statusPrompt string
 	isPaused     bool
 
@@ -125,14 +130,14 @@ type SIEMModel struct {
 	inputIP string
 }
 
-// NewSIEMModel creates a new TUI dashboard model with dual-window layout.
+// NewSIEMModel creates a new 6-panel TUI dashboard model.
 func NewSIEMModel(server *CentralServer, storage *StorageEngine) *SIEMModel {
 	m := &SIEMModel{
 		server:      server,
 		storage:     storage,
 		mitreMap:    make(map[string]int),
-		attackerMap: make(map[string]int),
-		rateHistory: make([]int, 25),
+		attackerMap: make(map[string]*attackerIntel),
+		rateHistory: make([]int, 20),
 	}
 
 	// Initialize default core techniques
@@ -141,7 +146,7 @@ func NewSIEMModel(server *CentralServer, storage *StorageEngine) *SIEMModel {
 		m.mitreMap[t] = 0
 	}
 
-	// Load historical stats and incidents from DB
+	// Load historical stats, incidents and bans from DB
 	if stats, err := storage.GetMITREStats(); err == nil {
 		for _, s := range stats {
 			m.mitreMap[s.TechniqueID] = s.Count
@@ -149,6 +154,12 @@ func NewSIEMModel(server *CentralServer, storage *StorageEngine) *SIEMModel {
 	}
 	if incs, err := storage.GetCriticalEvents(30); err == nil {
 		m.incidents = incs
+	}
+	if bans, err := storage.GetActiveBans(); err == nil {
+		m.activeBans = bans
+	}
+	if actions, err := storage.GetRecentSOARActions(5); err == nil {
+		m.soarActions = actions
 	}
 
 	// Background worker reading events into memory buffer
@@ -175,6 +186,38 @@ func (m *SIEMModel) tickCmd() tea.Cmd {
 	return tea.Tick(80*time.Millisecond, func(t time.Time) tea.Msg {
 		return tickMsg(t)
 	})
+}
+
+// lookupGeoTag assigns an ASN / Geo threat actor tag to IP addresses.
+func lookupGeoTag(ip string) string {
+	if strings.HasPrefix(ip, "185.220.") || strings.HasPrefix(ip, "185.222.") || strings.HasPrefix(ip, "104.244.") {
+		return "DE - Tor Exit Node"
+	} else if strings.HasPrefix(ip, "45.154.") || strings.HasPrefix(ip, "194.26.") || strings.HasPrefix(ip, "193.106.") {
+		return "RU - Scanner/Nuclei"
+	} else if strings.HasPrefix(ip, "176.") || strings.HasPrefix(ip, "88.") || strings.HasPrefix(ip, "212.") || strings.HasPrefix(ip, "78.") {
+		return "TR - Turkcell/ISP"
+	} else if strings.HasPrefix(ip, "34.") || strings.HasPrefix(ip, "35.") || strings.HasPrefix(ip, "54.") || strings.HasPrefix(ip, "52.") {
+		return "US - Cloud Provider"
+	} else if strings.HasPrefix(ip, "198.51.100.") || strings.HasPrefix(ip, "203.0.113.") {
+		return "DOC - Threat Test IP"
+	}
+	return "EXT - Public WAN"
+}
+
+func extractTarget(rawLine string) string {
+	parts := strings.Fields(rawLine)
+	for _, p := range parts {
+		if strings.HasPrefix(p, "/") {
+			if len(p) > 22 {
+				return p[:22]
+			}
+			return p
+		}
+	}
+	if strings.Contains(rawLine, "SSH") || strings.Contains(rawLine, "password") {
+		return "SSH Service (22)"
+	}
+	return "Web / API Endpoint"
 }
 
 func (m *SIEMModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -249,7 +292,7 @@ func (m *SIEMModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.selectedIncIndex > 0 {
 					m.selectedIncIndex--
 				}
-			} else { // Live Stream or default
+			} else { // Live Stream
 				if m.selectedLogIndex > 0 {
 					m.selectedLogIndex--
 				}
@@ -259,13 +302,12 @@ func (m *SIEMModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.selectedIncIndex < len(m.incidents)-1 && m.selectedIncIndex < 15 {
 					m.selectedIncIndex++
 				}
-			} else { // Live Stream or default
+			} else { // Live Stream
 				if m.selectedLogIndex < len(m.events)-1 && m.selectedLogIndex < 15 {
 					m.selectedLogIndex++
 				}
 			}
 		case "enter":
-			// Bind single selected event under cursor
 			if m.activeTab == 2 && len(m.incidents) > 0 && m.selectedIncIndex < len(m.incidents) {
 				m.inspectEvent = m.incidents[m.selectedIncIndex]
 				m.mode = modalLogDetail
@@ -308,7 +350,19 @@ func (m *SIEMModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.mitreMap[ev.MitreTechniqueID]++
 				}
 				if ev.ClientIP != "" && ev.ClientIP != "127.0.0.1" {
-					m.attackerMap[ev.ClientIP]++
+					if existing, ok := m.attackerMap[ev.ClientIP]; ok {
+						existing.Count++
+						if existing.TopTarget == "" {
+							existing.TopTarget = extractTarget(ev.RawLine)
+						}
+					} else {
+						m.attackerMap[ev.ClientIP] = &attackerIntel{
+							IP:        ev.ClientIP,
+							GeoTag:    lookupGeoTag(ev.ClientIP),
+							Count:     1,
+							TopTarget: extractTarget(ev.RawLine),
+						}
+					}
 				}
 			}
 			m.eventBuffer = nil
@@ -319,8 +373,17 @@ func (m *SIEMModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.mu.Unlock()
 
 		m.nodes = m.server.GetNodesSnapshot()
+		if bans, err := m.storage.GetActiveBans(); err == nil {
+			m.activeBans = bans
+		}
+		if actions, err := m.storage.GetRecentSOARActions(3); err == nil {
+			m.soarActions = actions
+		}
 
 		eps := int(m.server.GetEPS())
+		if eps > m.peakEPS {
+			m.peakEPS = eps
+		}
 		m.rateHistory = append(m.rateHistory[1:], eps)
 
 		return m, m.tickCmd()
@@ -377,14 +440,14 @@ func (m *SIEMModel) View() string {
 	}
 
 	// 1. Strict Grid Math Calculation
-	leftWidth := int(float64(m.width) * 0.22)
+	leftWidth := int(float64(m.width) * 0.23)
 	if leftWidth < 24 {
 		leftWidth = 24
 	} else if leftWidth > 32 {
 		leftWidth = 32
 	}
 
-	rightWidth := int(float64(m.width) * 0.28)
+	rightWidth := int(float64(m.width) * 0.29)
 	if rightWidth < 30 {
 		rightWidth = 30
 	}
@@ -395,58 +458,61 @@ func (m *SIEMModel) View() string {
 	}
 
 	mainHeight := m.height - 4
-	if mainHeight < 14 {
-		mainHeight = 14
+	if mainHeight < 16 {
+		mainHeight = 16
 	}
 
-	centerTopHeight := int(float64(mainHeight) * 0.52)
-	if centerTopHeight < 6 {
-		centerTopHeight = 6
+	// Vertical splits
+	topHeight := int(float64(mainHeight) * 0.52)
+	if topHeight < 6 {
+		topHeight = 6
 	}
-	centerBottomHeight := mainHeight - centerTopHeight - 2
-	if centerBottomHeight < 6 {
-		centerBottomHeight = 6
+	bottomHeight := mainHeight - topHeight - 2
+	if bottomHeight < 6 {
+		bottomHeight = 6
 	}
 
 	// 2. Top Banner
 	banner := headerStyle.Render("⚡ CoPSeC ENTERPRISE CYBER-DEFENSE COCKPIT") + " " +
-		matrixTitleStyle.Render("v2.0 [DUAL-WINDOW SOC]")
+		matrixTitleStyle.Render("v2.0 [6-PANEL SOC MATRIX]")
 
-	// 3. Left Panel: Fleet Matrix & Telemetry
-	leftContent := m.renderFleetPanel(leftWidth - 2)
-	leftStyle := basePanelStyle
-	if m.activeTab == 0 {
-		leftStyle = activePanelStyle
-	}
-	leftPanel := leftStyle.Width(leftWidth).Height(mainHeight).MaxHeight(mainHeight).Render(leftContent)
+	// 3. Left Column: Top Fleet Matrix + Bottom SOAR Jail & Mitigations
+	leftTopContent := m.renderFleetPanel(leftWidth-2, topHeight-2)
+	leftTopPanel := basePanelStyle.Width(leftWidth).Height(topHeight).MaxHeight(topHeight).Render(leftTopContent)
 
-	// 4. Center Panels: Top Raw Stream + Bottom Critical Incidents
-	centerTopContent := m.renderThreatStream(centerWidth-2, centerTopHeight-2)
+	leftBottomContent := m.renderJailPanel(leftWidth-2, bottomHeight-2)
+	leftBottomPanel := basePanelStyle.Width(leftWidth).Height(bottomHeight).MaxHeight(bottomHeight).Render(leftBottomContent)
+
+	leftColumn := lipgloss.JoinVertical(lipgloss.Left, leftTopPanel, leftBottomPanel)
+
+	// 4. Center Column: Top Raw Stream + Bottom Critical Incidents
+	centerTopContent := m.renderThreatStream(centerWidth-2, topHeight-2)
 	topStyle := basePanelStyle
 	if m.activeTab == 1 {
 		topStyle = activePanelStyle
 	}
-	centerTopPanel := topStyle.Width(centerWidth).Height(centerTopHeight).MaxHeight(centerTopHeight).Render(centerTopContent)
+	centerTopPanel := topStyle.Width(centerWidth).Height(topHeight).MaxHeight(topHeight).Render(centerTopContent)
 
-	centerBottomContent := m.renderIncidentStream(centerWidth-2, centerBottomHeight-2)
+	centerBottomContent := m.renderIncidentStream(centerWidth-2, bottomHeight-2)
 	bottomStyle := basePanelStyle
 	if m.activeTab == 2 {
 		bottomStyle = activePanelStyle
 	}
-	centerBottomPanel := bottomStyle.Width(centerWidth).Height(centerBottomHeight).MaxHeight(centerBottomHeight).Render(centerBottomContent)
+	centerBottomPanel := bottomStyle.Width(centerWidth).Height(bottomHeight).MaxHeight(bottomHeight).Render(centerBottomContent)
 
 	centerColumn := lipgloss.JoinVertical(lipgloss.Left, centerTopPanel, centerBottomPanel)
 
-	// 5. Right Panel: Enterprise MITRE Heatmap & Intel
-	rightContent := m.renderMITREPanel(rightWidth-2, mainHeight-2)
-	rightStyle := basePanelStyle
-	if m.activeTab == 3 {
-		rightStyle = activePanelStyle
-	}
-	rightPanel := rightStyle.Width(rightWidth).Height(mainHeight).MaxHeight(mainHeight).Render(rightContent)
+	// 5. Right Column: Top Enterprise MITRE Heatmap + Bottom Geo Threat Radar & Actors
+	rightTopContent := m.renderMITREPanel(rightWidth-2, topHeight-2)
+	rightTopPanel := basePanelStyle.Width(rightWidth).Height(topHeight).MaxHeight(topHeight).Render(rightTopContent)
+
+	rightBottomContent := m.renderThreatIntelPanel(rightWidth-2, bottomHeight-2)
+	rightBottomPanel := basePanelStyle.Width(rightWidth).Height(bottomHeight).MaxHeight(bottomHeight).Render(rightBottomContent)
+
+	rightColumn := lipgloss.JoinVertical(lipgloss.Left, rightTopPanel, rightBottomPanel)
 
 	// Horizontal Join for the 3 main columns
-	middleRow := lipgloss.JoinHorizontal(lipgloss.Top, leftPanel, centerColumn, rightPanel)
+	middleRow := lipgloss.JoinHorizontal(lipgloss.Top, leftColumn, centerColumn, rightColumn)
 
 	// 6. Bottom Bar: Metrics & Controls
 	bottomContent := m.renderBottomPanel(m.width - 2)
@@ -468,7 +534,7 @@ func (m *SIEMModel) View() string {
 
 func renderMiniBar(pct float64, width int) string {
 	if width <= 0 {
-		width = 8
+		width = 6
 	}
 	filled := int((pct / 100.0) * float64(width))
 	if filled > width {
@@ -480,7 +546,7 @@ func renderMiniBar(pct float64, width int) string {
 	return strings.Repeat("█", filled) + strings.Repeat("░", width-filled)
 }
 
-func (m *SIEMModel) renderFleetPanel(width int) string {
+func (m *SIEMModel) renderFleetPanel(width, maxLines int) string {
 	var b strings.Builder
 	b.WriteString(matrixTitleStyle.Render("🌐 FLEET MATRIX") + "\n")
 	b.WriteString(lipgloss.NewStyle().Foreground(colorTextMuted).Render(strings.Repeat("─", width)) + "\n")
@@ -504,7 +570,48 @@ func (m *SIEMModel) renderFleetPanel(width int) string {
 		b.WriteString(fmt.Sprintf("%s %s\n", statusBadge, lipgloss.NewStyle().Bold(true).Foreground(colorCyberCyan).Render(nodeName)))
 		b.WriteString(fmt.Sprintf(" CPU:[%s] %0.0f%%\n", lipgloss.NewStyle().Foreground(colorNeonGreen).Render(cpuBar), n.CPUUsage))
 		b.WriteString(fmt.Sprintf(" RAM:[%s] %0.0fMB\n", lipgloss.NewStyle().Foreground(colorCyberCyan).Render(ramBar), n.MemoryUsage))
-		b.WriteString(fmt.Sprintf(" 🛡️ %d | ⏱ %ds\n\n", n.ActiveBansCount, n.UptimeSeconds))
+		b.WriteString(fmt.Sprintf(" 🛡️ %d | ⏱ %ds\n", n.ActiveBansCount, n.UptimeSeconds))
+	}
+	return b.String()
+}
+
+func (m *SIEMModel) renderJailPanel(width, maxLines int) string {
+	var b strings.Builder
+	b.WriteString(alertStyle.Render("🛡 SOAR JAIL & MITIGATIONS") + "\n")
+	b.WriteString(lipgloss.NewStyle().Foreground(colorTextMuted).Render(strings.Repeat("─", width)) + "\n")
+
+	if len(m.activeBans) == 0 {
+		b.WriteString(lipgloss.NewStyle().Foreground(colorTextMuted).Render("No active IP isolations.\nAll perimeter guards idle.\n"))
+	} else {
+		limit := maxLines - 3
+		if limit <= 0 {
+			limit = 2
+		}
+		for i, ban := range m.activeBans {
+			if i >= limit {
+				break
+			}
+			elapsedSec := (time.Now().UnixMilli() - ban.BanTimeMs) / 1000
+			remSec := ban.DurationSeconds - elapsedSec
+			remStr := fmt.Sprintf("%dm", remSec/60)
+			if remSec <= 0 {
+				remStr = "exp"
+			}
+
+			reason := ban.Reason
+			if len(reason) > 10 {
+				reason = reason[:10]
+			}
+
+			line := fmt.Sprintf("🚫 %-14s %s %s", truncateString(ban.IP, 14), lipgloss.NewStyle().Foreground(colorWarningGold).Render(reason), remStr)
+			b.WriteString(truncateString(line, width) + "\n")
+		}
+	}
+
+	// Recent SOAR Actions
+	if len(m.soarActions) > 0 {
+		act := m.soarActions[0]
+		b.WriteString(lipgloss.NewStyle().Foreground(colorNeonGreen).Render(fmt.Sprintf("[ACK] %s %s (%dn)", act.ActionType, truncateString(act.TargetIP, 11), act.NodesCount)))
 	}
 	return b.String()
 }
@@ -660,9 +767,9 @@ func (m *SIEMModel) renderMITREPanel(width, maxLines int) string {
 		return list[i].Count > list[j].Count
 	})
 
-	limit := maxLines - 7
+	limit := maxLines - 2
 	if limit <= 0 {
-		limit = 6
+		limit = 4
 	}
 
 	for i, st := range list {
@@ -698,29 +805,41 @@ func (m *SIEMModel) renderMITREPanel(width, maxLines int) string {
 		b.WriteString(truncateString(row, width) + "\n")
 	}
 
-	// Intel Box: Top Attacker IPs
-	b.WriteString("\n" + lipgloss.NewStyle().Bold(true).Foreground(colorWarningGold).Render("🎯 TOP ATTACKERS") + "\n")
+	return b.String()
+}
+
+func (m *SIEMModel) renderThreatIntelPanel(width, maxLines int) string {
+	var b strings.Builder
+	b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorWarningGold).Render("🌐 GEOGRAPHIC THREAT RADAR & ACTORS") + "\n")
 	b.WriteString(lipgloss.NewStyle().Foreground(colorTextMuted).Render(strings.Repeat("─", width)) + "\n")
 
-	var attackers []attackerStat
-	for ip, count := range m.attackerMap {
-		attackers = append(attackers, attackerStat{IP: ip, Count: count})
+	var attackers []*attackerIntel
+	for _, at := range m.attackerMap {
+		attackers = append(attackers, at)
 	}
 	sort.Slice(attackers, func(i, j int) bool {
 		return attackers[i].Count > attackers[j].Count
 	})
 
 	if len(attackers) == 0 {
-		b.WriteString(lipgloss.NewStyle().Foreground(colorTextMuted).Render("No threat actors\n"))
+		b.WriteString(lipgloss.NewStyle().Foreground(colorTextMuted).Render("No threat actors logged yet\n"))
 	} else {
+		limit := maxLines - 2
+		if limit <= 0 {
+			limit = 3
+		}
 		for i, at := range attackers {
-			if i >= 2 {
+			if i >= limit {
 				break
 			}
-			row := fmt.Sprintf("⚡ %-15s [%s]",
+			row1 := fmt.Sprintf("🔴 %-15s [%s]",
 				lipgloss.NewStyle().Bold(true).Foreground(colorAlertPink).Render(at.IP),
-				lipgloss.NewStyle().Foreground(colorNeonGreen).Render(strconv.Itoa(at.Count)))
-			b.WriteString(truncateString(row, width) + "\n")
+				lipgloss.NewStyle().Foreground(colorNeonGreen).Render(fmt.Sprintf("%d reqs", at.Count)))
+			row2 := fmt.Sprintf("   └ %s 🎯 %s",
+				lipgloss.NewStyle().Foreground(colorCyberCyan).Render(at.GeoTag),
+				lipgloss.NewStyle().Foreground(colorTextMuted).Render(at.TopTarget))
+			b.WriteString(truncateString(row1, width) + "\n")
+			b.WriteString(truncateString(row2, width) + "\n")
 		}
 	}
 
@@ -756,15 +875,15 @@ func (m *SIEMModel) renderBottomPanel(width int) string {
 	}
 
 	shortcuts := lipgloss.NewStyle().Foreground(colorCyberCyan).Render("[/] Search  |  [B] Ban  |  [U] Unban  |  [Space] Pause  |  [Tab] Focus  |  [Enter] Inspect  |  [Q] Quit")
-	rateDisplay := lipgloss.NewStyle().Bold(true).Foreground(colorNeonGreen).Render(fmt.Sprintf("EPS:[%d] Total:[%s] Threat:[%s]", eps, strconv.FormatUint(total, 10), threatIndex))
-	graph := lipgloss.NewStyle().Foreground(colorCyberCyan).Render(fmt.Sprintf("[%s]", sparkline.String()))
+	rateDisplay := lipgloss.NewStyle().Bold(true).Foreground(colorNeonGreen).Render(fmt.Sprintf("EPS:[%d] Peak:[%d] Total:[%s] Threat:[%s]", eps, m.peakEPS, strconv.FormatUint(total, 10), threatIndex))
+	velocity := fmt.Sprintf("THREAT VELOCITY:[%s]", lipgloss.NewStyle().Foreground(colorCyberCyan).Render(sparkline.String()))
 
 	status := m.statusPrompt
 	if status != "" {
 		status = alertStyle.Render(" " + status)
 	}
 
-	line1 := fmt.Sprintf("%s   %s %s%s", shortcuts, rateDisplay, graph, status)
+	line1 := fmt.Sprintf("%s   %s  %s%s", shortcuts, rateDisplay, velocity, status)
 	return truncateString(line1, width)
 }
 

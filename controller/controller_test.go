@@ -119,6 +119,23 @@ func TestStorageEngine(t *testing.T) {
 	if err != nil || len(searchResults) != 1 {
 		t.Fatalf("Expected 1 search result, got %d (err: %v)", len(searchResults), err)
 	}
+
+	// Active Bans & SOAR Action test
+	if err := store.RecordBan("198.51.100.25", "T1595 Scan", 3600); err != nil {
+		t.Fatalf("RecordBan failed: %v", err)
+	}
+	bans, err := store.GetActiveBans()
+	if err != nil || len(bans) != 1 || bans[0].IP != "198.51.100.25" {
+		t.Fatalf("Expected 1 active ban, got %+v", bans)
+	}
+
+	if err := store.RecordSOARAction("BAN_IP", "198.51.100.25", 1); err != nil {
+		t.Fatalf("RecordSOARAction failed: %v", err)
+	}
+	actions, err := store.GetRecentSOARActions(5)
+	if err != nil || len(actions) != 1 {
+		t.Fatalf("Expected 1 soar action, got %+v", actions)
+	}
 }
 
 func TestCentralServerAuthAndHeartbeat(t *testing.T) {
