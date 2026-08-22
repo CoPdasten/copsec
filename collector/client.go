@@ -18,6 +18,7 @@ import (
 	copsecproto "github.com/copsec/collector/proto"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/keepalive"
 )
 
 // GrpcClientConfig stores gRPC connection and server parameters.
@@ -158,9 +159,16 @@ func (c *ControllerClient) connect(ctx context.Context) (*grpc.ClientConn, copse
 	dialCtx, dialCancel := context.WithTimeout(ctx, 5*time.Second)
 	defer dialCancel()
 
+	keepaliveOpts := grpc.WithKeepaliveParams(keepalive.ClientParameters{
+		Time:                10 * time.Second, // Ping server every 10s
+		Timeout:             3 * time.Second,  // 3s timeout for keepalive response
+		PermitWithoutStream: true,
+	})
+
 	opts := []grpc.DialOption{
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithPerRPCCredentials(c.identity),
+		keepaliveOpts,
 		grpc.WithBlock(),
 	}
 

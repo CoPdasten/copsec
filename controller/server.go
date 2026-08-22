@@ -16,6 +16,7 @@ import (
 	copsecproto "github.com/copsec/collector/proto"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
@@ -268,6 +269,9 @@ func (s *CentralServer) processEvent(nodeID string, event *copsecproto.LogEvent)
 		go bot.ProcessEvent(stored)
 	}
 
+	// Thread-safe batching pool for zero-lock TUI rendering
+	PushLogToTUI(stored)
+
 	// Direct reactive dispatch to Bubbletea TUI with crash-protection guard
 	s.mu.RLock()
 	p := s.teaProgram
@@ -488,14 +492,27 @@ func (s *CentralServer) GetTotalEvents() uint64 {
 	return atomic.LoadUint64(&s.totalEventsProcessed)
 }
 
-// StartGRPCServer initializes the gRPC listener with CopsecStreamServiceServer registration.
+// StartGRPCServer initializes the gRPC listener with CopsecStreamServiceServer registration and aggressive keepalive policies.
 func StartGRPCServer(addr string, server *CentralServer) (*grpc.Server, error) {
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to listen on %s: %w", addr, err)
 	}
 
-	grpcServer := grpc.NewServer()
+	keepaliveParams := grpc.KeepaliveParams(keepalive.ServerParameters{
+		MaxConnectionIdle:     15 * time.Minute,
+		MaxConnectionAge:      2 * time.Hour,
+		MaxConnectionAgeGrace: 5 * time.Minute,
+		Time:                  15 * time.Second, // Ping client every 15s to keep NAT/VPN routes alive
+		Timeout:               5 * time.Second,
+	})
+
+	enforcementPolicy := grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+		MinTime:             5 * time.Second,
+		PermitWithoutStream: true,
+	})
+
+	grpcServer := grpc.NewServer(keepaliveParams, enforcementPolicy)
 	copsecproto.RegisterCopsecStreamServiceServer(grpcServer, server)
 
 	go func() {

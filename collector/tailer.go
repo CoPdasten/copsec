@@ -289,11 +289,7 @@ func (t *Tailer) readLines(reader *bufio.Reader, file *os.File, currentOffset in
 					Line:      line,
 					Timestamp: time.Now().UnixMilli(),
 				}
-				select {
-				case t.outChan <- entry:
-				default:
-					// Ring-buffer non-blocking: prevent reader lockup
-				}
+				t.sendLogNonBlocking(entry)
 			}
 		}
 
@@ -305,6 +301,15 @@ func (t *Tailer) readLines(reader *bufio.Reader, file *os.File, currentOffset in
 		}
 	}
 	return currentOffset
+}
+
+// sendLogNonBlocking prevents tailer goroutines from stalling when buffer channel is saturated.
+func (t *Tailer) sendLogNonBlocking(entry LogEntry) {
+	select {
+	case t.outChan <- entry:
+	default:
+		// Drop on saturated edge buffer to guarantee continuous file reading
+	}
 }
 
 // isNoisyCollectorLog drops self-generated feedback loop lines and background noise.

@@ -166,7 +166,23 @@ type SIEMModel struct {
 	inputIP string
 }
 
-// NewSIEMModel creates a high-performance strictly-bounded 6-panel TUI model.
+var (
+	tuiLogMu   sync.Mutex
+	tuiLogPool []*StoredEvent
+)
+
+// PushLogToTUI is a thread-safe, non-blocking log intake called directly by CentralServer.
+func PushLogToTUI(ev *StoredEvent) {
+	if ev == nil {
+		return
+	}
+	tuiLogMu.Lock()
+	defer tuiLogMu.Unlock()
+	if len(tuiLogPool) < 2000 {
+		tuiLogPool = append(tuiLogPool, ev)
+	}
+}
+
 // LogEventMsg encapsulates an event dispatched directly from gRPC stream to TUI.
 type LogEventMsg struct {
 	Event *StoredEvent
@@ -443,6 +459,17 @@ func (m *SIEMModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tickMsg:
+		// 1. Drain global thread-safe batching pool
+		tuiLogMu.Lock()
+		poolBatch := tuiLogPool
+		tuiLogPool = nil
+		tuiLogMu.Unlock()
+
+		for _, ev := range poolBatch {
+			m.processIncomingEvent(ev)
+		}
+
+		// 2. Drain internal subscriber buffer
 		m.mu.Lock()
 		buffered := m.eventBuffer
 		m.eventBuffer = nil
