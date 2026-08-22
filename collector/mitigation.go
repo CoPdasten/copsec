@@ -55,144 +55,116 @@ table inet copsec_filter {
 
 // KillActiveTCPConnections forcibly tears down established TCP / HTTP Keep-Alive sockets.
 func KillActiveTCPConnections(ipStr string) {
-	// 1. Terminate sockets using iproute2 'ss -K' (kernel socket destruction)
+	// 1. Linux Kernel Socket Killer: Kill all active TCP/HTTP Keep-Alive sockets immediately (Force RST)
 	_ = exec.Command("ss", "-K", "dst", ipStr).Run()
 	_ = exec.Command("ss", "-K", "src", ipStr).Run()
 	_ = exec.Command("sudo", "ss", "-K", "dst", ipStr).Run()
 	_ = exec.Command("sudo", "ss", "-K", "src", ipStr).Run()
 
-	// 2. Clear stateful conntrack entries if conntrack utility is present
+	// 2. Clear stateful conntrack entries immediately
 	_ = exec.Command("conntrack", "-D", "-s", ipStr).Run()
 	_ = exec.Command("conntrack", "-D", "-d", ipStr).Run()
 	_ = exec.Command("sudo", "conntrack", "-D", "-s", ipStr).Run()
 	_ = exec.Command("sudo", "conntrack", "-D", "-d", ipStr).Run()
 }
 
-// ExecuteSOARBan executes a multi-layer isolation: iptables raw/input + nftables set + TCP socket killer.
-func ExecuteSOARBan(ipStr string, durationSec int64) (bool, string) {
-	ip := net.ParseIP(strings.TrimSpace(ipStr))
+// ExecuteBan drops all packets at RAW PREROUTING and INPUT, kills all active TCP sockets, and registers in nftables.
+func ExecuteBan(targetIP string, timeoutSeconds int) error {
+	targetIP = strings.TrimSpace(targetIP)
+	if targetIP == "" {
+		return fmt.Errorf("empty target ip")
+	}
+
+	ip := net.ParseIP(targetIP)
 	if ip == nil {
-		return false, fmt.Sprintf("Rejected: invalid IP address '%s'", ipStr)
+		return fmt.Errorf("invalid ip address: %s", targetIP)
 	}
 
-	if durationSec <= 0 {
-		durationSec = 86400 // Default 24h
+	if timeoutSeconds <= 0 {
+		timeoutSeconds = 86400 // Default 24 hours
 	}
 
-	isIPv6 := ip.To4() == nil
-	var appliedLayers []string
-
-	// Layer 1: Guaranteed iptables / ip6tables RAW PREROUTING + INPUT Drop
-	if !isIPv6 {
-		// IPv4: raw PREROUTING (earliest packet drop) + INPUT
-		_ = exec.Command("iptables", "-t", "raw", "-I", "PREROUTING", "1", "-s", ipStr, "-j", "DROP").Run()
-		_ = exec.Command("sudo", "iptables", "-t", "raw", "-I", "PREROUTING", "1", "-s", ipStr, "-j", "DROP").Run()
-
-		checkErr := exec.Command("iptables", "-C", "INPUT", "-s", ipStr, "-j", "DROP").Run()
-		if checkErr != nil {
-			if iptOut, iptErr := exec.Command("iptables", "-I", "INPUT", "1", "-s", ipStr, "-j", "DROP").CombinedOutput(); iptErr == nil {
-				appliedLayers = append(appliedLayers, "iptables-raw/input")
-			} else {
-				sudoOut, sudoErr := exec.Command("sudo", "iptables", "-I", "INPUT", "1", "-s", ipStr, "-j", "DROP").CombinedOutput()
-				if sudoErr == nil {
-					appliedLayers = append(appliedLayers, "iptables-raw/input")
-				} else {
-					_ = iptOut
-					_ = sudoOut
-				}
-			}
-		} else {
-			appliedLayers = append(appliedLayers, "iptables(existing)")
-		}
-	} else {
-		// IPv6: raw PREROUTING + INPUT
-		_ = exec.Command("ip6tables", "-t", "raw", "-I", "PREROUTING", "1", "-s", ipStr, "-j", "DROP").Run()
-		_ = exec.Command("sudo", "ip6tables", "-t", "raw", "-I", "PREROUTING", "1", "-s", ipStr, "-j", "DROP").Run()
-
-		checkErr := exec.Command("ip6tables", "-C", "INPUT", "-s", ipStr, "-j", "DROP").Run()
-		if checkErr != nil {
-			if iptOut, iptErr := exec.Command("ip6tables", "-I", "INPUT", "1", "-s", ipStr, "-j", "DROP").CombinedOutput(); iptErr == nil {
-				appliedLayers = append(appliedLayers, "ip6tables-raw/input")
-			} else {
-				sudoOut, sudoErr := exec.Command("sudo", "ip6tables", "-I", "INPUT", "1", "-s", ipStr, "-j", "DROP").CombinedOutput()
-				if sudoErr == nil {
-					appliedLayers = append(appliedLayers, "ip6tables-raw/input")
-				} else {
-					_ = iptOut
-					_ = sudoOut
-				}
-			}
-		} else {
-			appliedLayers = append(appliedLayers, "ip6tables(existing)")
-		}
+	isV6 := ip.To4() == nil
+	cmdTool := "iptables"
+	if isV6 {
+		cmdTool = "ip6tables"
 	}
 
-	// Layer 2: Optional nftables set (if available)
+	// 1. En erken aşamada düşür (RAW PREROUTING - State bakmaksızın anında DROP)
+	_ = exec.Command(cmdTool, "-t", "raw", "-I", "PREROUTING", "1", "-s", targetIP, "-j", "DROP").Run()
+	_ = exec.Command("sudo", cmdTool, "-t", "raw", "-I", "PREROUTING", "1", "-s", targetIP, "-j", "DROP").Run()
+
+	// 2. INPUT zincirine DROP ekle
+	_ = exec.Command(cmdTool, "-I", "INPUT", "1", "-s", targetIP, "-j", "DROP").Run()
+	_ = exec.Command("sudo", cmdTool, "-I", "INPUT", "1", "-s", targetIP, "-j", "DROP").Run()
+
+	// 3. Mevcut tüm TCP/UDP oturumlarını conntrack üzerinden anında sil & Kernel Socket Destruction
+	KillActiveTCPConnections(targetIP)
+
+	// 4. nftables kuralı (varsa)
 	_ = EnsureNftablesRules()
-	var nftCmd *exec.Cmd
-	if isIPv6 {
-		nftCmd = exec.Command("nft", "add", "element", "inet", "copsec_filter", "ban_list_v6", fmt.Sprintf("{ %s timeout %ds }", ipStr, durationSec))
+	if !isV6 {
+		_ = exec.Command("nft", "add", "element", "inet", "copsec_filter", "ban_list", fmt.Sprintf("{ %s timeout %ds }", targetIP, timeoutSeconds)).Run()
+		_ = exec.Command("sudo", "nft", "add", "element", "inet", "copsec_filter", "ban_list", fmt.Sprintf("{ %s timeout %ds }", targetIP, timeoutSeconds)).Run()
 	} else {
-		nftCmd = exec.Command("nft", "add", "element", "inet", "copsec_filter", "ban_list", fmt.Sprintf("{ %s timeout %ds }", ipStr, durationSec))
-	}
-	if _, err := nftCmd.CombinedOutput(); err == nil {
-		appliedLayers = append(appliedLayers, "nftables")
+		_ = exec.Command("nft", "add", "element", "inet", "copsec_filter", "ban_list_v6", fmt.Sprintf("{ %s timeout %ds }", targetIP, timeoutSeconds)).Run()
+		_ = exec.Command("sudo", "nft", "add", "element", "inet", "copsec_filter", "ban_list_v6", fmt.Sprintf("{ %s timeout %ds }", targetIP, timeoutSeconds)).Run()
 	}
 
-	// Layer 3: TCP Connection Killer (Immediate RST injection for open HTTP/Keep-Alive sockets)
-	KillActiveTCPConnections(ipStr)
-	appliedLayers = append(appliedLayers, "TCP-Killer(RST)")
-
-	msg := fmt.Sprintf("Successfully isolated %s via [%s] for %ds", ipStr, strings.Join(appliedLayers, ", "), durationSec)
-	log.Printf("[SOAR_MITIGATION] 🚫 %s", msg)
-	return true, msg
+	log.Printf("[SOAR_MITIGATION] 🚫 Severed all TCP sockets & isolated %s via RAW PREROUTING/INPUT/ss-kill for %ds", targetIP, timeoutSeconds)
+	return nil
 }
 
-// ExecuteSOARUnban removes the IP from iptables raw/input chains and nftables sets.
-func ExecuteSOARUnban(ipStr string) (bool, string) {
-	ip := net.ParseIP(strings.TrimSpace(ipStr))
+// ExecuteUnban removes the target IP from raw/input firewall chains and nftables sets.
+func ExecuteUnban(targetIP string) error {
+	targetIP = strings.TrimSpace(targetIP)
+	if targetIP == "" {
+		return fmt.Errorf("empty target ip")
+	}
+
+	ip := net.ParseIP(targetIP)
 	if ip == nil {
-		return false, fmt.Sprintf("Rejected: invalid IP address '%s'", ipStr)
+		return fmt.Errorf("invalid ip address: %s", targetIP)
 	}
 
-	isIPv6 := ip.To4() == nil
-	var removedLayers []string
+	isV6 := ip.To4() == nil
+	cmdTool := "iptables"
+	if isV6 {
+		cmdTool = "ip6tables"
+	}
 
-	// Layer 1: iptables / ip6tables removal
-	if !isIPv6 {
-		_ = exec.Command("iptables", "-t", "raw", "-D", "PREROUTING", "-s", ipStr, "-j", "DROP").Run()
-		_ = exec.Command("sudo", "iptables", "-t", "raw", "-D", "PREROUTING", "-s", ipStr, "-j", "DROP").Run()
-		if _, err := exec.Command("iptables", "-D", "INPUT", "-s", ipStr, "-j", "DROP").CombinedOutput(); err == nil {
-			removedLayers = append(removedLayers, "iptables")
-		} else {
-			if _, sudoErr := exec.Command("sudo", "iptables", "-D", "INPUT", "-s", ipStr, "-j", "DROP").CombinedOutput(); sudoErr == nil {
-				removedLayers = append(removedLayers, "iptables")
-			}
-		}
+	_ = exec.Command(cmdTool, "-t", "raw", "-D", "PREROUTING", "-s", targetIP, "-j", "DROP").Run()
+	_ = exec.Command("sudo", cmdTool, "-t", "raw", "-D", "PREROUTING", "-s", targetIP, "-j", "DROP").Run()
+
+	_ = exec.Command(cmdTool, "-D", "INPUT", "-s", targetIP, "-j", "DROP").Run()
+	_ = exec.Command("sudo", cmdTool, "-D", "INPUT", "-s", targetIP, "-j", "DROP").Run()
+
+	if !isV6 {
+		_ = exec.Command("nft", "delete", "element", "inet", "copsec_filter", "ban_list", fmt.Sprintf("{ %s }", targetIP)).Run()
+		_ = exec.Command("sudo", "nft", "delete", "element", "inet", "copsec_filter", "ban_list", fmt.Sprintf("{ %s }", targetIP)).Run()
 	} else {
-		_ = exec.Command("ip6tables", "-t", "raw", "-D", "PREROUTING", "-s", ipStr, "-j", "DROP").Run()
-		_ = exec.Command("sudo", "ip6tables", "-t", "raw", "-D", "PREROUTING", "-s", ipStr, "-j", "DROP").Run()
-		if _, err := exec.Command("ip6tables", "-D", "INPUT", "-s", ipStr, "-j", "DROP").CombinedOutput(); err == nil {
-			removedLayers = append(removedLayers, "ip6tables")
-		} else {
-			if _, sudoErr := exec.Command("sudo", "ip6tables", "-D", "INPUT", "-s", ipStr, "-j", "DROP").CombinedOutput(); sudoErr == nil {
-				removedLayers = append(removedLayers, "ip6tables")
-			}
-		}
+		_ = exec.Command("nft", "delete", "element", "inet", "copsec_filter", "ban_list_v6", fmt.Sprintf("{ %s }", targetIP)).Run()
+		_ = exec.Command("sudo", "nft", "delete", "element", "inet", "copsec_filter", "ban_list_v6", fmt.Sprintf("{ %s }", targetIP)).Run()
 	}
 
-	// Layer 2: nftables set removal
-	var nftCmd *exec.Cmd
-	if isIPv6 {
-		nftCmd = exec.Command("nft", "delete", "element", "inet", "copsec_filter", "ban_list_v6", fmt.Sprintf("{ %s }", ipStr))
-	} else {
-		nftCmd = exec.Command("nft", "delete", "element", "inet", "copsec_filter", "ban_list", fmt.Sprintf("{ %s }", ipStr))
-	}
-	if _, err := nftCmd.CombinedOutput(); err == nil {
-		removedLayers = append(removedLayers, "nftables")
-	}
+	log.Printf("[SOAR_MITIGATION] 🟢 Unbanned %s", targetIP)
+	return nil
+}
 
-	msg := fmt.Sprintf("Unbanned IP %s across backends: %s", ipStr, strings.Join(removedLayers, ", "))
-	log.Printf("[SOAR_MITIGATION] 🔓 %s", msg)
-	return true, msg
+// ExecuteSOARBan wraps ExecuteBan for compatibility with legacy client and fallback calls.
+func ExecuteSOARBan(ipStr string, durationSec int64) (bool, string) {
+	err := ExecuteBan(ipStr, int(durationSec))
+	if err != nil {
+		return false, err.Error()
+	}
+	return true, fmt.Sprintf("Successfully isolated %s via [RAW PREROUTING/INPUT, TCP-Killer(RST)] for %ds", ipStr, durationSec)
+}
+
+// ExecuteSOARUnban wraps ExecuteUnban for compatibility.
+func ExecuteSOARUnban(ipStr string) (bool, string) {
+	err := ExecuteUnban(ipStr)
+	if err != nil {
+		return false, err.Error()
+	}
+	return true, fmt.Sprintf("Successfully unbanned %s across backends", ipStr)
 }

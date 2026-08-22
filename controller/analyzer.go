@@ -265,7 +265,7 @@ func IsNoisyLog(rawLine string) bool {
 	return false
 }
 
-// Analyze inspects the raw log line and returns rule matching details + Shannon entropy anomalies.
+// Analyze inspects the complete raw log payload (URI, Query, Referer, User-Agent) and returns rule matching details + Shannon entropy anomalies.
 func (e *RuleEngine) Analyze(rawLine string, statusCode int, source string) (ruleID, techID string, score int, matched bool) {
 	if IsNoisyLog(rawLine) {
 		return "", "", 0, false
@@ -275,8 +275,10 @@ func (e *RuleEngine) Analyze(rawLine string, statusCode int, source string) (rul
 	defer e.mu.RUnlock()
 
 	normalized := NormalizePayload(rawLine)
+	lowerRaw := strings.ToLower(rawLine)
+	lowerNorm := strings.ToLower(normalized)
 
-	// 1. Signature Inspection
+	// 1. Signature & Multi-Vector Payload Inspection
 	for _, r := range e.rules {
 		if source == "ssh" && r.Category != "ssh" && r.Category != "credential-access" && r.Category != "privilege-escalation" {
 			if r.Category == "web" || r.Category == "exfiltration" {
@@ -297,7 +299,8 @@ func (e *RuleEngine) Analyze(rawLine string, statusCode int, source string) (rul
 			}
 		}
 
-		if r.CompiledRegex.MatchString(normalized) || r.CompiledRegex.MatchString(rawLine) {
+		if r.CompiledRegex.MatchString(normalized) || r.CompiledRegex.MatchString(rawLine) ||
+			r.CompiledRegex.MatchString(lowerNorm) || r.CompiledRegex.MatchString(lowerRaw) {
 			return r.ID, r.MitreTechniqueID, r.ThreatScore, true
 		}
 	}
