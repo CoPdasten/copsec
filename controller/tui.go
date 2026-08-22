@@ -20,6 +20,7 @@ var (
 	colorWarningGold = lipgloss.Color("#FFB800")
 	colorDarkBg      = lipgloss.Color("#0A0E14")
 	colorPanelBorder = lipgloss.Color("#1E293B")
+	colorScrollTrack = lipgloss.Color("#24283B")
 	colorTextMuted   = lipgloss.Color("#64748B")
 	colorTextLight   = lipgloss.Color("#E2E8F0")
 	colorSelectedBg  = lipgloss.Color("#1A2333")
@@ -92,34 +93,39 @@ type attackerIntel struct {
 	TopTarget string
 }
 
-// SIEMModel holds the state for the 6-panel SOC cockpit with Threat Hunting & GeoIP radar.
+// SIEMModel holds the state for the 6-panel SOC cockpit with dynamic scrollbars & search engine.
 type SIEMModel struct {
-	server       *CentralServer
-	storage      *StorageEngine
-	width        int
-	height       int
-	events       []*StoredEvent
-	incidents    []*StoredEvent
-	nodes        []NodeSession
-	activeBans   []ActiveBanRecord
-	soarActions  []SOARActionRecord
-	mitreMap     map[string]int
-	attackerMap  map[string]*attackerIntel
-	activeTab    int
-	rateHistory  []int
-	peakEPS      int
-	statusPrompt string
-	isPaused     bool
+	server         *CentralServer
+	storage        *StorageEngine
+	width          int
+	height         int
+	events         []*StoredEvent
+	filteredEvents []*StoredEvent
+	incidents      []*StoredEvent
+	nodes          []NodeSession
+	activeBans     []ActiveBanRecord
+	soarActions    []SOARActionRecord
+	mitreMap       map[string]int
+	attackerMap    map[string]*attackerIntel
+	activeTab      int // 0: Fleet, 1: Live Stream, 2: Critical Incidents, 3: MITRE
+	rateHistory    []int
+	peakEPS        int
+	statusPrompt   string
+	isPaused       bool
 
 	// Threat Hunting Search
 	searchQuery    string
 	isFilterActive bool
 	inputSearch    string
 
-	// Navigation & Cursor Binding
+	// Viewport Scroll & Cursor State
 	selectedLogIndex int
+	logScrollOffset  int
+
 	selectedIncIndex int
-	inspectEvent     *StoredEvent
+	incScrollOffset  int
+
+	inspectEvent *StoredEvent
 
 	// Async event queue buffer
 	mu          sync.Mutex
@@ -135,6 +141,7 @@ func NewSIEMModel(server *CentralServer, storage *StorageEngine) *SIEMModel {
 	m := &SIEMModel{
 		server:      server,
 		storage:     storage,
+		activeTab:   1, // Default focus on Live Stream
 		mitreMap:    make(map[string]int),
 		attackerMap: make(map[string]*attackerIntel),
 		rateHistory: make([]int, 20),
@@ -152,7 +159,7 @@ func NewSIEMModel(server *CentralServer, storage *StorageEngine) *SIEMModel {
 			m.mitreMap[s.TechniqueID] = s.Count
 		}
 	}
-	if incs, err := storage.GetCriticalEvents(30); err == nil {
+	if incs, err := storage.GetCriticalEvents(40); err == nil {
 		m.incidents = incs
 	}
 	if bans, err := storage.GetActiveBans(); err == nil {
@@ -234,7 +241,10 @@ func (m *SIEMModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.mode == modalSearch && m.isFilterActive {
 					m.isFilterActive = false
 					m.searchQuery = ""
-					m.statusPrompt = "🔍 Search filter cleared"
+					m.filteredEvents = nil
+					m.selectedLogIndex = 0
+					m.logScrollOffset = 0
+					m.statusPrompt = "🔍 Search filter cleared. Resumed live stream."
 				}
 				m.mode = modalNone
 				m.inspectEvent = nil
@@ -285,35 +295,63 @@ func (m *SIEMModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.isFilterActive {
 				m.isFilterActive = false
 				m.searchQuery = ""
+				m.filteredEvents = nil
+				m.selectedLogIndex = 0
+				m.logScrollOffset = 0
 				m.statusPrompt = "🔍 Search filter cleared. Resumed live stream."
 			}
 		case "up", "k":
 			if m.activeTab == 2 { // Critical Incidents
 				if m.selectedIncIndex > 0 {
 					m.selectedIncIndex--
+					if m.selectedIncIndex < m.incScrollOffset {
+						m.incScrollOffset = m.selectedIncIndex
+					}
 				}
 			} else { // Live Stream
 				if m.selectedLogIndex > 0 {
 					m.selectedLogIndex--
+					if m.selectedLogIndex < m.logScrollOffset {
+						m.logScrollOffset = m.selectedLogIndex
+					}
 				}
 			}
 		case "down", "j":
 			if m.activeTab == 2 { // Critical Incidents
-				if m.selectedIncIndex < len(m.incidents)-1 && m.selectedIncIndex < 15 {
+				if m.selectedIncIndex < len(m.incidents)-1 {
 					m.selectedIncIndex++
 				}
 			} else { // Live Stream
-				if m.selectedLogIndex < len(m.events)-1 && m.selectedLogIndex < 15 {
+				currentList := m.getCurrentEventsList()
+				if m.selectedLogIndex < len(currentList)-1 {
 					m.selectedLogIndex++
 				}
+			}
+		case "pgup", "ctrl+u":
+			if m.activeTab == 2 {
+				m.selectedIncIndex = max(0, m.selectedIncIndex-5)
+				m.incScrollOffset = max(0, m.incScrollOffset-5)
+			} else {
+				m.selectedLogIndex = max(0, m.selectedLogIndex-5)
+				m.logScrollOffset = max(0, m.logScrollOffset-5)
+			}
+		case "pgdown", "ctrl+d":
+			if m.activeTab == 2 {
+				m.selectedIncIndex = min(len(m.incidents)-1, m.selectedIncIndex+5)
+			} else {
+				currentList := m.getCurrentEventsList()
+				m.selectedLogIndex = min(len(currentList)-1, m.selectedLogIndex+5)
 			}
 		case "enter":
 			if m.activeTab == 2 && len(m.incidents) > 0 && m.selectedIncIndex < len(m.incidents) {
 				m.inspectEvent = m.incidents[m.selectedIncIndex]
 				m.mode = modalLogDetail
-			} else if len(m.events) > 0 && m.selectedLogIndex < len(m.events) {
-				m.inspectEvent = m.events[m.selectedLogIndex]
-				m.mode = modalLogDetail
+			} else {
+				currentList := m.getCurrentEventsList()
+				if len(currentList) > 0 && m.selectedLogIndex < len(currentList) {
+					m.inspectEvent = currentList[m.selectedLogIndex]
+					m.mode = modalLogDetail
+				}
 			}
 		case " ":
 			m.isPaused = !m.isPaused
@@ -339,11 +377,20 @@ func (m *SIEMModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			for _, ev := range m.eventBuffer {
 				if !m.isPaused && !m.isFilterActive {
 					m.events = append([]*StoredEvent{ev}, m.events...)
+					if m.selectedLogIndex > 0 {
+						// Maintain cursor relative to user viewing
+						m.selectedLogIndex++
+						m.logScrollOffset++
+					}
 				}
 				if ev.ThreatScore >= 50 {
 					m.incidents = append([]*StoredEvent{ev}, m.incidents...)
-					if len(m.incidents) > 40 {
-						m.incidents = m.incidents[:40]
+					if m.selectedIncIndex > 0 {
+						m.selectedIncIndex++
+						m.incScrollOffset++
+					}
+					if len(m.incidents) > 60 {
+						m.incidents = m.incidents[:60]
 					}
 				}
 				if ev.MitreTechniqueID != "" {
@@ -366,8 +413,8 @@ func (m *SIEMModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			m.eventBuffer = nil
-			if len(m.events) > 80 {
-				m.events = m.events[:80]
+			if len(m.events) > 100 {
+				m.events = m.events[:100]
 			}
 		}
 		m.mu.Unlock()
@@ -392,16 +439,26 @@ func (m *SIEMModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m *SIEMModel) getCurrentEventsList() []*StoredEvent {
+	if m.isFilterActive {
+		return m.filteredEvents
+	}
+	return m.events
+}
+
 func (m *SIEMModel) executeSearch() {
 	query := strings.TrimSpace(m.inputSearch)
 	m.mode = modalNone
 	if query == "" {
 		m.isFilterActive = false
 		m.searchQuery = ""
+		m.filteredEvents = nil
+		m.selectedLogIndex = 0
+		m.logScrollOffset = 0
 		return
 	}
 
-	results, err := m.storage.SearchEvents(query, 50)
+	results, err := m.storage.SearchEvents(query, 100)
 	if err != nil {
 		m.statusPrompt = fmt.Sprintf("⚠️ Search error: %v", err)
 		return
@@ -409,9 +466,10 @@ func (m *SIEMModel) executeSearch() {
 
 	m.isFilterActive = true
 	m.searchQuery = query
-	m.events = results
+	m.filteredEvents = results
 	m.selectedLogIndex = 0
-	m.statusPrompt = fmt.Sprintf("🔍 Filter active: '%s' (%d matches found)", query, len(results))
+	m.logScrollOffset = 0
+	m.statusPrompt = fmt.Sprintf("🔍 Filter active: '%s' (%d Hits) - Press ESC to Clear", query, len(results))
 }
 
 func (m *SIEMModel) submitModal() {
@@ -478,7 +536,11 @@ func (m *SIEMModel) View() string {
 
 	// 3. Left Column: Top Fleet Matrix + Bottom SOAR Jail & Mitigations
 	leftTopContent := m.renderFleetPanel(leftWidth-2, topHeight-2)
-	leftTopPanel := basePanelStyle.Width(leftWidth).Height(topHeight).MaxHeight(topHeight).Render(leftTopContent)
+	leftTopStyle := basePanelStyle
+	if m.activeTab == 0 {
+		leftTopStyle = activePanelStyle
+	}
+	leftTopPanel := leftTopStyle.Width(leftWidth).Height(topHeight).MaxHeight(topHeight).Render(leftTopContent)
 
 	leftBottomContent := m.renderJailPanel(leftWidth-2, bottomHeight-2)
 	leftBottomPanel := basePanelStyle.Width(leftWidth).Height(bottomHeight).MaxHeight(bottomHeight).Render(leftBottomContent)
@@ -504,7 +566,11 @@ func (m *SIEMModel) View() string {
 
 	// 5. Right Column: Top Enterprise MITRE Heatmap + Bottom Geo Threat Radar & Actors
 	rightTopContent := m.renderMITREPanel(rightWidth-2, topHeight-2)
-	rightTopPanel := basePanelStyle.Width(rightWidth).Height(topHeight).MaxHeight(topHeight).Render(rightTopContent)
+	rightTopStyle := basePanelStyle
+	if m.activeTab == 3 {
+		rightTopStyle = activePanelStyle
+	}
+	rightTopPanel := rightTopStyle.Width(rightWidth).Height(topHeight).MaxHeight(topHeight).Render(rightTopContent)
 
 	rightBottomContent := m.renderThreatIntelPanel(rightWidth-2, bottomHeight-2)
 	rightBottomPanel := basePanelStyle.Width(rightWidth).Height(bottomHeight).MaxHeight(bottomHeight).Render(rightBottomContent)
@@ -623,34 +689,48 @@ func (m *SIEMModel) renderThreatStream(width, maxLines int) string {
 	if m.isPaused {
 		pauseTag = " [PAUSED]"
 	}
-	filterTag := ""
+
+	currentList := m.getCurrentEventsList()
+	title := "⚡ LIVE INGESTION STREAM"
 	if m.isFilterActive {
-		filterTag = fmt.Sprintf(" [FILTER: %s]", truncateString(m.searchQuery, 12))
+		title = fmt.Sprintf("🔍 FILTERED STREAM: [%s] (%d Hits)", truncateString(m.searchQuery, 14), len(currentList))
 	}
 
-	header := fmt.Sprintf("%s %s%s%s",
-		headerStyle.Render("⚡ LIVE INGESTION STREAM"),
+	header := fmt.Sprintf("%s %s%s",
+		headerStyle.Render(title),
 		lipgloss.NewStyle().Foreground(colorNeonGreen).Render(fmt.Sprintf("(%d EPS)", eps)),
-		alertStyle.Render(pauseTag),
-		lipgloss.NewStyle().Foreground(colorWarningGold).Render(filterTag))
+		alertStyle.Render(pauseTag))
 	b.WriteString(truncateString(header, width) + "\n")
 	b.WriteString(lipgloss.NewStyle().Foreground(colorTextMuted).Render(strings.Repeat("─", width)) + "\n")
 
-	if len(m.events) == 0 {
-		b.WriteString(lipgloss.NewStyle().Foreground(colorTextMuted).Render("Listening for edge node stream events...\n"))
+	if len(currentList) == 0 {
+		if m.isFilterActive {
+			b.WriteString(lipgloss.NewStyle().Foreground(colorWarningGold).Render("No log entries match active query filter. [Esc] to Clear.\n"))
+		} else {
+			b.WriteString(lipgloss.NewStyle().Foreground(colorTextMuted).Render("Listening for edge node stream events...\n"))
+		}
 		return b.String()
 	}
 
-	limit := maxLines / 2
-	if limit <= 0 {
-		limit = 3
+	visibleItems := maxLines / 2
+	if visibleItems <= 0 {
+		visibleItems = 3
 	}
 
-	for i, ev := range m.events {
-		if i >= limit {
+	// Adjust viewport scroll offset
+	if m.selectedLogIndex < m.logScrollOffset {
+		m.logScrollOffset = m.selectedLogIndex
+	} else if m.selectedLogIndex >= m.logScrollOffset+visibleItems {
+		m.logScrollOffset = m.selectedLogIndex - visibleItems + 1
+	}
+
+	for i := 0; i < visibleItems; i++ {
+		idx := m.logScrollOffset + i
+		if idx >= len(currentList) {
 			break
 		}
 
+		ev := currentList[idx]
 		timeStr := time.UnixMilli(ev.TimestampMs).Format("15:04:05")
 		srcIcon := "🌐 HTTP"
 		if ev.Source == "ssh" {
@@ -667,10 +747,20 @@ func (m *SIEMModel) renderThreatStream(width, maxLines int) string {
 		}
 
 		prefix := "  "
-		if m.activeTab == 1 && i == m.selectedLogIndex {
+		if m.activeTab == 1 && idx == m.selectedLogIndex {
 			prefix = "▶ "
 		}
 
+		// Calculate scrollbar character for this row
+		scrollChar := lipgloss.NewStyle().Foreground(colorScrollTrack).Render("│")
+		if len(currentList) > visibleItems {
+			thumbPos := int(float64(m.selectedLogIndex) / float64(len(currentList)-1) * float64(visibleItems-1))
+			if i == thumbPos {
+				scrollChar = lipgloss.NewStyle().Foreground(colorCyberCyan).Render("█")
+			}
+		}
+
+		contentWidth := width - 3
 		line1 := fmt.Sprintf("%s%s %s %s 🎯 %s 🏷 %s",
 			prefix,
 			lipgloss.NewStyle().Foreground(colorTextMuted).Render(timeStr),
@@ -679,13 +769,19 @@ func (m *SIEMModel) renderThreatStream(width, maxLines int) string {
 			lipgloss.NewStyle().Bold(true).Foreground(colorTextLight).Render(ev.ClientIP),
 			lipgloss.NewStyle().Foreground(colorWarningGold).Render(ev.MitreTechniqueID),
 		)
-		line2 := fmt.Sprintf("    %s", lipgloss.NewStyle().Foreground(colorTextMuted).Render(truncateString(ev.RawLine, width-6)))
+		line2 := fmt.Sprintf("    %s", lipgloss.NewStyle().Foreground(colorTextMuted).Render(truncateString(ev.RawLine, contentWidth-4)))
 
-		if m.activeTab == 1 && i == m.selectedLogIndex {
-			b.WriteString(lipgloss.NewStyle().Background(colorSelectedBg).Render(truncateString(line1, width)) + "\n")
-			b.WriteString(lipgloss.NewStyle().Background(colorSelectedBg).Render(truncateString(line2, width)) + "\n")
+		formatted1 := truncateString(line1, contentWidth)
+		formatted2 := truncateString(line2, contentWidth)
+		padding1 := strings.Repeat(" ", max(0, contentWidth-lipgloss.Width(formatted1)))
+		padding2 := strings.Repeat(" ", max(0, contentWidth-lipgloss.Width(formatted2)))
+
+		if m.activeTab == 1 && idx == m.selectedLogIndex {
+			b.WriteString(lipgloss.NewStyle().Background(colorSelectedBg).Render(formatted1+padding1) + " " + scrollChar + "\n")
+			b.WriteString(lipgloss.NewStyle().Background(colorSelectedBg).Render(formatted2+padding2) + " " + scrollChar + "\n")
 		} else {
-			b.WriteString(truncateString(line1, width) + "\n" + truncateString(line2, width) + "\n")
+			b.WriteString(formatted1 + padding1 + " " + scrollChar + "\n")
+			b.WriteString(formatted2 + padding2 + " " + scrollChar + "\n")
 		}
 	}
 	return b.String()
@@ -701,16 +797,25 @@ func (m *SIEMModel) renderIncidentStream(width, maxLines int) string {
 		return b.String()
 	}
 
-	limit := maxLines / 2
-	if limit <= 0 {
-		limit = 3
+	visibleItems := maxLines / 2
+	if visibleItems <= 0 {
+		visibleItems = 3
 	}
 
-	for i, ev := range m.incidents {
-		if i >= limit {
+	// Adjust viewport scroll offset
+	if m.selectedIncIndex < m.incScrollOffset {
+		m.incScrollOffset = m.selectedIncIndex
+	} else if m.selectedIncIndex >= m.incScrollOffset+visibleItems {
+		m.incScrollOffset = m.selectedIncIndex - visibleItems + 1
+	}
+
+	for i := 0; i < visibleItems; i++ {
+		idx := m.incScrollOffset + i
+		if idx >= len(m.incidents) {
 			break
 		}
 
+		ev := m.incidents[idx]
 		timeStr := time.UnixMilli(ev.TimestampMs).Format("15:04:05")
 		scoreBadge := alertStyle.Render(fmt.Sprintf("[CRIT %d]", ev.ThreatScore))
 		if ev.ThreatScore < 70 {
@@ -718,10 +823,20 @@ func (m *SIEMModel) renderIncidentStream(width, maxLines int) string {
 		}
 
 		prefix := "  "
-		if m.activeTab == 2 && i == m.selectedIncIndex {
+		if m.activeTab == 2 && idx == m.selectedIncIndex {
 			prefix = "▶ "
 		}
 
+		// Calculate scrollbar character for this row
+		scrollChar := lipgloss.NewStyle().Foreground(colorScrollTrack).Render("│")
+		if len(m.incidents) > visibleItems {
+			thumbPos := int(float64(m.selectedIncIndex) / float64(len(m.incidents)-1) * float64(visibleItems-1))
+			if i == thumbPos {
+				scrollChar = lipgloss.NewStyle().Foreground(colorAlertPink).Render("█")
+			}
+		}
+
+		contentWidth := width - 3
 		line1 := fmt.Sprintf("%s%s %s 🎯 %s 🏷 %s (%s)",
 			prefix,
 			lipgloss.NewStyle().Foreground(colorTextMuted).Render(timeStr),
@@ -730,13 +845,19 @@ func (m *SIEMModel) renderIncidentStream(width, maxLines int) string {
 			lipgloss.NewStyle().Foreground(colorWarningGold).Render(ev.MitreTechniqueID),
 			lipgloss.NewStyle().Foreground(colorCyberCyan).Render(truncateString(ev.RuleID, 16)),
 		)
-		line2 := fmt.Sprintf("    %s", lipgloss.NewStyle().Foreground(colorTextLight).Render(truncateString(ev.RawLine, width-6)))
+		line2 := fmt.Sprintf("    %s", lipgloss.NewStyle().Foreground(colorTextLight).Render(truncateString(ev.RawLine, contentWidth-4)))
 
-		if m.activeTab == 2 && i == m.selectedIncIndex {
-			b.WriteString(lipgloss.NewStyle().Background(colorSelectedBg).Render(truncateString(line1, width)) + "\n")
-			b.WriteString(lipgloss.NewStyle().Background(colorSelectedBg).Render(truncateString(line2, width)) + "\n")
+		formatted1 := truncateString(line1, contentWidth)
+		formatted2 := truncateString(line2, contentWidth)
+		padding1 := strings.Repeat(" ", max(0, contentWidth-lipgloss.Width(formatted1)))
+		padding2 := strings.Repeat(" ", max(0, contentWidth-lipgloss.Width(formatted2)))
+
+		if m.activeTab == 2 && idx == m.selectedIncIndex {
+			b.WriteString(lipgloss.NewStyle().Background(colorSelectedBg).Render(formatted1+padding1) + " " + scrollChar + "\n")
+			b.WriteString(lipgloss.NewStyle().Background(colorSelectedBg).Render(formatted2+padding2) + " " + scrollChar + "\n")
 		} else {
-			b.WriteString(truncateString(line1, width) + "\n" + truncateString(line2, width) + "\n")
+			b.WriteString(formatted1 + padding1 + " " + scrollChar + "\n")
+			b.WriteString(formatted2 + padding2 + " " + scrollChar + "\n")
 		}
 	}
 	return b.String()
