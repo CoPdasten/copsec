@@ -240,11 +240,11 @@ func (s *CentralServer) processEvent(nodeID string, event *copsecproto.LogEvent)
 			ev.AIAnalysis = summary
 			_ = s.storage.UpdateEventAI(ev.ID, summary)
 
-			if bot != nil && ev.ThreatScore >= 50 {
+			if bot != nil && (ev.ThreatScore >= 40 || ev.StatusCode >= 400) {
 				bot.ProcessEvent(ev)
 			}
 		}(stored)
-	} else if bot != nil && stored.ThreatScore >= 50 {
+	} else if bot != nil && (stored.ThreatScore >= 40 || stored.StatusCode >= 400) {
 		go bot.ProcessEvent(stored)
 	}
 

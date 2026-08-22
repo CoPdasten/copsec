@@ -59,16 +59,16 @@ func (b *TelegramSOARBot) ProcessEvent(ev *StoredEvent) {
 		return
 	}
 
-	// Alert threshold: ThreatScore >= 50
-	if ev.ThreatScore < 50 {
+	// Alert threshold: ThreatScore >= 40 or Suspicious HTTP error status >= 400
+	if ev.ThreatScore < 40 && ev.StatusCode < 400 {
 		return
 	}
 
-	severityEmoji := "⚠️"
+	severityHeader := "⚠️ *[CoPSeC Suspicious Incident - WARN]*"
 	if ev.ThreatScore >= 80 {
-		severityEmoji = "🔥"
-	} else if ev.ThreatScore >= 65 {
-		severityEmoji = "🚨"
+		severityHeader = "🔥 *[CoPSeC Threat Incident - CRITICAL]*"
+	} else if ev.ThreatScore >= 60 {
+		severityHeader = "🚨 *[CoPSeC Threat Incident - HIGH]*"
 	}
 
 	aiSection := ""
@@ -76,18 +76,23 @@ func (b *TelegramSOARBot) ProcessEvent(ev *StoredEvent) {
 		aiSection = fmt.Sprintf("\n\n🧠 *AI Threat Intel:*\n%s", ev.AIAnalysis)
 	}
 
-	text := fmt.Sprintf("%s *CoPSeC Threat Incident*\n\n"+
+	statusDetail := ""
+	if ev.StatusCode > 0 {
+		statusDetail = fmt.Sprintf(" (HTTP %d)", ev.StatusCode)
+	}
+
+	text := fmt.Sprintf("%s\n\n"+
 		"🖥 *Node:* `%s`\n"+
 		"🌐 *Source:* `%s`\n"+
 		"🎯 *Target/IP:* `%s`\n"+
 		"🛡 *Rule:* `%s`\n"+
 		"🏷 *MITRE:* `%s`\n"+
-		"⚡ *Threat Score:* `%d/100`\n"+
+		"⚡ *Threat Score:* `%d/100%s`\n"+
 		"⏱ *Time:* `%s`\n\n"+
 		"📜 *Payload:*\n`%s`%s",
-		severityEmoji,
+		severityHeader,
 		ev.NodeID, ev.Source, ev.ClientIP, ev.RuleID, ev.MitreTechniqueID,
-		ev.ThreatScore, time.UnixMilli(ev.TimestampMs).Format("15:04:05"),
+		ev.ThreatScore, statusDetail, time.UnixMilli(ev.TimestampMs).Format("15:04:05"),
 		truncateString(ev.RawLine, 140),
 		aiSection)
 

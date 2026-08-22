@@ -230,8 +230,8 @@ func (m *SIEMModel) Init() tea.Cmd {
 }
 
 func (m *SIEMModel) tickCmd() tea.Cmd {
-	// 50ms = 20 FPS steady rate without UI stuttering
-	return tea.Tick(50*time.Millisecond, func(t time.Time) tea.Msg {
+	// 33ms = ~30 FPS steady rate for silky smooth UI
+	return tea.Tick(33*time.Millisecond, func(t time.Time) tea.Msg {
 		return tickMsg(t)
 	})
 }
@@ -426,9 +426,9 @@ func (m *SIEMModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.selectedLogIndex++
 						m.logScrollOffset++
 					}
-					// Fixed-size Ring Buffer: max 150 items
-					if len(m.events) > 150 {
-						m.events = m.events[:150]
+					// Fixed-size Ring Buffer: max 250 items
+					if len(m.events) > 250 {
+						m.events = m.events[:250]
 					}
 				}
 				if ev.ThreatScore >= 50 {
@@ -437,8 +437,8 @@ func (m *SIEMModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.selectedIncIndex++
 						m.incScrollOffset++
 					}
-					if len(m.incidents) > 80 {
-						m.incidents = m.incidents[:80]
+					if len(m.incidents) > 120 {
+						m.incidents = m.incidents[:120]
 					}
 				}
 				if ev.MitreTechniqueID != "" {
