@@ -24,8 +24,8 @@ var (
 	colorTextLight   = lipgloss.Color("#E2E8F0")
 	colorSelectedBg  = lipgloss.Color("#1A2333")
 
-	// Panel Styles
-	panelStyle = lipgloss.NewStyle().
+	// Base Panel Styles
+	basePanelStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(colorPanelBorder).
 			Padding(0, 1)
@@ -107,9 +107,9 @@ type SIEMModel struct {
 	isPaused     bool
 
 	// Threat Hunting Search
-	searchQuery   string
+	searchQuery    string
 	isFilterActive bool
-	inputSearch   string
+	inputSearch    string
 
 	// Navigation
 	selectedLogIndex int
@@ -146,7 +146,7 @@ func NewSIEMModel(server *CentralServer, storage *StorageEngine) *SIEMModel {
 			m.mitreMap[s.TechniqueID] = s.Count
 		}
 	}
-	if incs, err := storage.GetCriticalEvents(20); err == nil {
+	if incs, err := storage.GetCriticalEvents(30); err == nil {
 		m.incidents = incs
 	}
 
@@ -370,64 +370,86 @@ func (m *SIEMModel) View() string {
 		return "Initializing CoPSeC Enterprise Cyber-Defense Cockpit..."
 	}
 
-	totalWidth := m.width - 4
-	if totalWidth < 80 {
-		totalWidth = 80
-	}
-	leftWidth := totalWidth * 24 / 100
-	rightWidth := totalWidth * 32 / 100
-	centerWidth := totalWidth - leftWidth - rightWidth - 6
-
-	mainHeight := m.height - 10
-	if mainHeight < 16 {
-		mainHeight = 16
+	// 1. Strict Grid Math Calculation
+	// Left Panel: 22% of total width (bounded between 24 and 32 chars)
+	leftWidth := int(float64(m.width) * 0.22)
+	if leftWidth < 24 {
+		leftWidth = 24
+	} else if leftWidth > 32 {
+		leftWidth = 32
 	}
 
-	streamHeight := mainHeight / 2
-	incidentHeight := mainHeight - streamHeight
+	// Right Panel: 28% of total width (min 30 chars)
+	rightWidth := int(float64(m.width) * 0.28)
+	if rightWidth < 30 {
+		rightWidth = 30
+	}
 
-	// 1. Top Banner
+	// Center Column: Remaining width (accounts for 3 panel borders: 2 chars each = 6)
+	centerWidth := m.width - leftWidth - rightWidth - 6
+	if centerWidth < 30 {
+		centerWidth = 30
+	}
+
+	// Vertical Grid Math
+	// mainHeight excludes header (1 line), banner/margins (1 line), and bottom bar (2 lines)
+	mainHeight := m.height - 4
+	if mainHeight < 14 {
+		mainHeight = 14
+	}
+
+	centerTopHeight := int(float64(mainHeight) * 0.52)
+	if centerTopHeight < 6 {
+		centerTopHeight = 6
+	}
+	centerBottomHeight := mainHeight - centerTopHeight - 2
+	if centerBottomHeight < 6 {
+		centerBottomHeight = 6
+	}
+
+	// 2. Top Banner
 	banner := headerStyle.Render("⚡ CoPSeC ENTERPRISE CYBER-DEFENSE COCKPIT") + " " +
-		matrixTitleStyle.Render("v2.0 [DUAL-WINDOW SOC]") + "\n"
+		matrixTitleStyle.Render("v2.0 [DUAL-WINDOW SOC]")
 
-	// 2. Left Panel: Fleet Matrix & Telemetry
+	// 3. Left Panel: Fleet Matrix & Telemetry
 	leftContent := m.renderFleetPanel(leftWidth - 2)
-	leftStyle := panelStyle
+	leftStyle := basePanelStyle
 	if m.activeTab == 0 {
 		leftStyle = activePanelStyle
 	}
-	leftPanel := leftStyle.Width(leftWidth).Height(mainHeight).Render(leftContent)
+	leftPanel := leftStyle.Width(leftWidth).Height(mainHeight).MaxHeight(mainHeight).Render(leftContent)
 
-	// 3. Center Panels (Dual-Window): Top Ingestion Stream + Bottom Incident Alerts
-	centerTopContent := m.renderThreatStream(centerWidth-2, streamHeight-2)
-	topStyle := panelStyle
+	// 4. Center Panels: Top Raw Stream + Bottom Critical Incidents
+	centerTopContent := m.renderThreatStream(centerWidth-2, centerTopHeight-2)
+	topStyle := basePanelStyle
 	if m.activeTab == 1 {
 		topStyle = activePanelStyle
 	}
-	centerTopPanel := topStyle.Width(centerWidth).Height(streamHeight).Render(centerTopContent)
+	centerTopPanel := topStyle.Width(centerWidth).Height(centerTopHeight).MaxHeight(centerTopHeight).Render(centerTopContent)
 
-	centerBottomContent := m.renderIncidentStream(centerWidth-2, incidentHeight-2)
-	bottomStyle := panelStyle
+	centerBottomContent := m.renderIncidentStream(centerWidth-2, centerBottomHeight-2)
+	bottomStyle := basePanelStyle
 	if m.activeTab == 2 {
 		bottomStyle = activePanelStyle
 	}
-	centerBottomPanel := bottomStyle.Width(centerWidth).Height(incidentHeight).Render(centerBottomContent)
+	centerBottomPanel := bottomStyle.Width(centerWidth).Height(centerBottomHeight).MaxHeight(centerBottomHeight).Render(centerBottomContent)
 
 	centerColumn := lipgloss.JoinVertical(lipgloss.Left, centerTopPanel, centerBottomPanel)
 
-	// 4. Right Panel: Enterprise MITRE Heatmap & Intel
+	// 5. Right Panel: Enterprise MITRE Heatmap & Intel
 	rightContent := m.renderMITREPanel(rightWidth-2, mainHeight-2)
-	rightStyle := panelStyle
+	rightStyle := basePanelStyle
 	if m.activeTab == 3 {
 		rightStyle = activePanelStyle
 	}
-	rightPanel := rightStyle.Width(rightWidth).Height(mainHeight).Render(rightContent)
+	rightPanel := rightStyle.Width(rightWidth).Height(mainHeight).MaxHeight(mainHeight).Render(rightContent)
 
+	// Horizontal Join for the 3 main columns
 	middleRow := lipgloss.JoinHorizontal(lipgloss.Top, leftPanel, centerColumn, rightPanel)
 
-	// 5. Bottom Panel: Metrics & Controls
-	bottomContent := m.renderBottomPanel(totalWidth)
-	bottomPanel := panelStyle.Width(totalWidth).Height(4).Render(bottomContent)
+	// 6. Bottom Bar: Metrics & Controls
+	bottomContent := m.renderBottomPanel(m.width - 2)
+	bottomPanel := lipgloss.NewStyle().Width(m.width).Render(bottomContent)
 
 	baseView := lipgloss.JoinVertical(lipgloss.Left, banner, middleRow, bottomPanel)
 
@@ -459,30 +481,29 @@ func renderMiniBar(pct float64, width int) string {
 
 func (m *SIEMModel) renderFleetPanel(width int) string {
 	var b strings.Builder
-	b.WriteString(matrixTitleStyle.Render("🌐 FLEET MATRIX & TELEMETRY") + "\n")
+	b.WriteString(matrixTitleStyle.Render("🌐 FLEET MATRIX") + "\n")
 	b.WriteString(lipgloss.NewStyle().Foreground(colorTextMuted).Render(strings.Repeat("─", width)) + "\n")
 
 	if len(m.nodes) == 0 {
-		b.WriteString(lipgloss.NewStyle().Foreground(colorTextMuted).Render("No edge nodes connected.\n(Listening on gRPC 0.0.0.0:50051...)"))
+		b.WriteString(lipgloss.NewStyle().Foreground(colorTextMuted).Render("No edge nodes connected.\n(gRPC 0.0.0.0:50051)"))
 		return b.String()
 	}
 
 	for _, n := range m.nodes {
 		isOnline := time.Since(n.LastSeen) <= 20*time.Second
-		statusBadge := lipgloss.NewStyle().Foreground(colorNeonGreen).Render("🟢 ACTIVE")
+		statusBadge := lipgloss.NewStyle().Foreground(colorNeonGreen).Render("🟢")
 		if !isOnline {
-			statusBadge = alertStyle.Render("🔴 OFFLINE")
+			statusBadge = alertStyle.Render("🔴")
 		}
 
-		nodeName := n.NodeID
-		cpuBar := renderMiniBar(n.CPUUsage, 8)
-		ramBar := renderMiniBar(n.MemoryUsage/256.0*100.0, 8)
+		nodeName := truncateString(n.NodeID, width-4)
+		cpuBar := renderMiniBar(n.CPUUsage, 6)
+		ramBar := renderMiniBar(n.MemoryUsage/256.0*100.0, 6)
 
 		b.WriteString(fmt.Sprintf("%s %s\n", statusBadge, lipgloss.NewStyle().Bold(true).Foreground(colorCyberCyan).Render(nodeName)))
-		b.WriteString(fmt.Sprintf("  CPU: [%s] %0.1f%%\n", lipgloss.NewStyle().Foreground(colorNeonGreen).Render(cpuBar), n.CPUUsage))
-		b.WriteString(fmt.Sprintf("  RAM: [%s] %0.1f MB\n", lipgloss.NewStyle().Foreground(colorCyberCyan).Render(ramBar), n.MemoryUsage))
-		b.WriteString(fmt.Sprintf("  🛡️ Bans: %d  | ⏱️ Up: %ds\n", n.ActiveBansCount, n.UptimeSeconds))
-		b.WriteString("\n")
+		b.WriteString(fmt.Sprintf(" CPU:[%s] %0.0f%%\n", lipgloss.NewStyle().Foreground(colorNeonGreen).Render(cpuBar), n.CPUUsage))
+		b.WriteString(fmt.Sprintf(" RAM:[%s] %0.0fMB\n", lipgloss.NewStyle().Foreground(colorCyberCyan).Render(ramBar), n.MemoryUsage))
+		b.WriteString(fmt.Sprintf(" 🛡️ %d | ⏱ %ds\n\n", n.ActiveBansCount, n.UptimeSeconds))
 	}
 	return b.String()
 }
@@ -496,24 +517,25 @@ func (m *SIEMModel) renderThreatStream(width, maxLines int) string {
 	}
 	filterTag := ""
 	if m.isFilterActive {
-		filterTag = fmt.Sprintf(" 🔍 [FILTER: %s]", m.searchQuery)
+		filterTag = fmt.Sprintf(" [FILTER: %s]", truncateString(m.searchQuery, 12))
 	}
 
-	b.WriteString(fmt.Sprintf("%s %s%s%s\n",
+	header := fmt.Sprintf("%s %s%s%s",
 		headerStyle.Render("⚡ LIVE INGESTION STREAM"),
 		lipgloss.NewStyle().Foreground(colorNeonGreen).Render(fmt.Sprintf("(%d EPS)", eps)),
 		alertStyle.Render(pauseTag),
-		lipgloss.NewStyle().Foreground(colorWarningGold).Render(filterTag)))
+		lipgloss.NewStyle().Foreground(colorWarningGold).Render(filterTag))
+	b.WriteString(truncateString(header, width) + "\n")
 	b.WriteString(lipgloss.NewStyle().Foreground(colorTextMuted).Render(strings.Repeat("─", width)) + "\n")
 
 	if len(m.events) == 0 {
-		b.WriteString(lipgloss.NewStyle().Foreground(colorTextMuted).Render("Listening for edge node stream events on gRPC...\n"))
+		b.WriteString(lipgloss.NewStyle().Foreground(colorTextMuted).Render("Listening for edge node stream events...\n"))
 		return b.String()
 	}
 
 	limit := maxLines / 2
 	if limit <= 0 {
-		limit = 4
+		limit = 3
 	}
 
 	for i, ev := range m.events {
@@ -552,10 +574,10 @@ func (m *SIEMModel) renderThreatStream(width, maxLines int) string {
 		line2 := fmt.Sprintf("    %s", lipgloss.NewStyle().Foreground(colorTextMuted).Render(truncateString(ev.RawLine, width-6)))
 
 		if m.activeTab == 1 && i == m.selectedLogIndex {
-			b.WriteString(lipgloss.NewStyle().Background(colorSelectedBg).Render(line1) + "\n")
-			b.WriteString(lipgloss.NewStyle().Background(colorSelectedBg).Render(line2) + "\n")
+			b.WriteString(lipgloss.NewStyle().Background(colorSelectedBg).Render(truncateString(line1, width)) + "\n")
+			b.WriteString(lipgloss.NewStyle().Background(colorSelectedBg).Render(truncateString(line2, width)) + "\n")
 		} else {
-			b.WriteString(line1 + "\n" + line2 + "\n")
+			b.WriteString(truncateString(line1, width) + "\n" + truncateString(line2, width) + "\n")
 		}
 	}
 	return b.String()
@@ -563,7 +585,7 @@ func (m *SIEMModel) renderThreatStream(width, maxLines int) string {
 
 func (m *SIEMModel) renderIncidentStream(width, maxLines int) string {
 	var b strings.Builder
-	b.WriteString(alertStyle.Render("🔥 CRITICAL & WARN INCIDENTS (THREAT >= 50)") + "\n")
+	b.WriteString(alertStyle.Render("🔥 CRITICAL INCIDENTS (THREAT >= 50)") + "\n")
 	b.WriteString(lipgloss.NewStyle().Foreground(colorTextMuted).Render(strings.Repeat("─", width)) + "\n")
 
 	if len(m.incidents) == 0 {
@@ -573,7 +595,7 @@ func (m *SIEMModel) renderIncidentStream(width, maxLines int) string {
 
 	limit := maxLines / 2
 	if limit <= 0 {
-		limit = 4
+		limit = 3
 	}
 
 	for i, ev := range m.incidents {
@@ -598,15 +620,15 @@ func (m *SIEMModel) renderIncidentStream(width, maxLines int) string {
 			scoreBadge,
 			lipgloss.NewStyle().Bold(true).Foreground(colorAlertPink).Render(ev.ClientIP),
 			lipgloss.NewStyle().Foreground(colorWarningGold).Render(ev.MitreTechniqueID),
-			lipgloss.NewStyle().Foreground(colorCyberCyan).Render(ev.RuleID),
+			lipgloss.NewStyle().Foreground(colorCyberCyan).Render(truncateString(ev.RuleID, 16)),
 		)
 		line2 := fmt.Sprintf("    %s", lipgloss.NewStyle().Foreground(colorTextLight).Render(truncateString(ev.RawLine, width-6)))
 
 		if m.activeTab == 2 && i == m.selectedIncIndex {
-			b.WriteString(lipgloss.NewStyle().Background(colorSelectedBg).Render(line1) + "\n")
-			b.WriteString(lipgloss.NewStyle().Background(colorSelectedBg).Render(line2) + "\n")
+			b.WriteString(lipgloss.NewStyle().Background(colorSelectedBg).Render(truncateString(line1, width)) + "\n")
+			b.WriteString(lipgloss.NewStyle().Background(colorSelectedBg).Render(truncateString(line2, width)) + "\n")
 		} else {
-			b.WriteString(line1 + "\n" + line2 + "\n")
+			b.WriteString(truncateString(line1, width) + "\n" + truncateString(line2, width) + "\n")
 		}
 	}
 	return b.String()
@@ -614,7 +636,7 @@ func (m *SIEMModel) renderIncidentStream(width, maxLines int) string {
 
 func (m *SIEMModel) renderMITREPanel(width, maxLines int) string {
 	var b strings.Builder
-	b.WriteString(matrixTitleStyle.Render("🛡 ENTERPRISE MITRE HEATMAP & INTEL") + "\n")
+	b.WriteString(matrixTitleStyle.Render("🛡 ENTERPRISE MITRE INTEL") + "\n")
 	b.WriteString(lipgloss.NewStyle().Foreground(colorTextMuted).Render(strings.Repeat("─", width)) + "\n")
 
 	analyzer := m.server.GetAnalyzer()
@@ -637,9 +659,9 @@ func (m *SIEMModel) renderMITREPanel(width, maxLines int) string {
 		return list[i].Count > list[j].Count
 	})
 
-	limit := maxLines - 8
+	limit := maxLines - 7
 	if limit <= 0 {
-		limit = 8
+		limit = 6
 	}
 
 	for i, st := range list {
@@ -649,14 +671,14 @@ func (m *SIEMModel) renderMITREPanel(width, maxLines int) string {
 
 		barLen := 0
 		if st.Count > 0 {
-			barLen = min(st.Count/2+1, 8)
+			barLen = min(st.Count/2+1, 6)
 		}
 		filled := strings.Repeat("█", barLen)
-		empty := strings.Repeat("░", 8-barLen)
+		empty := strings.Repeat("░", 6-barLen)
 
 		techName := st.Name
-		if len(techName) > 16 {
-			techName = techName[:16]
+		if len(techName) > 12 {
+			techName = techName[:12]
 		}
 
 		color := colorCyberCyan
@@ -666,16 +688,17 @@ func (m *SIEMModel) renderMITREPanel(width, maxLines int) string {
 			color = colorWarningGold
 		}
 
-		b.WriteString(fmt.Sprintf("%-6s %-16s %s%s %2d\n",
+		row := fmt.Sprintf("%-6s %-12s %s%s %2d",
 			lipgloss.NewStyle().Bold(true).Foreground(color).Render(st.ID),
 			lipgloss.NewStyle().Foreground(colorTextLight).Render(techName),
 			lipgloss.NewStyle().Foreground(colorAlertPink).Render(filled),
 			lipgloss.NewStyle().Foreground(colorPanelBorder).Render(empty),
-			st.Count))
+			st.Count)
+		b.WriteString(truncateString(row, width) + "\n")
 	}
 
 	// Intel Box: Top Attacker IPs
-	b.WriteString("\n" + lipgloss.NewStyle().Bold(true).Foreground(colorWarningGold).Render("🎯 TOP ATTACKER INTEL") + "\n")
+	b.WriteString("\n" + lipgloss.NewStyle().Bold(true).Foreground(colorWarningGold).Render("🎯 TOP ATTACKERS") + "\n")
 	b.WriteString(lipgloss.NewStyle().Foreground(colorTextMuted).Render(strings.Repeat("─", width)) + "\n")
 
 	var attackers []attackerStat
@@ -687,15 +710,16 @@ func (m *SIEMModel) renderMITREPanel(width, maxLines int) string {
 	})
 
 	if len(attackers) == 0 {
-		b.WriteString(lipgloss.NewStyle().Foreground(colorTextMuted).Render("No threat actors logged yet\n"))
+		b.WriteString(lipgloss.NewStyle().Foreground(colorTextMuted).Render("No threat actors\n"))
 	} else {
 		for i, at := range attackers {
-			if i >= 3 {
+			if i >= 2 {
 				break
 			}
-			b.WriteString(fmt.Sprintf("⚡ %-18s [%s hits]\n",
+			row := fmt.Sprintf("⚡ %-15s [%s]",
 				lipgloss.NewStyle().Bold(true).Foreground(colorAlertPink).Render(at.IP),
-				lipgloss.NewStyle().Foreground(colorNeonGreen).Render(strconv.Itoa(at.Count))))
+				lipgloss.NewStyle().Foreground(colorNeonGreen).Render(strconv.Itoa(at.Count)))
+			b.WriteString(truncateString(row, width) + "\n")
 		}
 	}
 
@@ -731,7 +755,7 @@ func (m *SIEMModel) renderBottomPanel(width int) string {
 	}
 
 	shortcuts := lipgloss.NewStyle().Foreground(colorCyberCyan).Render("[/] Search  |  [B] Ban  |  [U] Unban  |  [Space] Pause  |  [Tab] Focus  |  [Enter] Inspect  |  [Q] Quit")
-	rateDisplay := lipgloss.NewStyle().Bold(true).Foreground(colorNeonGreen).Render(fmt.Sprintf("EPS: [%d]  Total: [%s]  Threat: [%s]", eps, strconv.FormatUint(total, 10), threatIndex))
+	rateDisplay := lipgloss.NewStyle().Bold(true).Foreground(colorNeonGreen).Render(fmt.Sprintf("EPS:[%d] Total:[%s] Threat:[%s]", eps, strconv.FormatUint(total, 10), threatIndex))
 	graph := lipgloss.NewStyle().Foreground(colorCyberCyan).Render(fmt.Sprintf("[%s]", sparkline.String()))
 
 	status := m.statusPrompt
@@ -739,8 +763,8 @@ func (m *SIEMModel) renderBottomPanel(width int) string {
 		status = alertStyle.Render(" " + status)
 	}
 
-	return fmt.Sprintf("%s   %s %s%s\n%s", shortcuts, rateDisplay, graph, status,
-		lipgloss.NewStyle().Foreground(colorTextMuted).Render("CoPSeC Enterprise SOC Cockpit • Dual-Window Threat Hunting Core"))
+	line1 := fmt.Sprintf("%s   %s %s%s", shortcuts, rateDisplay, graph, status)
+	return truncateString(line1, width)
 }
 
 func (m *SIEMModel) renderSearchModalOverlay(baseView string) string {
