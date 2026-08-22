@@ -257,12 +257,19 @@ func (s *CentralServer) processEvent(nodeID string, event *copsecproto.LogEvent)
 		go bot.ProcessEvent(stored)
 	}
 
-	// Direct reactive dispatch to Bubbletea TUI
+	// Direct reactive dispatch to Bubbletea TUI with crash-protection guard
 	s.mu.RLock()
 	p := s.teaProgram
 	s.mu.RUnlock()
 	if p != nil {
-		p.Send(stored)
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("[WARN] Recovered from TUI dispatch panic: %v", r)
+				}
+			}()
+			p.Send(stored)
+		}()
 	}
 
 	// Broadcast to TUI subscriber non-blockingly

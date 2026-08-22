@@ -459,6 +459,9 @@ func (m *SIEMModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *SIEMModel) processIncomingEvent(ev *StoredEvent) {
+	if ev == nil {
+		return
+	}
 	if !m.isPaused && !m.isFilterActive {
 		m.events = append([]*StoredEvent{ev}, m.events...)
 		if m.selectedLogIndex > 0 {
@@ -896,7 +899,7 @@ func (m *SIEMModel) renderThreatStream(width, maxLines int) string {
 		}
 
 		scrollChar := styleScrollTrack.Render("│")
-		if len(currentList) > visibleItems {
+		if len(currentList) > 1 && visibleItems > 1 {
 			thumbPos := int(float64(m.selectedLogIndex) / float64(len(currentList)-1) * float64(visibleItems-1))
 			if i == thumbPos {
 				scrollChar = styleCyan.Render("█")
@@ -971,7 +974,7 @@ func (m *SIEMModel) renderIncidentStream(width, maxLines int) string {
 		}
 
 		scrollChar := styleScrollTrack.Render("│")
-		if len(m.incidents) > visibleItems {
+		if len(m.incidents) > 1 && visibleItems > 1 {
 			thumbPos := int(float64(m.selectedIncIndex) / float64(len(m.incidents)-1) * float64(visibleItems-1))
 			if i == thumbPos {
 				scrollChar = styleAlert.Render("█")
