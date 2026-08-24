@@ -33,6 +33,8 @@ type StoredEvent struct {
 	City             string `json:"city,omitempty"`
 	ASN              string `json:"asn,omitempty"`
 	FlagEmoji        string `json:"flag_emoji,omitempty"`
+	ScoreBreakdown   string `json:"score_breakdown,omitempty"`
+	ThreatTier       string `json:"threat_tier,omitempty"`
 }
 
 // ActiveBanRecord represents an IP quarantined in the SOAR Jail.

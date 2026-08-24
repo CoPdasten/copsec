@@ -13,6 +13,8 @@ import (
 	"time"
 
 	copsecproto "github.com/copsec/collector/proto"
+	"github.com/copsec/controller/pkg/geoip"
+	"github.com/copsec/controller/pkg/threat"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/keepalive"
@@ -48,6 +50,7 @@ type CentralServer struct {
 	wsHub        *WSHub
 	telegramBot  *TelegramSOARBot
 	aiEngine     *AIEngine
+	threatEngine *threat.ScoringEngine
 	nodes        map[string]*NodeSession
 	eventSubChan chan *StoredEvent
 
@@ -69,6 +72,7 @@ func NewCentralServer(storage *StorageEngine, analyzer *RuleEngine) *CentralServ
 		storage:          storage,
 		analyzer:         analyzer,
 		aiEngine:         NewAIEngine(),
+		threatEngine:     threat.GetDefaultEngine(),
 		nodes:            make(map[string]*NodeSession),
 		eventSubChan:     make(chan *StoredEvent, 4096),
 		autoBanEnabled:   true,
@@ -318,6 +322,21 @@ func (s *CentralServer) processEvent(nodeID string, event *copsecproto.LogEvent)
 		}
 	}
 
+	// 3. Dynamic Sliding-Window & Time-Decayed Threat Scoring Engine
+	loc := geoip.GetDefaultEngine().Lookup(event.ClientIp)
+	var assessment threat.ThreatAssessment
+	if s.threatEngine != nil && event.ClientIp != "" {
+		assessment = s.threatEngine.Evaluate(
+			event.ClientIp,
+			threatScore,
+			ruleID,
+			mitreID,
+			int(event.StatusCode),
+			loc.ASN,
+		)
+		threatScore = assessment.FinalScore
+	}
+
 	stored := &StoredEvent{
 		NodeID:           nodeID,
 		Source:           event.Source,
@@ -328,6 +347,13 @@ func (s *CentralServer) processEvent(nodeID string, event *copsecproto.LogEvent)
 		RuleID:           ruleID,
 		MitreTechniqueID: mitreID,
 		ThreatScore:      threatScore,
+		ScoreBreakdown:   assessment.Breakdown,
+		ThreatTier:       assessment.Tier,
+		CountryCode:      loc.CountryCode,
+		CountryName:      loc.CountryName,
+		City:             loc.City,
+		ASN:              loc.ASN,
+		FlagEmoji:        loc.FlagEmoji,
 	}
 
 	if stored.TimestampMs == 0 {

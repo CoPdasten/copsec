@@ -18,6 +18,7 @@ import (
 	"github.com/copsec/controller/pkg/healing"
 	"github.com/copsec/controller/pkg/p2p"
 	"github.com/copsec/controller/pkg/tarpit"
+	"github.com/copsec/controller/pkg/threat"
 	"github.com/copsec/controller/pkg/yara"
 )
 
@@ -124,6 +125,7 @@ func (ws *WebSOCServer) Start() error {
 	mux.HandleFunc("/api/security/dns", ws.handleSecurityDNS)
 	mux.HandleFunc("/api/security/yara", ws.handleSecurityYARA)
 	mux.HandleFunc("/api/security/integrity", ws.handleSecurityIntegrity)
+	mux.HandleFunc("/api/threat/inspect", ws.handleThreatInspect)
 
 	// 3. Embedded Web SOC and Deception Traps
 	mux.HandleFunc("/", ws.handleRootOrTrap)
@@ -843,4 +845,28 @@ func (ws *WebSOCServer) handleSecurityYARA(w http.ResponseWriter, r *http.Reques
 func (ws *WebSOCServer) handleSecurityIntegrity(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(ws.integrityGuard.GetRecentEvents())
+}
+
+func (ws *WebSOCServer) handleThreatInspect(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	ip := strings.TrimSpace(r.URL.Query().Get("ip"))
+	if ip == "" {
+		http.Error(w, `{"error":"ip parameter is required"}`, http.StatusBadRequest)
+		return
+	}
+
+	state, found := threat.GetDefaultEngine().GetEntityState(ip)
+	if !found {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"found":   false,
+			"ip":      ip,
+			"message": "No active sliding-window threat state tracked for IP",
+		})
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"found": true,
+		"state": state,
+	})
 }

@@ -1264,6 +1264,12 @@
           <div class="meta-box" style="grid-column: span 2;"><label>Origin Country & ASN</label><span id="drawer-geo">-</span></div>
         </div>
 
+        <!-- Dynamic Sliding-Window Threat Scoring Breakdown -->
+        <div id="drawer-breakdown-box" style="background: #0b1329; border: 1px solid #1e2c4a; border-radius: 6px; padding: 0.65rem 0.85rem; margin-bottom: 0.85rem; display: none;">
+          <div style="font-size: 0.72rem; color: var(--amber); font-weight: 700; font-family: var(--font-mono); text-transform: uppercase;">⚡ Dynamic Threat Scoring Breakdown</div>
+          <div style="font-size: 0.78rem; color: #e2e8f0; font-family: var(--font-mono); margin-top: 0.25rem;" id="drawer-breakdown-text">-</div>
+        </div>
+
         <!-- SOC Executive Incident Report Action Bar -->
         <div style="background: #090e1c; border: 1px solid #1e2c4a; border-radius: 6px; padding: 0.75rem; margin-bottom: 1rem; display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
           <div>
@@ -1739,7 +1745,7 @@
 
       tr.className = `incident-row ${rowSeverityClass}`;
 
-      const scoreBadge = getScoreBadge(ev.threat_score);
+      const scoreBadge = getScoreBadge(ev.threat_score, ev.score_breakdown);
       const timeStr = new Date(ev.timestamp_ms || Date.now()).toLocaleTimeString();
       const nodeLabel = ev.node_id || 'controller';
       const signal = parseTelemetrySignal(ev.raw_line, ev.source);
@@ -1762,11 +1768,12 @@
       if (tbody.children.length > 60) tbody.removeChild(tbody.lastChild);
     }
 
-    function getScoreBadge(score) {
-      if (score >= 80) return `<span class="badge badge-critical">${score} CRIT</span>`;
-      if (score >= 50) return `<span class="badge badge-high">${score} HIGH</span>`;
-      if (score >= 30) return `<span class="badge badge-medium">${score} MED</span>`;
-      return `<span class="badge badge-low">${score} LOW</span>`;
+    function getScoreBadge(score, breakdown) {
+      const tooltip = breakdown ? `title="${escapeHtml(breakdown)}"` : '';
+      if (score >= 85) return `<span class="badge badge-critical" style="background: rgba(244, 63, 94, 0.2); color: #f43f5e; border: 1px solid #f43f5e; font-weight: 700;" ${tooltip}>${score} CRIT</span>`;
+      if (score >= 70) return `<span class="badge badge-high" style="background: rgba(249, 115, 22, 0.2); color: #f97316; border: 1px solid #f97316; font-weight: 700;" ${tooltip}>${score} HIGH</span>`;
+      if (score >= 30) return `<span class="badge badge-medium" style="background: rgba(245, 158, 11, 0.2); color: #f59e0b; border: 1px solid #f59e0b; font-weight: 600;" ${tooltip}>${score} SUSP</span>`;
+      return `<span class="badge badge-low" style="background: rgba(6, 182, 212, 0.15); color: var(--cyan); border: 1px solid var(--cyan);" ${tooltip}>${score} LOW</span>`;
     }
 
     // GeoIP Attack Origin Radar / World Density Matrix
@@ -1837,7 +1844,16 @@
       document.getElementById('drawer-time').textContent = new Date(ev.timestamp_ms || Date.now()).toLocaleString();
       document.getElementById('drawer-node').textContent = ev.node_id || 'controller';
       document.getElementById('drawer-ip').textContent = ev.client_ip || '-';
-      document.getElementById('drawer-score').innerHTML = getScoreBadge(ev.threat_score);
+      document.getElementById('drawer-score').innerHTML = getScoreBadge(ev.threat_score, ev.score_breakdown);
+
+      const breakdownBox = document.getElementById('drawer-breakdown-box');
+      const breakdownText = document.getElementById('drawer-breakdown-text');
+      if (ev.score_breakdown && breakdownBox && breakdownText) {
+        breakdownText.textContent = ev.score_breakdown;
+        breakdownBox.style.display = 'block';
+      } else if (breakdownBox) {
+        breakdownBox.style.display = 'none';
+      }
 
       const geoLabel = (ev.flag_emoji || '🌐') + ' ' + (ev.country_name || ev.country_code || 'Unknown Origin') + (ev.asn ? ` • ${ev.asn}` : '');
       const geoEl = document.getElementById('drawer-geo');

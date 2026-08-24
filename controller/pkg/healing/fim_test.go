@@ -3,6 +3,7 @@ package healing
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 )
 
@@ -16,9 +17,12 @@ func TestFIMSelfHealingAutoRemediation(t *testing.T) {
 		t.Fatalf("Failed to write initial file: %v", err)
 	}
 
+	var mu sync.Mutex
 	var healedEvents []FIMDriftEvent
 	engine := NewFIMHealingEngine(func(ev FIMDriftEvent) {
+		mu.Lock()
 		healedEvents = append(healedEvents, ev)
+		mu.Unlock()
 	})
 
 	engine.RegisterTarget(testTarget, originalContent, 0644)

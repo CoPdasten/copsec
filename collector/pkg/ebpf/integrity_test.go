@@ -1,13 +1,17 @@
 package ebpf
 
 import (
+	"sync"
 	"testing"
 )
 
 func TestIntegrityGuardPtraceAndModuleInspection(t *testing.T) {
+	var mu sync.Mutex
 	var capturedEvents []IntegrityEvent
 	guard := NewIntegrityGuard("/tmp/test_quarantine", func(ev IntegrityEvent) {
+		mu.Lock()
 		capturedEvents = append(capturedEvents, ev)
+		mu.Unlock()
 	})
 
 	// 1. Test Ptrace Injection Interception
