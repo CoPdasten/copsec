@@ -14,6 +14,7 @@ import (
 
 	copsecproto "github.com/copsec/collector/proto"
 	"github.com/copsec/controller/pkg/geoip"
+	"github.com/copsec/controller/pkg/ml"
 	"github.com/copsec/controller/pkg/threat"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -322,7 +323,35 @@ func (s *CentralServer) processEvent(nodeID string, event *copsecproto.LogEvent)
 		}
 	}
 
-	// 3. Dynamic Sliding-Window & Time-Decayed Threat Scoring Engine
+	// 3. Pure-Go ML Flow Anomaly Engine Evaluation
+	var mlAnomaly bool
+	var mlConfidence float64
+	var mlDescription string
+	if event.ClientIp != "" {
+		mlRes := ml.GetDefaultEngine().EvaluateFlow(
+			event.ClientIp,
+			[]byte(event.RawLine),
+			0,
+			int(event.StatusCode),
+			event.TimestampMs,
+		)
+		if mlRes.IsAnomaly {
+			mlAnomaly = true
+			mlConfidence = mlRes.ConfidencePct
+			mlDescription = mlRes.Description
+			if threatScore < 80 {
+				threatScore += 40
+			}
+			if ruleID == "" {
+				ruleID = "ml_flow_anomaly"
+			}
+			if mitreID == "" {
+				mitreID = "T1071"
+			}
+		}
+	}
+
+	// 4. Dynamic Sliding-Window & Time-Decayed Threat Scoring Engine
 	loc := geoip.GetDefaultEngine().Lookup(event.ClientIp)
 	var assessment threat.ThreatAssessment
 	if s.threatEngine != nil && event.ClientIp != "" {
@@ -354,6 +383,9 @@ func (s *CentralServer) processEvent(nodeID string, event *copsecproto.LogEvent)
 		City:             loc.City,
 		ASN:              loc.ASN,
 		FlagEmoji:        loc.FlagEmoji,
+		MLAnomaly:        mlAnomaly,
+		MLConfidencePct:  mlConfidence,
+		MLDescription:    mlDescription,
 	}
 
 	if stored.TimestampMs == 0 {

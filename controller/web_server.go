@@ -16,6 +16,7 @@ import (
 	"github.com/copsec/controller/pkg/ebpf"
 	"github.com/copsec/controller/pkg/geoip"
 	"github.com/copsec/controller/pkg/healing"
+	"github.com/copsec/controller/pkg/ml"
 	"github.com/copsec/controller/pkg/p2p"
 	"github.com/copsec/controller/pkg/tarpit"
 	"github.com/copsec/controller/pkg/threat"
@@ -126,6 +127,7 @@ func (ws *WebSOCServer) Start() error {
 	mux.HandleFunc("/api/security/yara", ws.handleSecurityYARA)
 	mux.HandleFunc("/api/security/integrity", ws.handleSecurityIntegrity)
 	mux.HandleFunc("/api/threat/inspect", ws.handleThreatInspect)
+	mux.HandleFunc("/api/ml/stats", ws.handleMLStats)
 
 	// 3. Embedded Web SOC and Deception Traps
 	mux.HandleFunc("/", ws.handleRootOrTrap)
@@ -869,4 +871,9 @@ func (ws *WebSOCServer) handleThreatInspect(w http.ResponseWriter, r *http.Reque
 		"found": true,
 		"state": state,
 	})
+}
+
+func (ws *WebSOCServer) handleMLStats(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(ml.GetDefaultEngine().GetStats())
 }

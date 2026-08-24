@@ -1270,6 +1270,15 @@
           <div style="font-size: 0.78rem; color: #e2e8f0; font-family: var(--font-mono); margin-top: 0.25rem;" id="drawer-breakdown-text">-</div>
         </div>
 
+        <!-- Pure-Go ML Flow Anomaly Radar Widget -->
+        <div id="drawer-ml-container" style="background: rgba(88, 28, 135, 0.15); border: 1px solid #7e22ce; border-radius: 6px; padding: 0.75rem 0.85rem; margin-bottom: 0.85rem; display: none;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
+            <div style="font-size: 0.72rem; color: #c084fc; font-weight: 700; font-family: var(--font-mono); text-transform: uppercase;">🤖 Pure-Go ML Flow Anomaly Radar</div>
+            <span id="drawer-ml-badge" class="badge" style="background: rgba(192, 132, 252, 0.2); color: #c084fc; border: 1px solid #c084fc; font-weight: 700;">CONFIDENCE: 92%</span>
+          </div>
+          <div style="font-size: 0.75rem; color: #e2e8f0; line-height: 1.35;" id="drawer-ml-desc">-</div>
+        </div>
+
         <!-- SOC Executive Incident Report Action Bar -->
         <div style="background: #090e1c; border: 1px solid #1e2c4a; border-radius: 6px; padding: 0.75rem; margin-bottom: 1rem; display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
           <div>
@@ -1751,6 +1760,8 @@
       const signal = parseTelemetrySignal(ev.raw_line, ev.source);
       const flagEmoji = ev.flag_emoji || '🌐';
 
+      const mlChip = ev.ml_anomaly ? `<span class="chip chip-alert" style="background: rgba(168, 85, 247, 0.2); color: #c084fc; border: 1px solid #c084fc; font-weight: 700; margin-right: 0.35rem;">🤖 ML Anomaly ${(ev.ml_confidence_pct || 88).toFixed(0)}%</span>` : '';
+
       tr.innerHTML = `
         <td style="font-family: var(--font-mono); color: var(--text-muted);">${timeStr}</td>
         <td><span class="tag-node">${escapeHtml(nodeLabel)}</span></td>
@@ -1759,7 +1770,7 @@
         <td>${scoreBadge}</td>
         <td>
           <div class="payload-cell">
-            <div class="payload-summary">${signal.html}</div>
+            <div class="payload-summary">${mlChip}${signal.html}</div>
             <button class="btn-inspect" onclick="openPayloadDrawerByIndex(${index})">🔍 Inspect</button>
           </div>
         </td>
@@ -1853,6 +1864,17 @@
         breakdownBox.style.display = 'block';
       } else if (breakdownBox) {
         breakdownBox.style.display = 'none';
+      }
+
+      const mlContainer = document.getElementById('drawer-ml-container');
+      const mlBadge = document.getElementById('drawer-ml-badge');
+      const mlDesc = document.getElementById('drawer-ml-desc');
+      if (ev.ml_anomaly && mlContainer && mlBadge && mlDesc) {
+        mlBadge.textContent = `CONFIDENCE: ${(ev.ml_confidence_pct || 88).toFixed(0)}%`;
+        mlDesc.textContent = `Unsupervised Anomaly: ${ev.ml_description || 'Abnormal flow velocity, entropy distribution, or error burst detected.'}`;
+        mlContainer.style.display = 'block';
+      } else if (mlContainer) {
+        mlContainer.style.display = 'none';
       }
 
       const geoLabel = (ev.flag_emoji || '🌐') + ' ' + (ev.country_name || ev.country_code || 'Unknown Origin') + (ev.asn ? ` • ${ev.asn}` : '');
