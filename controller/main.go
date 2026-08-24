@@ -11,9 +11,6 @@ import (
 	"sync"
 	"syscall"
 	"time"
-
-	tea "github.com/charmbracelet/bubbletea"
-	"golang.org/x/term"
 )
 
 func main() {
@@ -31,8 +28,6 @@ func main() {
 	tgChat := flag.String("telegram-chat", os.Getenv("COPSEC_TELEGRAM_CHAT_ID"), "Telegram Chat ID")
 	autoBan := flag.Bool("auto-ban", true, "Enable autonomous SOAR auto-ban")
 	autoBanThreshold := flag.Int("auto-ban-threshold", 50, "Threat score threshold for auto-ban")
-	daemon := flag.Bool("daemon", false, "Run in headless daemon mode without TUI dashboard")
-	headless := flag.Bool("headless", false, "Alias for --daemon")
 	flag.Parse()
 
 	// Resolve effective addresses and ports
@@ -51,10 +46,7 @@ func main() {
 		honeypotSSHAddr = *honeypotSSHAddrFlag
 	}
 
-	isInteractiveTTY := term.IsTerminal(int(os.Stdin.Fd()))
-	isDaemonMode := *daemon || *headless || !isInteractiveTTY
-
-	log.Println("[INFO] ⚡ CoPSeC Distributed Micro-SIEM / Autonomous SOAR Matrix initializing...")
+	log.Println("[INFO] ⚡ CoPSeC Central Controller daemon initializing...")
 
 	// 1. Embedded Timeseries Storage (WAL-mode SQLite)
 	finalDbPath := *dbPath
@@ -136,7 +128,7 @@ func main() {
 	var wg sync.WaitGroup
 	tgBot.Start(ctx, &wg)
 
-	// 7. Embedded Web SOC Server
+	// 7. Embedded Web SOC Server (Single-Binary Web Console)
 	webServer := NewWebSOCServer(
 		webAddr,
 		centralServer,
@@ -162,49 +154,19 @@ func main() {
 		<-ctx.Done()
 	}()
 
-	// Handle OS shutdown signals
+	log.Printf("[INFO] ⚡ CoPSeC Central Controller daemon initialized successfully.")
+	log.Printf("       • Web SOC Console : http://%s", webAddr)
+	log.Printf("       • gRPC Ingestion  : %s", grpcAddr)
+	log.Printf("       • SSH Honeypot    : %s", honeypotSSHAddr)
+	log.Printf("       • Autonomous SOAR : Auto-Ban=%v (Threshold: %d)", *autoBan, *autoBanThreshold)
+
+	// Block on OS termination signals for clean shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	<-sigChan
 
-	if isDaemonMode {
-		log.Printf("[INFO] ⚡ CoPSeC Controller running in Headless / Daemon Mode:")
-		log.Printf("       • Web SOC Console : http://%s", webAddr)
-		log.Printf("       • gRPC Ingestion  : %s", grpcAddr)
-		log.Printf("       • SSH Honeypot    : %s", honeypotSSHAddr)
-		log.Printf("       • Autonomous SOAR : Auto-Ban=%v (Threshold: %d)", *autoBan, *autoBanThreshold)
-		log.Printf("[INFO] Press Ctrl+C or send SIGTERM to stop.")
-
-		<-sigChan
-		log.Println("[INFO] Shutting down CoPSeC Controller gracefully...")
-		cancel()
-		wg.Wait()
-		// Allow background flushes
-		time.Sleep(200 * time.Millisecond)
-		return
-	}
-
-	// 9. Matrix Cyberpunk TUI Dashboard (Bubbletea) - Only in interactive TTY
-	logFile, err := os.OpenFile("/tmp/copsec_controller.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0640)
-	if err == nil {
-		log.SetOutput(logFile)
-		defer logFile.Close()
-	}
-
-	model := NewSIEMModel(centralServer, storage)
-	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
-
-	centralServer.SetTeaProgram(p)
-
-	go func() {
-		<-sigChan
-		p.Quit()
-		cancel()
-	}()
-
-	if _, err := p.Run(); err != nil {
-		log.Fatalf("[FATAL] TUI execution failed: %v", err)
-	}
-
+	log.Println("[INFO] Gracefully shutting down CoPSeC Controller & flushing SQLite WAL...")
 	cancel()
 	wg.Wait()
+	time.Sleep(150 * time.Millisecond)
 }

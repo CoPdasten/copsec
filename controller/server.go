@@ -12,7 +12,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/charmbracelet/bubbletea"
 	copsecproto "github.com/copsec/collector/proto"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -49,7 +48,6 @@ type CentralServer struct {
 	wsHub        *WSHub
 	telegramBot  *TelegramSOARBot
 	aiEngine     *AIEngine
-	teaProgram   *tea.Program
 	nodes        map[string]*NodeSession
 	eventSubChan chan *StoredEvent
 
@@ -144,13 +142,6 @@ func (s *CentralServer) SetTelegramBot(bot *TelegramSOARBot) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.telegramBot = bot
-}
-
-// SetTeaProgram links the live Bubbletea program instance for direct reactive UI rendering.
-func (s *CentralServer) SetTeaProgram(p *tea.Program) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.teaProgram = p
 }
 
 // GetAnalyzer returns the rule engine instance.
@@ -382,24 +373,6 @@ func (s *CentralServer) processEvent(nodeID string, event *copsecproto.LogEvent)
 		if hub != nil {
 			hub.Broadcast("event", stored)
 		}
-	}
-
-	// Thread-safe batching pool for zero-lock TUI rendering
-	PushLogToTUI(stored)
-
-	// Direct reactive dispatch to Bubbletea TUI with crash-protection guard
-	s.mu.RLock()
-	p := s.teaProgram
-	s.mu.RUnlock()
-	if p != nil {
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					log.Printf("[WARN] Recovered from TUI dispatch panic: %v", r)
-				}
-			}()
-			p.Send(LogEventMsg{Event: stored})
-		}()
 	}
 
 	// Broadcast to channel subscriber non-blockingly

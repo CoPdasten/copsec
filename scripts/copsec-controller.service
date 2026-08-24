@@ -1,0 +1,22 @@
+[Unit]
+Description=CoPSeC Central Controller & Web SOC Engine
+Documentation=https://github.com/CoPdasten/copsec
+After=network.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/var/lib/copsec
+ExecStart=/usr/local/bin/copsec-controller
+Restart=always
+RestartSec=3s
+LimitNOFILE=1048576
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_NET_BIND_SERVICE CAP_SYS_ADMIN
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW CAP_NET_BIND_SERVICE CAP_SYS_ADMIN
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

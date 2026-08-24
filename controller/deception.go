@@ -161,7 +161,6 @@ func (hp *HoneypotSSHServer) handleSSHAttempt(clientIP string, port int, usernam
 
 	if hp.server != nil {
 		_ = hp.server.storage.InsertEvent(siemEvent)
-		PushLogToTUI(siemEvent)
 		select {
 		case hp.server.eventSubChan <- siemEvent:
 		default:
@@ -352,7 +351,6 @@ func (hdr *HoneyDeceptionRouter) HandleHoneyProbe(w http.ResponseWriter, r *http
 
 	if hdr.server != nil {
 		_ = hdr.server.storage.InsertEvent(siemEvent)
-		PushLogToTUI(siemEvent)
 		select {
 		case hdr.server.eventSubChan <- siemEvent:
 		default:
