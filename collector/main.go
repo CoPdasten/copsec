@@ -28,6 +28,7 @@ func main() {
 	authLogPath := flag.String("auth-log", "/var/log/auth.log", "Path to SSH / Auth log file")
 	syslogPath := flag.String("syslog", "/var/log/syslog", "Path to system syslog file")
 	suricataLogPath := flag.String("suricata-log", "/var/log/suricata/eve.json", "Path to Suricata EVE JSON log file")
+	snortLogPath := flag.String("snort-log", "/var/log/snort/alert_json.txt", "Path to Snort 3 Alert JSON log file")
 	auditLogPath := flag.String("audit-log", "/var/log/audit/audit.log", "Path to Linux auditd log file")
 	offsetFilePath := flag.String("offset-file", "/var/lib/copsec/offsets.json", "Path to save/load file offsets")
 	whitelistPath := flag.String("whitelist", "/etc/copsec/whitelist.json", "Path to whitelist configuration JSON")
@@ -121,6 +122,7 @@ func main() {
 		{Source: "auth", Path: *authLogPath},
 		{Source: "syslog", Path: *syslogPath},
 		{Source: "suricata", Path: *suricataLogPath},
+		{Source: "snort", Path: *snortLogPath},
 		{Source: "audit", Path: *auditLogPath},
 	}
 

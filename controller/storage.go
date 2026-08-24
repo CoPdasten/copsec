@@ -38,6 +38,12 @@ type StoredEvent struct {
 	MLAnomaly        bool    `json:"ml_anomaly,omitempty"`
 	MLConfidencePct  float64 `json:"ml_confidence_pct,omitempty"`
 	MLDescription    string  `json:"ml_description,omitempty"`
+	SnortML          bool    `json:"snort_ml,omitempty"`
+	SnortMsg         string  `json:"snort_msg,omitempty"`
+	SnortModelID     string  `json:"snort_model_id,omitempty"`
+	SnortAnomalyScore float64 `json:"snort_anomaly_score,omitempty"`
+	SnortConfidence  float64 `json:"snort_confidence,omitempty"`
+	SnortPriority    int     `json:"snort_priority,omitempty"`
 }
 
 // ActiveBanRecord represents an IP quarantined in the SOAR Jail.

@@ -15,6 +15,7 @@ import (
 	copsecproto "github.com/copsec/collector/proto"
 	"github.com/copsec/controller/pkg/geoip"
 	"github.com/copsec/controller/pkg/ml"
+	"github.com/copsec/controller/pkg/snort"
 	"github.com/copsec/controller/pkg/threat"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -323,7 +324,44 @@ func (s *CentralServer) processEvent(nodeID string, event *copsecproto.LogEvent)
 		}
 	}
 
-	// 3. Pure-Go ML Flow Anomaly Engine Evaluation
+	// 3. Snort 3 / Snort ML Telemetry Normalization & Threat Bridge
+	var snortML bool
+	var snortMsg string
+	var snortModelID string
+	var snortAnomalyScore float64
+	var snortConfidence float64
+	var snortPriority int
+
+	if snortEv, ok := snort.ParseSnortAlert([]byte(event.RawLine)); ok {
+		if event.ClientIp == "" && snortEv.SrcAddr != "" {
+			event.ClientIp = snortEv.SrcAddr
+		}
+		if ruleID == "" && snortEv.Rule != "" {
+			ruleID = snortEv.Rule
+		}
+		if mitreID == "" {
+			mitreID = "T1071"
+		}
+		snortMsg = snortEv.Msg
+		snortPriority = snortEv.Priority
+		if snortEv.ML != nil {
+			snortML = true
+			snortModelID = snortEv.ML.ModelID
+			snortAnomalyScore = snortEv.ML.AnomalyScore
+			snortConfidence = snortEv.ML.Confidence
+		}
+
+		if snortEv.IsHighConfidenceAnomaly() {
+			if threatScore < 85 {
+				threatScore += 50
+			}
+			if threatScore > 100 {
+				threatScore = 100
+			}
+		}
+	}
+
+	// 4. Pure-Go ML Flow Anomaly Engine Evaluation
 	var mlAnomaly bool
 	var mlConfidence float64
 	var mlDescription string
@@ -351,7 +389,7 @@ func (s *CentralServer) processEvent(nodeID string, event *copsecproto.LogEvent)
 		}
 	}
 
-	// 4. Dynamic Sliding-Window & Time-Decayed Threat Scoring Engine
+	// 5. Dynamic Sliding-Window & Time-Decayed Threat Scoring Engine
 	loc := geoip.GetDefaultEngine().Lookup(event.ClientIp)
 	var assessment threat.ThreatAssessment
 	if s.threatEngine != nil && event.ClientIp != "" {
@@ -367,25 +405,31 @@ func (s *CentralServer) processEvent(nodeID string, event *copsecproto.LogEvent)
 	}
 
 	stored := &StoredEvent{
-		NodeID:           nodeID,
-		Source:           event.Source,
-		RawLine:          event.RawLine,
-		ClientIP:         event.ClientIp,
-		StatusCode:       int(event.StatusCode),
-		TimestampMs:      event.TimestampMs,
-		RuleID:           ruleID,
-		MitreTechniqueID: mitreID,
-		ThreatScore:      threatScore,
-		ScoreBreakdown:   assessment.Breakdown,
-		ThreatTier:       assessment.Tier,
-		CountryCode:      loc.CountryCode,
-		CountryName:      loc.CountryName,
-		City:             loc.City,
-		ASN:              loc.ASN,
-		FlagEmoji:        loc.FlagEmoji,
-		MLAnomaly:        mlAnomaly,
-		MLConfidencePct:  mlConfidence,
-		MLDescription:    mlDescription,
+		NodeID:             nodeID,
+		Source:             event.Source,
+		RawLine:            event.RawLine,
+		ClientIP:           event.ClientIp,
+		StatusCode:         int(event.StatusCode),
+		TimestampMs:        event.TimestampMs,
+		RuleID:             ruleID,
+		MitreTechniqueID:   mitreID,
+		ThreatScore:        threatScore,
+		ScoreBreakdown:     assessment.Breakdown,
+		ThreatTier:         assessment.Tier,
+		CountryCode:        loc.CountryCode,
+		CountryName:        loc.CountryName,
+		City:               loc.City,
+		ASN:                loc.ASN,
+		FlagEmoji:          loc.FlagEmoji,
+		MLAnomaly:          mlAnomaly,
+		MLConfidencePct:    mlConfidence,
+		MLDescription:      mlDescription,
+		SnortML:            snortML,
+		SnortMsg:           snortMsg,
+		SnortModelID:       snortModelID,
+		SnortAnomalyScore:  snortAnomalyScore,
+		SnortConfidence:    snortConfidence,
+		SnortPriority:      snortPriority,
 	}
 
 	if stored.TimestampMs == 0 {
