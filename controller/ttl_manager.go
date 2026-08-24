@@ -6,6 +6,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/copsec/controller/pkg/geoip"
 )
 
 // PenaltyTier represents the severity tier in the SOAR penalty lifecycle.
@@ -32,6 +34,10 @@ type DetailedBanRecord struct {
 	L7Active        bool        `json:"l7_active"`
 	OffenseCount    int         `json:"offense_count"`
 	RemainingSec    int64       `json:"remaining_sec"`
+	CountryCode     string      `json:"country_code,omitempty"`
+	CountryName     string      `json:"country_name,omitempty"`
+	FlagEmoji       string      `json:"flag_emoji,omitempty"`
+	ASN             string      `json:"asn,omitempty"`
 }
 
 // TTLBanManager orchestrates the multi-layer kernel/WAF mitigation and tiered TTL lifecycle.
@@ -251,6 +257,7 @@ func (tm *TTLBanManager) GetActiveBans() []DetailedBanRecord {
 
 	nowMs := time.Now().UnixMilli()
 	var list []DetailedBanRecord
+	geo := geoip.GetDefaultEngine()
 	for _, b := range tm.activeBans {
 		rec := *b
 		if rec.DurationSeconds > 0 && rec.ExpireTimeMs > 0 {
@@ -261,6 +268,13 @@ func (tm *TTLBanManager) GetActiveBans() []DetailedBanRecord {
 			rec.RemainingSec = rem
 		} else {
 			rec.RemainingSec = -1 // Permanent
+		}
+		if rec.IP != "" {
+			loc := geo.Lookup(rec.IP)
+			rec.CountryCode = loc.CountryCode
+			rec.CountryName = loc.CountryName
+			rec.FlagEmoji = loc.FlagEmoji
+			rec.ASN = loc.ASN
 		}
 		list = append(list, rec)
 	}

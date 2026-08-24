@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/copsec/controller/pkg/geoip"
 	_ "modernc.org/sqlite"
 )
 
@@ -27,6 +28,11 @@ type StoredEvent struct {
 	MitreTechniqueID string `json:"mitre_technique_id"`
 	ThreatScore      int    `json:"threat_score"`
 	AIAnalysis       string `json:"ai_analysis,omitempty"`
+	CountryCode      string `json:"country_code,omitempty"`
+	CountryName      string `json:"country_name,omitempty"`
+	City             string `json:"city,omitempty"`
+	ASN              string `json:"asn,omitempty"`
+	FlagEmoji        string `json:"flag_emoji,omitempty"`
 }
 
 // ActiveBanRecord represents an IP quarantined in the SOAR Jail.
@@ -523,9 +529,18 @@ func (s *StorageEngine) SearchEvents(filterStr string, limit int) ([]*StoredEven
 
 func scanEvents(rows *sql.Rows) ([]*StoredEvent, error) {
 	var results []*StoredEvent
+	geo := geoip.GetDefaultEngine()
 	for rows.Next() {
 		ev := &StoredEvent{}
 		if err := rows.Scan(&ev.ID, &ev.NodeID, &ev.Source, &ev.RawLine, &ev.ClientIP, &ev.StatusCode, &ev.TimestampMs, &ev.RuleID, &ev.MitreTechniqueID, &ev.ThreatScore, &ev.AIAnalysis); err == nil {
+			if ev.ClientIP != "" && ev.ClientIP != "-" {
+				loc := geo.Lookup(ev.ClientIP)
+				ev.CountryCode = loc.CountryCode
+				ev.CountryName = loc.CountryName
+				ev.City = loc.City
+				ev.ASN = loc.ASN
+				ev.FlagEmoji = loc.FlagEmoji
+			}
 			results = append(results, ev)
 		}
 	}
@@ -634,11 +649,20 @@ func (s *StorageEngine) GetHoneypotLogs(limit int) ([]*HoneypotEvent, error) {
 	defer rows.Close()
 
 	var list []*HoneypotEvent
+	geo := geoip.GetDefaultEngine()
 	for rows.Next() {
 		ev := &HoneypotEvent{}
 		var autoBannedInt int
 		if err := rows.Scan(&ev.ID, &ev.TrapType, &ev.ClientIP, &ev.Port, &ev.Username, &ev.Password, &ev.KeyFingerprint, &ev.ClientVersion, &ev.RequestedURL, &ev.UserAgent, &ev.PayloadSummary, &ev.TimestampMs, &autoBannedInt); err == nil {
 			ev.AutoBanned = (autoBannedInt == 1)
+			if ev.ClientIP != "" && ev.ClientIP != "-" {
+				loc := geo.Lookup(ev.ClientIP)
+				ev.CountryCode = loc.CountryCode
+				ev.CountryName = loc.CountryName
+				ev.City = loc.City
+				ev.ASN = loc.ASN
+				ev.FlagEmoji = loc.FlagEmoji
+			}
 			list = append(list, ev)
 		}
 	}

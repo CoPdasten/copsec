@@ -18,19 +18,24 @@ import (
 
 // HoneypotEvent represents an intercepted intrusion attempt on deception traps.
 type HoneypotEvent struct {
-	ID              int64     `json:"id"`
-	TrapType        string    `json:"trap_type"` // "SSH", "HONEY_URL", "RATE_LIMIT"
-	ClientIP        string    `json:"client_ip"`
-	Port            int       `json:"port"`
-	Username        string    `json:"username,omitempty"`
-	Password        string    `json:"password,omitempty"`
-	KeyFingerprint  string    `json:"key_fingerprint,omitempty"`
-	ClientVersion   string    `json:"client_version,omitempty"`
-	RequestedURL    string    `json:"requested_url,omitempty"`
-	UserAgent       string    `json:"user_agent,omitempty"`
-	PayloadSummary  string    `json:"payload_summary,omitempty"`
-	TimestampMs     int64     `json:"timestamp_ms"`
-	AutoBanned      bool      `json:"auto_banned"`
+	ID             int64  `json:"id"`
+	TrapType       string `json:"trap_type"` // "SSH", "HONEY_URL", "RATE_LIMIT"
+	ClientIP       string `json:"client_ip"`
+	Port           int    `json:"port"`
+	Username       string `json:"username,omitempty"`
+	Password       string `json:"password,omitempty"`
+	KeyFingerprint string `json:"key_fingerprint,omitempty"`
+	ClientVersion  string `json:"client_version,omitempty"`
+	RequestedURL   string `json:"requested_url,omitempty"`
+	UserAgent      string `json:"user_agent,omitempty"`
+	PayloadSummary string `json:"payload_summary,omitempty"`
+	TimestampMs    int64  `json:"timestamp_ms"`
+	AutoBanned     bool   `json:"auto_banned"`
+	CountryCode    string `json:"country_code,omitempty"`
+	CountryName    string `json:"country_name,omitempty"`
+	City           string `json:"city,omitempty"`
+	ASN            string `json:"asn,omitempty"`
+	FlagEmoji      string `json:"flag_emoji,omitempty"`
 }
 
 // HoneypotSSHServer runs an embedded, zero-dependency SSH deception listener.

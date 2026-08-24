@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/copsec/controller/pkg/geoip"
 )
 
 // TelegramBotConfig holds the bot authentication and routing parameters.
@@ -81,17 +83,19 @@ func (b *TelegramSOARBot) ProcessEvent(ev *StoredEvent) {
 		statusDetail = fmt.Sprintf(" (HTTP %d)", ev.StatusCode)
 	}
 
+	geo := geoip.GetDefaultEngine().Lookup(ev.ClientIP)
+
 	text := fmt.Sprintf("%s\n\n"+
 		"🖥 *Node:* `%s`\n"+
 		"🌐 *Source:* `%s`\n"+
-		"🎯 *Target/IP:* `%s`\n"+
+		"🎯 *Target/IP:* `%s` %s (%s, %s)\n"+
 		"🛡 *Rule:* `%s`\n"+
 		"🏷 *MITRE:* `%s`\n"+
 		"⚡ *Threat Score:* `%d/100%s`\n"+
 		"⏱ *Time:* `%s`\n\n"+
 		"📜 *Payload:*\n`%s`%s",
 		severityHeader,
-		ev.NodeID, ev.Source, ev.ClientIP, ev.RuleID, ev.MitreTechniqueID,
+		ev.NodeID, ev.Source, ev.ClientIP, geo.FlagEmoji, geo.CountryName, geo.ASN, ev.RuleID, ev.MitreTechniqueID,
 		ev.ThreatScore, statusDetail, time.UnixMilli(ev.TimestampMs).Format("15:04:05"),
 		truncateString(ev.RawLine, 140),
 		aiSection)

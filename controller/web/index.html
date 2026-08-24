@@ -818,14 +818,28 @@
           </div>
         </div>
 
-        <!-- MITRE ATT&CK Radar -->
-        <div class="card">
-          <div class="card-header">
-            <div class="card-title">🎯 MITRE ATT&CK Radar</div>
-            <span class="badge badge-medium">Real-Time Distribution</span>
+        <!-- Right Column: GeoIP Threat Radar & MITRE Matrix -->
+        <div style="display: flex; flex-direction: column; gap: 1.25rem;">
+          <!-- GeoIP Attack Origin Radar / Density Matrix -->
+          <div class="card" style="margin-bottom: 0;">
+            <div class="card-header">
+              <div class="card-title">🌍 Attack Origin Matrix</div>
+              <span class="badge badge-medium">GeoIP Threat Vector</span>
+            </div>
+            <div style="padding: 1rem;" id="geo-stats-container">
+              <div style="color: var(--text-muted); font-size: 0.78rem;">Aggregating origin geo-vectors...</div>
+            </div>
           </div>
-          <div style="padding: 1rem;" id="mitre-stats-container">
-            <div style="color: var(--text-muted); font-size: 0.78rem;">Aggregating technique distributions...</div>
+
+          <!-- MITRE ATT&CK Radar -->
+          <div class="card" style="margin-bottom: 0;">
+            <div class="card-header">
+              <div class="card-title">🎯 MITRE ATT&CK Radar</div>
+              <span class="badge badge-medium">Real-Time Distribution</span>
+            </div>
+            <div style="padding: 1rem;" id="mitre-stats-container">
+              <div style="color: var(--text-muted); font-size: 0.78rem;">Aggregating technique distributions...</div>
+            </div>
           </div>
         </div>
       </div>
@@ -1005,12 +1019,24 @@
         </div>
         <button class="toast-close" onclick="closePayloadDrawer()">✖</button>
       </div>
-      <div class="drawer-body">
-        <div class="drawer-meta-grid">
+        <div class="drawer-meta-grid" style="grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));">
           <div class="meta-box"><label>Timestamp</label><span id="drawer-time">-</span></div>
           <div class="meta-box"><label>Origin Sensor</label><span id="drawer-node">-</span></div>
           <div class="meta-box"><label>Client IP</label><span id="drawer-ip" style="color: var(--cyan);">-</span></div>
           <div class="meta-box"><label>Threat Score</label><span id="drawer-score">-</span></div>
+          <div class="meta-box" style="grid-column: span 2;"><label>Origin Country & ASN</label><span id="drawer-geo">-</span></div>
+        </div>
+
+        <!-- SOC Executive Incident Report Action Bar -->
+        <div style="background: #090e1c; border: 1px solid #1e2c4a; border-radius: 6px; padding: 0.75rem; margin-bottom: 1rem; display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+          <div>
+            <div style="font-size: 0.78rem; font-weight: 700; color: #fff;">📄 Forensic Incident Investigation</div>
+            <div style="font-size: 0.68rem; color: var(--text-muted);">Autonomous LLM synthesis, MITRE TTPs & SOAR audit</div>
+          </div>
+          <div style="display: flex; gap: 0.4rem;">
+            <button class="btn btn-primary" style="font-size: 0.72rem; padding: 0.3rem 0.65rem;" onclick="exportIncidentReport('html')">📄 Export Report (PDF/HTML)</button>
+            <button class="btn" style="font-size: 0.72rem; padding: 0.3rem 0.65rem;" onclick="exportIncidentReport('markdown')">📥 Markdown (.md)</button>
+          </div>
         </div>
 
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
@@ -1242,6 +1268,9 @@
 
       if (stats.mitre_stats) {
         renderMITREStats(stats.mitre_stats);
+      }
+      if (stats.geo_stats) {
+        renderGeoStats(stats.geo_stats);
       }
     }
 
@@ -1475,11 +1504,12 @@
       const timeStr = new Date(ev.timestamp_ms || Date.now()).toLocaleTimeString();
       const nodeLabel = ev.node_id || 'controller';
       const signal = parseTelemetrySignal(ev.raw_line, ev.source);
+      const flagEmoji = ev.flag_emoji || '🌐';
 
       tr.innerHTML = `
         <td style="font-family: var(--font-mono); color: var(--text-muted);">${timeStr}</td>
         <td><span class="tag-node">${escapeHtml(nodeLabel)}</span></td>
-        <td><span class="ip-chip">${escapeHtml(ev.client_ip || '-')}</span></td>
+        <td><span class="ip-chip">${escapeHtml(flagEmoji)} ${escapeHtml(ev.client_ip || '-')}</span></td>
         <td><span class="tag-mitre">${escapeHtml(ev.mitre_technique_id || 'T1190')}</span></td>
         <td>${scoreBadge}</td>
         <td>
@@ -1500,6 +1530,34 @@
       return `<span class="badge badge-low">${score} LOW</span>`;
     }
 
+    // GeoIP Attack Origin Radar / World Density Matrix
+    function renderGeoStats(stats) {
+      const container = document.getElementById('geo-stats-container');
+      if (!stats || stats.length === 0) {
+        container.innerHTML = '<div style="color: var(--text-muted); font-size: 0.78rem;">No geo attack vectors recorded yet.</div>';
+        return;
+      }
+
+      let maxHits = 1;
+      stats.forEach(s => { if (s.attack_count > maxHits) maxHits = s.attack_count; });
+
+      container.innerHTML = stats.slice(0, 6).map(s => {
+        const pct = s.percentage ? s.percentage.toFixed(1) : ((s.attack_count / maxHits) * 100).toFixed(1);
+        const barWidth = Math.min(100, Math.round((s.attack_count / maxHits) * 100));
+        return `
+          <div class="mitre-pill" style="margin-bottom: 0.45rem;">
+            <div class="mitre-pill-top">
+              <span class="mitre-pill-tech" style="color: #fff;">${escapeHtml(s.flag_emoji || '🌐')} ${escapeHtml(s.country_name || s.country_code)}</span>
+              <span class="mitre-pill-count">${s.attack_count} hits (${pct}%)</span>
+            </div>
+            <div class="mitre-bar-bg">
+              <div class="mitre-bar-fill" style="width: ${barWidth}%; background: linear-gradient(90deg, var(--cyan), var(--magenta));"></div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
     // MITRE Radar Heatmap
     function renderMITREStats(stats) {
       const container = document.getElementById('mitre-stats-container');
@@ -1511,10 +1569,10 @@
       let maxHits = 1;
       stats.forEach(s => { if (s.count > maxHits) maxHits = s.count; });
 
-      container.innerHTML = stats.slice(0, 8).map(s => {
+      container.innerHTML = stats.slice(0, 6).map(s => {
         const pct = Math.min(100, Math.round((s.count / maxHits) * 100));
         return `
-          <div class="mitre-pill">
+          <div class="mitre-pill" style="margin-bottom: 0.45rem;">
             <div class="mitre-pill-top">
               <span class="mitre-pill-tech">${escapeHtml(s.technique_id)}</span>
               <span class="mitre-pill-count">${s.count} hits</span>
@@ -1542,6 +1600,10 @@
       document.getElementById('drawer-ip').textContent = ev.client_ip || '-';
       document.getElementById('drawer-score').innerHTML = getScoreBadge(ev.threat_score);
 
+      const geoLabel = (ev.flag_emoji || '🌐') + ' ' + (ev.country_name || ev.country_code || 'Unknown Origin') + (ev.asn ? ` • ${ev.asn}` : '');
+      const geoEl = document.getElementById('drawer-geo');
+      if (geoEl) geoEl.textContent = geoLabel;
+
       const jsonContainer = document.getElementById('drawer-json-content');
 
       let parsed = null;
@@ -1564,6 +1626,8 @@
           node_id: ev.node_id,
           source: ev.source,
           client_ip: ev.client_ip,
+          country: ev.country_name || ev.country_code,
+          asn: ev.asn,
           status_code: ev.status_code,
           timestamp_ms: ev.timestamp_ms,
           rule_id: ev.rule_id,
@@ -1584,6 +1648,27 @@
       }
 
       document.getElementById('drawer-overlay').classList.add('open');
+    }
+
+    function exportIncidentReport(format) {
+      if (!currentDrawerEvent) return;
+      const ev = currentDrawerEvent;
+      const params = new URLSearchParams({
+        id: ev.id || '',
+        ip: ev.client_ip || '',
+        rule: ev.rule_id || '',
+        mitre: ev.mitre_technique_id || '',
+        score: ev.threat_score || 0,
+        raw: ev.raw_line || '',
+        format: format || 'html'
+      });
+      const url = `/api/report/export?${params.toString()}`;
+      if (format === 'markdown' || format === 'md') {
+        window.location.href = url;
+      } else {
+        window.open(url, '_blank');
+      }
+      showToast(`Generating ${format.toUpperCase()} executive forensic report...`, 'info', 'Report Synthesized');
     }
 
     function closePayloadDrawer() {
@@ -1671,7 +1756,7 @@
               <td style="font-family: var(--font-mono); font-weight: 700; color: var(--cyan);">${escapeHtml(n.node_id)}</td>
               <td style="font-weight: 600;">${escapeHtml(n.hostname || '-')}</td>
               <td><span class="badge badge-medium">${escapeHtml(n.group_name || 'DEFAULT_EDGE')}</span></td>
-              <td><span class="ip-chip">${escapeHtml(n.remote_addr || '-')}</span></td>
+              <td><span class="ip-chip">${escapeHtml(n.flag_emoji || '🌐')} ${escapeHtml(n.remote_addr || '-')}</span></td>
               <td style="font-family: var(--font-mono);">${(n.cpu_usage || 0).toFixed(1)}%</td>
               <td style="font-family: var(--font-mono); color: var(--cyan); font-weight: 700;">${ramStr}</td>
               <td style="font-family: var(--font-mono); color: var(--amber); font-weight: 700;">${n.active_bans_count || 0}</td>
@@ -1700,8 +1785,9 @@
           const remText = b.remaining_sec > 0 ? `${b.remaining_sec}s remaining` : (b.remaining_sec === -1 ? 'PERMANENT' : 'EXPIRED');
           return `
             <tr id="ban-row-${escapeHtml(b.ip.replace(/[:.]/g, '_'))}">
-              <td><span class="ip-chip" style="color: var(--magenta);">${escapeHtml(b.ip)}</span></td>
+              <td><span class="ip-chip" style="color: var(--magenta);">${escapeHtml(b.flag_emoji || '🌐')} ${escapeHtml(b.ip)}</span></td>
               <td>
+                <span class="chip chip-proto">XDP FAST</span>
                 <span class="chip chip-proto">L3 RAW</span>
                 <span class="chip chip-proto">L4 SOCK</span>
                 <span class="chip chip-proto">L7 WAF</span>
@@ -1793,7 +1879,7 @@
           <tr>
             <td style="font-family: var(--font-mono); color: var(--text-muted);">${new Date(h.timestamp_ms).toLocaleTimeString()}</td>
             <td><span class="badge ${h.trap_type === 'SSH' ? 'badge-critical' : 'badge-high'}">${escapeHtml(h.trap_type)}</span></td>
-            <td><span class="ip-chip" style="color: var(--magenta);">${escapeHtml(h.client_ip)}:${h.port || 0}</span></td>
+            <td><span class="ip-chip" style="color: var(--magenta);">${escapeHtml(h.flag_emoji || '🌐')} ${escapeHtml(h.client_ip)}:${h.port || 0}</span></td>
             <td style="font-family: var(--font-mono); font-size: 0.75rem;">
               ${h.username ? `User: <b style="color: var(--cyan);">${escapeHtml(h.username)}</b> Pass: <b style="color: var(--amber);">${escapeHtml(h.password || '')}</b>` : escapeHtml(h.requested_url || '-')}
             </td>
@@ -1815,7 +1901,7 @@
       tr.innerHTML = `
         <td style="font-family: var(--font-mono); color: var(--text-muted);">${new Date(h.timestamp_ms || Date.now()).toLocaleTimeString()}</td>
         <td><span class="badge ${h.trap_type === 'SSH' ? 'badge-critical' : 'badge-high'}">${escapeHtml(h.trap_type)}</span></td>
-        <td><span class="ip-chip" style="color: var(--magenta);">${escapeHtml(h.client_ip)}:${h.port || 0}</span></td>
+        <td><span class="ip-chip" style="color: var(--magenta);">${escapeHtml(h.flag_emoji || '🌐')} ${escapeHtml(h.client_ip)}:${h.port || 0}</span></td>
         <td style="font-family: var(--font-mono); font-size: 0.75rem;">
           ${h.username ? `User: <b style="color: var(--cyan);">${escapeHtml(h.username)}</b> Pass: <b style="color: var(--amber);">${escapeHtml(h.password || '')}</b>` : escapeHtml(h.requested_url || '-')}
         </td>

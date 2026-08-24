@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+
+	"github.com/copsec/collector/pkg/ebpf"
 )
 
 var (
@@ -34,7 +36,7 @@ func isProtectedIP(ipStr string) bool {
 	return false
 }
 
-// ExecuteInstantBan: Zero-Latency Hybrid Mitigation (L3/L4 immediate, L7 async in background)
+// ExecuteInstantBan: Zero-Latency Hybrid Mitigation (eBPF/XDP + L3/L4 immediate, L7 async in background)
 func ExecuteInstantBan(ip string) error {
 	cleanIP := strings.TrimSpace(ip)
 	if isProtectedIP(cleanIP) {
@@ -49,6 +51,9 @@ func ExecuteInstantBan(ip string) error {
 	}
 	bannedIPMap.Store(cleanIP, true)
 	banLock.Unlock()
+
+	// 0. ANLIK eBPF/XDP FAST-PATH İMHA (NIC Ring Buffer / Driver Drop)
+	_ = ebpf.GetXDPEngine().AddBan(cleanIP)
 
 	// 1. ANLIK L3 İMHA (Kernel PREROUTING & INPUT)
 	_ = exec.Command("sudo", "iptables", "-t", "raw", "-I", "PREROUTING", "1", "-s", cleanIP, "-j", "DROP").Run()
@@ -91,6 +96,9 @@ func ExecuteAbsoluteUnban(ip string) error {
 	defer banLock.Unlock()
 
 	ip = strings.TrimSpace(ip)
+
+	// 0. eBPF/XDP Haritasından Temizle
+	_ = ebpf.GetXDPEngine().RemoveBan(ip)
 
 	// 1. iptables Kurallarını Kaldır
 	_ = exec.Command("sudo", "iptables", "-t", "raw", "-D", "PREROUTING", "-s", ip, "-j", "DROP").Run()

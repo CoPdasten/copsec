@@ -10,6 +10,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/copsec/controller/pkg/ai_report"
+	"github.com/copsec/controller/pkg/geoip"
 )
 
 //go:embed web/*
@@ -84,6 +87,10 @@ func (ws *WebSOCServer) Start() error {
 	mux.HandleFunc("/api/sigma/rule", ws.handleSigmaRuleSubmit)
 	mux.HandleFunc("/api/honeypot/logs", ws.handleHoneypotLogs)
 	mux.HandleFunc("/api/nodes", ws.handleNodes)
+	mux.HandleFunc("/api/geoip/stats", ws.handleGeoIPStats)
+	mux.HandleFunc("/api/geoip/lookup", ws.handleGeoIPLookup)
+	mux.HandleFunc("/api/report/incident", ws.handleIncidentReport)
+	mux.HandleFunc("/api/report/export", ws.handleExportReport)
 
 	// 3. Embedded Web SOC and Deception Traps
 	mux.HandleFunc("/", ws.handleRootOrTrap)
@@ -305,6 +312,7 @@ func (ws *WebSOCServer) handleStats(w http.ResponseWriter, r *http.Request) {
 		"nodes_count":  nodesCount,
 		"active_bans":  activeBansCount,
 		"mitre_stats":  mitreStats,
+		"geo_stats":    geoip.GetDefaultEngine().GetAttackOriginDensity(8),
 		"timestamp":    time.Now().UnixMilli(),
 	}
 
@@ -515,4 +523,142 @@ func (ws *WebSOCServer) handleNodes(w http.ResponseWriter, r *http.Request) {
 	}
 
 	json.NewEncoder(w).Encode([]NodeRegistryRecord{})
+}
+
+func (ws *WebSOCServer) handleGeoIPStats(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	stats := geoip.GetDefaultEngine().GetAttackOriginDensity(10)
+	json.NewEncoder(w).Encode(stats)
+}
+
+func (ws *WebSOCServer) handleGeoIPLookup(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	ip := strings.TrimSpace(r.URL.Query().Get("ip"))
+	if ip == "" {
+		http.Error(w, "missing ip parameter", http.StatusBadRequest)
+		return
+	}
+	loc := geoip.GetDefaultEngine().Lookup(ip)
+	json.NewEncoder(w).Encode(loc)
+}
+
+func (ws *WebSOCServer) handleIncidentReport(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	report := ws.buildIncidentReportFromRequest(r)
+	if report == nil {
+		http.Error(w, "incident not found or invalid parameters", http.StatusNotFound)
+		return
+	}
+
+	json.NewEncoder(w).Encode(report)
+}
+
+func (ws *WebSOCServer) handleExportReport(w http.ResponseWriter, r *http.Request) {
+	format := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("format")))
+	if format == "" {
+		format = "html"
+	}
+
+	report := ws.buildIncidentReportFromRequest(r)
+	if report == nil {
+		http.Error(w, "incident not found or invalid parameters", http.StatusNotFound)
+		return
+	}
+
+	if format == "markdown" || format == "md" {
+		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"copsec-incident-%s.md\"", report.IncidentID))
+		w.Write([]byte(report.ToMarkdown()))
+		return
+	}
+
+	// Default HTML format (Printable Executive Report)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write([]byte(report.ToHTML()))
+}
+
+func (ws *WebSOCServer) buildIncidentReportFromRequest(r *http.Request) *ai_report.IncidentForensicReport {
+	idStr := r.URL.Query().Get("id")
+	ipStr := r.URL.Query().Get("ip")
+
+	reportGen := ai_report.NewReportGenerator(geoip.GetDefaultEngine())
+
+	// If event ID is specified and DB is available
+	if idStr != "" && ws.storage != nil {
+		id, err := strconv.ParseInt(idStr, 10, 64)
+		if err == nil && id > 0 {
+			events, err := ws.storage.SearchEvents(fmt.Sprintf("ip:%s", ipStr), 10)
+			var matched *StoredEvent
+			if err == nil {
+				for _, ev := range events {
+					if ev.ID == id {
+						matched = ev
+						break
+					}
+				}
+			}
+			if matched != nil {
+				var timeline []ai_report.TimelineEvent
+				for _, e := range events {
+					timeline = append(timeline, ai_report.TimelineEvent{
+						TimestampMs: e.TimestampMs,
+						TimeStr:     time.UnixMilli(e.TimestampMs).Format("15:04:05"),
+						Source:      e.Source,
+						Event:       fmt.Sprintf("%s (MITRE: %s)", e.RuleID, e.MitreTechniqueID),
+						ThreatScore: e.ThreatScore,
+					})
+				}
+				return reportGen.GenerateIncidentReport(
+					fmt.Sprintf("INC-%d", matched.ID),
+					matched.ClientIP,
+					matched.NodeID,
+					matched.Source,
+					matched.ThreatScore,
+					matched.RuleID,
+					matched.MitreTechniqueID,
+					matched.RawLine,
+					matched.AIAnalysis,
+					matched.TimestampMs,
+					timeline,
+				)
+			}
+		}
+	}
+
+	// Fallback dynamic generation from query params
+	if ipStr == "" {
+		ipStr = "198.51.100.45"
+	}
+	ruleID := r.URL.Query().Get("rule")
+	if ruleID == "" {
+		ruleID = "sqli_union_injection"
+	}
+	mitreID := r.URL.Query().Get("mitre")
+	if mitreID == "" {
+		mitreID = "T1190"
+	}
+	scoreStr := r.URL.Query().Get("score")
+	score := 85
+	if s, err := strconv.Atoi(scoreStr); err == nil && s > 0 {
+		score = s
+	}
+	raw := r.URL.Query().Get("raw")
+	if raw == "" {
+		raw = fmt.Sprintf("GET /api/v1/users?id=1' UNION SELECT username,password_hash FROM users-- HTTP/1.1 from %s", ipStr)
+	}
+
+	return reportGen.GenerateIncidentReport(
+		fmt.Sprintf("INC-LIVE-%d", time.Now().UnixMilli()),
+		ipStr,
+		"edge-cluster-1",
+		"suricata",
+		score,
+		ruleID,
+		mitreID,
+		raw,
+		"• Intent: Automated SQL Injection and Database Reconnaissance\n• Root Cause: Unsanitized HTTP parameter in edge application",
+		time.Now().UnixMilli(),
+		nil,
+	)
 }

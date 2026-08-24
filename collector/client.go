@@ -16,6 +16,7 @@ import (
 	"time"
 
 	copsecproto "github.com/copsec/collector/proto"
+	"github.com/copsec/collector/pkg/ebpf"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
@@ -344,7 +345,7 @@ func (c *ControllerClient) runHeartbeatLoop(ctx context.Context, wg *sync.WaitGr
 				UptimeSeconds:   int64(time.Since(c.startTime).Seconds()),
 				CpuUsage:        float64(metrics.CPUPercent),
 				MemoryUsage:     memUsageMB, // MB
-				ActiveBansCount: 0,
+				ActiveBansCount: int32(ebpf.GetXDPEngine().GetActiveBansCount()),
 			}
 
 			hbCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
@@ -448,6 +449,7 @@ func (c *ControllerClient) executeSOARCommand(cmd *copsecproto.SOARCommand, stre
 		output = fmt.Sprintf("Successfully whitelisted IP %s and cleared iptables rule", targetIP)
 
 	case "FLUSH_BANS":
+		_ = ebpf.GetXDPEngine().Flush()
 		out, err := exec.Command("copsec-cli", "flush").CombinedOutput()
 		if err == nil {
 			success = true
