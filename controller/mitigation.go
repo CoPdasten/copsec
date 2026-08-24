@@ -15,7 +15,7 @@ var (
 	bannedIPMap sync.Map
 )
 
-// isProtectedIP checks if an IP belongs to local, loopback, private networks, or Tailscale CGNAT (100.64.0.0/10).
+// isProtectedIP checks if an IP belongs to local machine, private networks, or protected ranges.
 func isProtectedIP(ipStr string) bool {
 	cleanIP := strings.TrimSpace(ipStr)
 	if cleanIP == "" || cleanIP == "127.0.0.1" || cleanIP == "::1" || cleanIP == "localhost" {
@@ -121,32 +121,4 @@ func ExecuteAbsoluteUnban(ip string) error {
 	bannedIPMap.Delete(ip)
 	log.Printf("[SOAR_MITIGATION] 🟢 IP UNBANNED ACROSS ALL LAYERS: %s", ip)
 	return nil
-}
-
-// ExecuteSOARBan wraps ExecuteAbsoluteBan for gRPC & CLI compatibility.
-func ExecuteSOARBan(ipStr string, durationSec int64) (bool, string) {
-	err := ExecuteAbsoluteBan(ipStr)
-	if err != nil {
-		return false, err.Error()
-	}
-	return true, fmt.Sprintf("Successfully isolated %s via [HYBRID L3/L4/L7 (RAW/INPUT + Conntrack/Socket-Kill + Nginx WAF)] for %ds", ipStr, durationSec)
-}
-
-// ExecuteSOARUnban wraps ExecuteAbsoluteUnban for gRPC & CLI compatibility.
-func ExecuteSOARUnban(ipStr string) (bool, string) {
-	err := ExecuteAbsoluteUnban(ipStr)
-	if err != nil {
-		return false, err.Error()
-	}
-	return true, fmt.Sprintf("Successfully unbanned %s across all layers", ipStr)
-}
-
-// ExecuteBan is an alias for ExecuteAbsoluteBan.
-func ExecuteBan(targetIP string, timeoutSeconds int) error {
-	return ExecuteAbsoluteBan(targetIP)
-}
-
-// ExecuteUnban is an alias for ExecuteAbsoluteUnban.
-func ExecuteUnban(targetIP string) error {
-	return ExecuteAbsoluteUnban(targetIP)
 }

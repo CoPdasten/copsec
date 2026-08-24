@@ -289,3 +289,51 @@ func TestFallbackEngineAutonomousInspection(t *testing.T) {
 		t.Fatalf("Expected IP %s to be autonomously banned after 3 attempts", spikeIP)
 	}
 }
+
+func TestSuricataAndAuthParsers(t *testing.T) {
+	// 1. Suricata Alert test
+	suriAlertLine := `{"timestamp":"2026-08-23T12:34:56.789000+0000","event_type":"alert","src_ip":"198.51.100.222","src_port":44321,"dest_ip":"10.0.0.5","dest_port":80,"proto":"TCP","alert":{"action":"allowed","gid":1,"signature_id":2010935,"rev":1,"signature":"ET SCAN Potential Nmap Scan","category":"Attempted Information Leak","severity":2}}`
+	suriEv, ok := parseSuricataLine(suriAlertLine)
+	if !ok {
+		t.Fatalf("Expected parseSuricataLine to succeed on JSON")
+	}
+	if suriEv.Source != "suricata" || suriEv.ClientIp != "198.51.100.222" || suriEv.ThreatScore != 85 || suriEv.MitreTechniqueId != "T1190" {
+		t.Errorf("Unexpected suricata alert event: %+v", suriEv)
+	}
+
+	// 2. Suricata Flow/DNS test
+	suriFlowLine := `{"timestamp":"2026-08-23T12:34:56.789000+0000","event_type":"flow","src_ip":"192.168.1.50","dest_ip":"1.1.1.1","proto":"UDP"}`
+	suriFlowEv, ok := parseSuricataLine(suriFlowLine)
+	if !ok {
+		t.Fatalf("Expected parseSuricataLine to succeed on flow JSON")
+	}
+	if suriFlowEv.ThreatScore != 0 || suriFlowEv.ClientIp != "192.168.1.50" {
+		t.Errorf("Unexpected suricata flow event: %+v", suriFlowEv)
+	}
+
+	// 3. Auth Failed Password test
+	authFailLine := `Aug 23 12:00:00 vps sshd[5678]: Failed password for root from 203.0.113.88 port 54321 ssh2`
+	authFailEv, ok := parseAuthLine(authFailLine)
+	if !ok {
+		t.Fatalf("Expected parseAuthLine to succeed")
+	}
+	if authFailEv.Source != "auth" || authFailEv.ClientIp != "203.0.113.88" || authFailEv.ThreatScore != 70 || authFailEv.MitreTechniqueId != "T1110.001" {
+		t.Errorf("Unexpected auth fail event: %+v", authFailEv)
+	}
+
+	// 4. Auth Sudo test
+	authSudoLine := `Aug 23 12:00:00 vps sudo:   ubuntu : TTY=pts/0 ; PWD=/home/ubuntu ; USER=root ; COMMAND=/bin/bash`
+	authSudoEv, ok := parseAuthLine(authSudoLine)
+	if !ok {
+		t.Fatalf("Expected parseAuthLine to succeed on sudo")
+	}
+	if authSudoEv.ThreatScore != 20 || authSudoEv.RuleId != "sudo_execution" {
+		t.Errorf("Unexpected auth sudo event: %+v", authSudoEv)
+	}
+
+	// 5. ParseLogSourceLine Dispatcher test
+	dispatched := ParseLogSourceLine("suricata", suriAlertLine, time.Now().UnixMilli())
+	if dispatched.ThreatScore != 85 || dispatched.ClientIp != "198.51.100.222" {
+		t.Errorf("ParseLogSourceLine dispatcher failed for suricata: %+v", dispatched)
+	}
+}

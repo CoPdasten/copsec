@@ -6,8 +6,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	copsecproto "github.com/copsec/collector/proto"
 )
 
 // LogEntry encapsulates normalized log record information across sources.
@@ -42,7 +40,7 @@ type MultiLogCollector struct {
 func NewMultiLogCollector(sources []LogSourceConfig, offsetFilePath, whitelistPath string, client *ControllerClient) *MultiLogCollector {
 	om := NewOffsetManager(offsetFilePath)
 	filter := NewPreRoutingFilter(whitelistPath)
-	logChan := make(chan LogEntry, 1024)
+	logChan := make(chan LogEntry, 100)
 
 	var tailers []*Tailer
 	for _, src := range sources {
@@ -127,24 +125,9 @@ func (c *MultiLogCollector) runPipeline(ctx context.Context, wg *sync.WaitGroup)
 	}
 }
 
-// dispatch handles the passed candidate suspicious log entry and forwards to Controller gRPC Client.
+// dispatch handles the passed candidate log entry and forwards to Controller gRPC Client.
 func (c *MultiLogCollector) dispatch(entry LogEntry) {
-	ip := ExtractIP(entry.Line)
-	var clientIP string
-	if ip != nil {
-		clientIP = ip.String()
-	}
-
-	statusCode := int32(ExtractHTTPStatus(entry.Line))
-
-	event := &copsecproto.LogEvent{
-		Source:      entry.Source,
-		RawLine:     entry.Line,
-		ClientIp:    clientIP,
-		StatusCode:  statusCode,
-		TimestampMs: entry.Timestamp,
-	}
-
+	event := ParseLogSourceLine(entry.Source, entry.Line, entry.Timestamp)
 	if c.client != nil {
 		c.client.Submit(event)
 	}

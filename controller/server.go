@@ -42,6 +42,9 @@ type CentralServer struct {
 	mu           sync.RWMutex
 	storage      *StorageEngine
 	analyzer     *RuleEngine
+	sigmaEngine  *SigmaEngine
+	ttlManager   *TTLBanManager
+	wsHub        *WSHub
 	telegramBot  *TelegramSOARBot
 	aiEngine     *AIEngine
 	teaProgram   *tea.Program
@@ -81,10 +84,47 @@ func NewCentralServer(storage *StorageEngine, analyzer *RuleEngine) *CentralServ
 		for range ticker.C {
 			count := atomic.SwapUint64(&srv.epsEventsThisSec, 0)
 			atomic.StoreUint64(&srv.currentEPS, count)
+
+			// Broadcast live system stats to Web SOC WebSocket clients
+			if srv.wsHub != nil {
+				mitreStats, _ := srv.storage.GetMITREStats()
+				activeBansCount := 0
+				if srv.ttlManager != nil {
+					activeBansCount = len(srv.ttlManager.GetActiveBans())
+				}
+				srv.wsHub.Broadcast("stats", map[string]interface{}{
+					"eps":          count,
+					"total_events": atomic.LoadUint64(&srv.totalEventsProcessed),
+					"nodes_count":  len(srv.GetNodesSnapshot()),
+					"active_bans":  activeBansCount,
+					"mitre_stats":  mitreStats,
+				})
+			}
 		}
 	}()
 
 	return srv
+}
+
+// SetSigmaEngine attaches the in-memory SigmaHQ detection engine.
+func (s *CentralServer) SetSigmaEngine(engine *SigmaEngine) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sigmaEngine = engine
+}
+
+// SetTTLManager attaches the SOAR dynamic TTL lifecycle manager.
+func (s *CentralServer) SetTTLManager(mgr *TTLBanManager) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ttlManager = mgr
+}
+
+// SetWSHub attaches the zero-backpressure WebSocket broadcast hub.
+func (s *CentralServer) SetWSHub(hub *WSHub) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.wsHub = hub
 }
 
 // SetAutoBanPolicy configures autonomous auto-ban behavior.
@@ -208,7 +248,32 @@ func (s *CentralServer) processEvent(nodeID string, event *copsecproto.LogEvent)
 	mitreID := event.MitreTechniqueId
 	threatScore := int(event.ThreatScore)
 
-	// Run deep inspection via RuleEngine
+	// 1. In-Memory Sigma Detection Engine (Detection-as-Code) Evaluation
+	s.mu.RLock()
+	sigma := s.sigmaEngine
+	s.mu.RUnlock()
+
+	if sigma != nil {
+		fields := map[string]string{
+			"source":    event.Source,
+			"client_ip": event.ClientIp,
+			"status":    fmt.Sprintf("%d", event.StatusCode),
+			"raw":       event.RawLine,
+		}
+		if matchedSigmaRule, matched := sigma.EvaluateEvent(event.RawLine, fields); matched {
+			if ruleID == "" {
+				ruleID = matchedSigmaRule.ID
+			}
+			if mitreID == "" {
+				mitreID = matchedSigmaRule.MitreTechniqueID
+			}
+			if threatScore < matchedSigmaRule.ThreatScore {
+				threatScore = matchedSigmaRule.ThreatScore
+			}
+		}
+	}
+
+	// 2. RuleEngine Inspection Fallback
 	if s.analyzer != nil {
 		matchedRule, matchedMitre, matchedScore, matched := s.analyzer.Analyze(event.RawLine, int(event.StatusCode), event.Source)
 		if matched {
@@ -243,16 +308,17 @@ func (s *CentralServer) processEvent(nodeID string, event *copsecproto.LogEvent)
 	// Persist to embedded SQLite
 	_ = s.storage.InsertEvent(stored)
 
-	// Check Autonomous Auto-Ban Policy
+	// Check Autonomous Auto-Ban Policy & Dynamic TTL Management
 	s.checkAutonomousBanPolicy(stored)
 
 	// Trigger AI Threat Intelligence analysis for severe incidents
 	s.mu.RLock()
 	ai := s.aiEngine
 	bot := s.telegramBot
+	hub := s.wsHub
 	s.mu.RUnlock()
 
-	if ai != nil && (stored.ThreatScore >= 65 || strings.Contains(stored.RuleID, "anomaly") || strings.Contains(stored.RuleID, "rce") || strings.Contains(stored.RuleID, "sqli")) {
+	if ai != nil && (stored.ThreatScore >= 65 || strings.Contains(stored.RuleID, "anomaly") || strings.Contains(stored.RuleID, "rce") || strings.Contains(stored.RuleID, "sqli") || strings.Contains(stored.RuleID, "sigma")) {
 		go func(ev *StoredEvent) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
@@ -264,9 +330,20 @@ func (s *CentralServer) processEvent(nodeID string, event *copsecproto.LogEvent)
 			if bot != nil && (ev.ThreatScore >= 40 || ev.StatusCode >= 400) {
 				bot.ProcessEvent(ev)
 			}
+
+			// Broadcast AI updated event to Web SOC
+			if hub != nil {
+				hub.Broadcast("event", ev)
+			}
 		}(stored)
-	} else if bot != nil && (stored.ThreatScore >= 40 || stored.StatusCode >= 400) {
-		go bot.ProcessEvent(stored)
+	} else {
+		if bot != nil && (stored.ThreatScore >= 40 || stored.StatusCode >= 400) {
+			go bot.ProcessEvent(stored)
+		}
+		// Non-blocking Web SOC WebSocket broadcast
+		if hub != nil {
+			hub.Broadcast("event", stored)
+		}
 	}
 
 	// Thread-safe batching pool for zero-lock TUI rendering
@@ -287,27 +364,11 @@ func (s *CentralServer) processEvent(nodeID string, event *copsecproto.LogEvent)
 		}()
 	}
 
-	// Broadcast to TUI subscriber non-blockingly
+	// Broadcast to channel subscriber non-blockingly
 	select {
 	case s.eventSubChan <- stored:
 	default:
 	}
-}
-
-// isProtectedIP returns true if the IP belongs to loopback, private networks, Controller public IP, or cluster interconnects.
-func isProtectedIP(ipStr string) bool {
-	ipStr = strings.TrimSpace(ipStr)
-	if ipStr == "" || ipStr == "127.0.0.1" || ipStr == "::1" || ipStr == "localhost" {
-		return true
-	}
-	if ipStr == "37.59.108.186" || strings.HasPrefix(ipStr, "100.") {
-		return true
-	}
-	ip := net.ParseIP(ipStr)
-	if ip == nil {
-		return true
-	}
-	return ip.IsLoopback() || ip.IsPrivate() || ip.IsUnspecified()
 }
 
 // checkAutonomousBanPolicy evaluates static critical scores (>=50) and correlation spike windows.
@@ -364,22 +425,27 @@ func (s *CentralServer) checkAutonomousBanPolicy(event *StoredEvent) {
 
 	if triggerAutoBan {
 		s.autoBanned[ip] = now
-		jailTag := fmt.Sprintf("[AUTO] %s (%d/100)", event.MitreTechniqueID, event.ThreatScore)
-		if event.MitreTechniqueID == "" {
-			jailTag = fmt.Sprintf("[AUTO] Score:%d", event.ThreatScore)
-		}
 
-		dispatched := s.BroadcastSOARCommand("BAN_IP", ip, 86400)
-		if s.storage != nil {
-			_ = s.storage.RecordBan(ip, jailTag, 86400)
+		// Enforce via TTLBanManager if present, or direct broadcast fallback
+		s.mu.RLock()
+		ttlMgr := s.ttlManager
+		bot := s.telegramBot
+		s.mu.RUnlock()
+
+		dispatched := 0
+		if ttlMgr != nil {
+			_, _ = ttlMgr.BanIP(ip, banReason, 86400, TierExtendedQuarantine)
+			dispatched = len(s.GetNodesSnapshot())
+		} else {
+			dispatched = s.BroadcastSOARCommand("BAN_IP", ip, 86400)
+			if s.storage != nil {
+				_ = s.storage.RecordBan(ip, banReason, 86400)
+			}
 		}
 
 		log.Printf("[SOAR_AUTOBAN] Autonomous Ban executed for IP %s (Reason: %s, Dispatched: %d nodes)", ip, banReason, dispatched)
 
 		// Dispatch high-priority autonomous Telegram alert
-		s.mu.RLock()
-		bot := s.telegramBot
-		s.mu.RUnlock()
 		if bot != nil {
 			go bot.SendAutoBanAlert(event, banReason, dispatched)
 		}
@@ -516,7 +582,7 @@ func StartGRPCServer(addr string, server *CentralServer) (*grpc.Server, error) {
 		MaxConnectionIdle:     15 * time.Minute,
 		MaxConnectionAge:      2 * time.Hour,
 		MaxConnectionAgeGrace: 5 * time.Minute,
-		Time:                  15 * time.Second, // Ping client every 15s to keep NAT/VPN routes alive
+		Time:                  15 * time.Second,
 		Timeout:               5 * time.Second,
 	})
 

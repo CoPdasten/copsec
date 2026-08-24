@@ -19,13 +19,15 @@ func main() {
 	nginxLogPath := flag.String("nginx-log", "/var/log/nginx/access.log", "Path to Nginx access log file")
 	authLogPath := flag.String("auth-log", "/var/log/auth.log", "Path to SSH / Auth log file")
 	syslogPath := flag.String("syslog", "/var/log/syslog", "Path to system syslog file")
+	suricataLogPath := flag.String("suricata-log", "/var/log/suricata/eve.json", "Path to Suricata EVE JSON log file")
+	auditLogPath := flag.String("audit-log", "/var/log/audit/audit.log", "Path to Linux auditd log file")
 	offsetFilePath := flag.String("offset-file", "/var/lib/copsec/offsets.json", "Path to save/load file offsets")
 	whitelistPath := flag.String("whitelist", "/etc/copsec/whitelist.json", "Path to whitelist configuration JSON")
 	fallbackTgToken := flag.String("fallback-telegram-token", "", "Optional Telegram Bot Token for direct offline edge emergency alerts")
 	fallbackTgChat := flag.String("fallback-telegram-chat", "", "Optional Telegram Chat ID for direct offline edge emergency alerts")
 	flag.Parse()
 
-	log.Println("[INFO] CoPSeC Phase 3 Edge Multi-Log Collector initializing...")
+	log.Println("[INFO] CoPSeC Phase 3 Edge Multi-Log Collector initializing (5 Core Sensors)...")
 
 	// 1. Identity & Auto-Enrollment
 	identityMgr, err := LoadOrCreateIdentity(*nodeIdentityPath)
@@ -71,8 +73,10 @@ func main() {
 
 	sources := []LogSourceConfig{
 		{Source: "nginx", Path: *nginxLogPath},
-		{Source: "ssh", Path: *authLogPath},
+		{Source: "auth", Path: *authLogPath},
 		{Source: "syslog", Path: *syslogPath},
+		{Source: "suricata", Path: *suricataLogPath},
+		{Source: "audit", Path: *auditLogPath},
 	}
 
 	collector := NewMultiLogCollector(sources, finalOffsetPath, finalWhitelistPath, controllerClient)

@@ -117,7 +117,13 @@ func (s *StorageEngine) initSchema() error {
 		reason TEXT DEFAULT '',
 		ban_time_ms INTEGER NOT NULL,
 		duration_seconds INTEGER DEFAULT 86400,
-		status TEXT DEFAULT 'ACTIVE'
+		expire_time_ms INTEGER DEFAULT 0,
+		penalty_tier TEXT DEFAULT 'TEMP_ISOLATION',
+		status TEXT DEFAULT 'ACTIVE',
+		l3_active INTEGER DEFAULT 1,
+		l4_active INTEGER DEFAULT 1,
+		l7_active INTEGER DEFAULT 1,
+		offense_count INTEGER DEFAULT 1
 	);
 
 	CREATE TABLE IF NOT EXISTS soar_actions (
@@ -135,9 +141,50 @@ func (s *StorageEngine) initSchema() error {
 		last_seen_ms INTEGER NOT NULL,
 		status TEXT DEFAULT 'ACTIVE'
 	);
+
+	CREATE TABLE IF NOT EXISTS system_config (
+		key TEXT PRIMARY KEY,
+		value TEXT NOT NULL,
+		updated_at_ms INTEGER NOT NULL
+	);
+
+	CREATE TABLE IF NOT EXISTS honeypot_events (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		trap_type TEXT NOT NULL,
+		client_ip TEXT NOT NULL,
+		port INTEGER DEFAULT 0,
+		username TEXT DEFAULT '',
+		password TEXT DEFAULT '',
+		key_fingerprint TEXT DEFAULT '',
+		client_version TEXT DEFAULT '',
+		requested_url TEXT DEFAULT '',
+		user_agent TEXT DEFAULT '',
+		payload_summary TEXT DEFAULT '',
+		timestamp_ms INTEGER NOT NULL,
+		auto_banned INTEGER DEFAULT 1
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_honeypot_time ON honeypot_events(timestamp_ms DESC);
 	`
 	_, err := s.db.Exec(schema)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Safe migration check for active_bans columns if table existed previously
+	cols := []string{
+		"ALTER TABLE active_bans ADD COLUMN expire_time_ms INTEGER DEFAULT 0",
+		"ALTER TABLE active_bans ADD COLUMN penalty_tier TEXT DEFAULT 'TEMP_ISOLATION'",
+		"ALTER TABLE active_bans ADD COLUMN l3_active INTEGER DEFAULT 1",
+		"ALTER TABLE active_bans ADD COLUMN l4_active INTEGER DEFAULT 1",
+		"ALTER TABLE active_bans ADD COLUMN l7_active INTEGER DEFAULT 1",
+		"ALTER TABLE active_bans ADD COLUMN offense_count INTEGER DEFAULT 1",
+	}
+	for _, colSQL := range cols {
+		_, _ = s.db.Exec(colSQL) // ignore error if column already exists
+	}
+
+	return nil
 }
 
 // InsertEvent records a new LogEvent asynchronously with prepared statement.
@@ -166,14 +213,48 @@ func (s *StorageEngine) UpdateEventAI(eventID int64, aiAnalysis string) error {
 	return err
 }
 
-// RecordBan saves a banned IP in the jail.
+// RecordBan saves a banned IP in the jail (backward compatible).
 func (s *StorageEngine) RecordBan(ip, reason string, durationSeconds int64) error {
+	nowMs := time.Now().UnixMilli()
+	var expireMs int64 = 0
+	if durationSeconds > 0 {
+		expireMs = nowMs + (durationSeconds * 1000)
+	}
+
+	record := &DetailedBanRecord{
+		IP:              ip,
+		Reason:          reason,
+		BanTimeMs:       nowMs,
+		DurationSeconds: durationSeconds,
+		ExpireTimeMs:    expireMs,
+		PenaltyTier:     TierTempIsolation,
+		Status:          "ACTIVE",
+		L3Active:        true,
+		L4Active:        true,
+		L7Active:        true,
+		OffenseCount:    1,
+	}
+	return s.RecordDetailedBan(record)
+}
+
+// RecordDetailedBan saves full structured SOAR ban details.
+func (s *StorageEngine) RecordDetailedBan(b *DetailedBanRecord) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	query := `INSERT OR REPLACE INTO active_bans (ip, reason, ban_time_ms, duration_seconds, status)
-	          VALUES (?, ?, ?, ?, 'ACTIVE')`
-	_, err := s.db.Exec(query, ip, reason, time.Now().UnixMilli(), durationSeconds)
+	query := `INSERT OR REPLACE INTO active_bans (ip, reason, ban_time_ms, duration_seconds, expire_time_ms, penalty_tier, status, l3_active, l4_active, l7_active, offense_count)
+	          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	_, err := s.db.Exec(query, b.IP, b.Reason, b.BanTimeMs, b.DurationSeconds, b.ExpireTimeMs, string(b.PenaltyTier), b.Status, b.L3Active, b.L4Active, b.L7Active, b.OffenseCount)
+	return err
+}
+
+// UpdateBanStatus marks ban state (e.g. EXPIRED, MANUAL_UNBAN).
+func (s *StorageEngine) UpdateBanStatus(ip, status string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	query := `UPDATE active_bans SET status = ?, l3_active = 0, l4_active = 0, l7_active = 0 WHERE ip = ?`
+	_, err := s.db.Exec(query, status, ip)
 	return err
 }
 
@@ -187,12 +268,12 @@ func (s *StorageEngine) RemoveBan(ip string) error {
 	return err
 }
 
-// GetActiveBans returns currently quarantined IPs.
+// GetActiveBans returns currently quarantined IPs (backward compatible).
 func (s *StorageEngine) GetActiveBans() ([]ActiveBanRecord, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	query := `SELECT ip, reason, ban_time_ms, duration_seconds, status FROM active_bans ORDER BY ban_time_ms DESC LIMIT 15`
+	query := `SELECT ip, reason, ban_time_ms, duration_seconds, status FROM active_bans WHERE status = 'ACTIVE' ORDER BY ban_time_ms DESC LIMIT 25`
 	rows, err := s.db.Query(query)
 	if err != nil {
 		return nil, err
@@ -207,6 +288,35 @@ func (s *StorageEngine) GetActiveBans() ([]ActiveBanRecord, error) {
 		}
 	}
 	return bans, nil
+}
+
+// GetActiveBansDetailed returns structured ban records for TTL manager restoration and SOC table.
+func (s *StorageEngine) GetActiveBansDetailed() ([]*DetailedBanRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	query := `SELECT ip, reason, ban_time_ms, duration_seconds, expire_time_ms, penalty_tier, status, l3_active, l4_active, l7_active, offense_count
+	          FROM active_bans WHERE status = 'ACTIVE' ORDER BY ban_time_ms DESC`
+	rows, err := s.db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var list []*DetailedBanRecord
+	for rows.Next() {
+		b := &DetailedBanRecord{}
+		var tierStr string
+		var l3, l4, l7 int
+		if err := rows.Scan(&b.IP, &b.Reason, &b.BanTimeMs, &b.DurationSeconds, &b.ExpireTimeMs, &tierStr, &b.Status, &l3, &l4, &l7, &b.OffenseCount); err == nil {
+			b.PenaltyTier = PenaltyTier(tierStr)
+			b.L3Active = (l3 == 1)
+			b.L4Active = (l4 == 1)
+			b.L7Active = (l7 == 1)
+			list = append(list, b)
+		}
+	}
+	return list, nil
 }
 
 // RecordSOARAction records an executed SOAR mitigation command.
@@ -317,7 +427,6 @@ func (s *StorageEngine) SearchEvents(filterStr string, limit int) ([]*StoredEven
 			conditions = append(conditions, "(raw_line LIKE ? OR client_ip LIKE ? OR rule_id LIKE ?)")
 			args = append(args, "%"+qVal+"%", "%"+qVal+"%", "%"+qVal+"%")
 		} else {
-			// Free text search across raw_line, IP, rule
 			conditions = append(conditions, "(raw_line LIKE ? OR client_ip LIKE ? OR rule_id LIKE ?)")
 			args = append(args, "%"+token+"%", "%"+token+"%", "%"+token+"%")
 		}
@@ -373,6 +482,96 @@ func (s *StorageEngine) GetMITREStats() ([]MITREStat, error) {
 		}
 	}
 	return stats, nil
+}
+
+// SaveSystemConfig persists a map of runtime settings.
+func (s *StorageEngine) SaveSystemConfig(cfg map[string]string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	nowMs := time.Now().UnixMilli()
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare(`INSERT OR REPLACE INTO system_config (key, value, updated_at_ms) VALUES (?, ?, ?)`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for k, v := range cfg {
+		if _, err := stmt.Exec(k, v, nowMs); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+// GetAllSystemConfig retrieves all key-value runtime settings.
+func (s *StorageEngine) GetAllSystemConfig() (map[string]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	query := `SELECT key, value FROM system_config`
+	rows, err := s.db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	res := make(map[string]string)
+	for rows.Next() {
+		var k, v string
+		if err := rows.Scan(&k, &v); err == nil {
+			res[k] = v
+		}
+	}
+	return res, nil
+}
+
+// RecordHoneypotEvent saves intercepted fake SSH or Honey-URL intrusions.
+func (s *StorageEngine) RecordHoneypotEvent(ev *HoneypotEvent) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	query := `INSERT INTO honeypot_events (trap_type, client_ip, port, username, password, key_fingerprint, client_version, requested_url, user_agent, payload_summary, timestamp_ms, auto_banned)
+	          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	res, err := s.db.Exec(query, ev.TrapType, ev.ClientIP, ev.Port, ev.Username, ev.Password, ev.KeyFingerprint, ev.ClientVersion, ev.RequestedURL, ev.UserAgent, ev.PayloadSummary, ev.TimestampMs, ev.AutoBanned)
+	if err != nil {
+		return err
+	}
+	id, _ := res.LastInsertId()
+	ev.ID = id
+	return nil
+}
+
+// GetHoneypotLogs retrieves latest deception trap hits.
+func (s *StorageEngine) GetHoneypotLogs(limit int) ([]*HoneypotEvent, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	query := `SELECT id, trap_type, client_ip, port, username, password, key_fingerprint, client_version, requested_url, user_agent, payload_summary, timestamp_ms, auto_banned
+	          FROM honeypot_events ORDER BY timestamp_ms DESC LIMIT ?`
+	rows, err := s.db.Query(query, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var list []*HoneypotEvent
+	for rows.Next() {
+		ev := &HoneypotEvent{}
+		var autoBannedInt int
+		if err := rows.Scan(&ev.ID, &ev.TrapType, &ev.ClientIP, &ev.Port, &ev.Username, &ev.Password, &ev.KeyFingerprint, &ev.ClientVersion, &ev.RequestedURL, &ev.UserAgent, &ev.PayloadSummary, &ev.TimestampMs, &autoBannedInt); err == nil {
+			ev.AutoBanned = (autoBannedInt == 1)
+			list = append(list, ev)
+		}
+	}
+	return list, nil
 }
 
 // Close terminates database connections.

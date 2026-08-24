@@ -13,9 +13,11 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 	"unsafe"
+
+	copsecproto "github.com/copsec/collector/proto"
+	"golang.org/x/sys/unix"
 )
 
 // OffsetManager handles loading and persisting file read offsets.
@@ -132,17 +134,16 @@ func (t *Tailer) tailFile(ctx context.Context) error {
 	// Strictly Read-Only Open
 	file, err := os.OpenFile(t.filePath, os.O_RDONLY, 0)
 	if err != nil {
-		if os.IsNotExist(err) {
-			select {
-			case <-ctx.Done():
-				return nil
-			case <-time.After(1 * time.Second):
-				return nil
-			}
+		log.Printf("[TAILER_ERROR] Cannot open %s (%s): %v. Retrying in 3s...", t.source, t.filePath, err)
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(3 * time.Second):
+			return nil
 		}
-		return err
 	}
 	defer file.Close()
+	log.Printf("[TAILER_ACTIVE] Successfully hooked to %s (%s)", t.source, t.filePath)
 
 	stat, err := file.Stat()
 	if err != nil {
@@ -177,24 +178,24 @@ func (t *Tailer) tailFile(ctx context.Context) error {
 	t.offsetManager.SetOffset(t.filePath, currentOffset)
 
 	// Setup non-blocking inotify watch
-	inotifyFd, err := syscall.InotifyInit1(syscall.IN_NONBLOCK | syscall.IN_CLOEXEC)
+	inotifyFd, err := unix.InotifyInit1(unix.IN_NONBLOCK | unix.IN_CLOEXEC)
 	if err != nil {
 		inotifyFd = -1
 	} else {
-		defer syscall.Close(inotifyFd)
-		watchMask := uint32(syscall.IN_MODIFY | syscall.IN_MOVE_SELF | syscall.IN_DELETE_SELF)
-		wd, err := syscall.InotifyAddWatch(inotifyFd, t.filePath, watchMask)
+		defer unix.Close(inotifyFd)
+		watchMask := uint32(unix.IN_MODIFY | unix.IN_MOVE_SELF | unix.IN_DELETE_SELF)
+		wd, err := unix.InotifyAddWatch(inotifyFd, t.filePath, watchMask)
 		if err == nil {
-			defer syscall.InotifyRmWatch(inotifyFd, uint32(wd))
+			defer unix.InotifyRmWatch(inotifyFd, uint32(wd))
 		}
 	}
 
 	flushTicker := time.NewTicker(5 * time.Second)
 	defer flushTicker.Stop()
 
-	// 250ms Hybrid Polling ticker to guarantee zero-miss on Linux inotify stalls / logrotate
-	pollTicker := time.NewTicker(250 * time.Millisecond)
-	defer pollTicker.Stop()
+	pollFds := []unix.PollFd{
+		{Fd: int32(inotifyFd), Events: unix.POLLIN},
+	}
 
 	buf := make([]byte, 4096)
 	for {
@@ -208,65 +209,71 @@ func (t *Tailer) tailFile(ctx context.Context) error {
 			t.offsetManager.SetOffset(t.filePath, currentOffset)
 			_ = t.offsetManager.Flush()
 
-		case <-pollTicker.C:
-			// Periodic size check to catch rotations or missed inotify events
-			st, err := os.Stat(t.filePath)
-			if err != nil {
-				if os.IsNotExist(err) {
-					// File moved / rotated
-					log.Printf("[INFO] File %s temporarily unlinked. Waiting for recreate...", t.filePath)
+		default:
+			// Dosya silindi mi / inode değişti mi / logrotate truncate mi oldu kontrolü
+			if currentFi, statErr := os.Stat(t.filePath); statErr != nil || !os.SameFile(stat, currentFi) || currentFi.Size() < currentOffset {
+				log.Printf("[TAILER_RESET] File rotated or recreated for %s (%s). Rehooking...", t.source, t.filePath)
+				t.offsetManager.SetOffset(t.filePath, 0)
+				_ = t.offsetManager.Flush()
+				return nil
+			}
+
+			if inotifyFd < 0 {
+				select {
+				case <-ctx.Done():
 					return nil
-				}
-			} else {
-				if st.Size() < currentOffset {
-					log.Printf("[INFO] File %s truncated (Size %d < Offset %d). Reopening...", t.filePath, st.Size(), currentOffset)
-					return nil
-				} else if st.Size() > currentOffset {
+				case <-time.After(100 * time.Millisecond):
 					currentOffset = t.readLines(reader, file, currentOffset)
 					t.offsetManager.SetOffset(t.filePath, currentOffset)
-				}
-			}
-
-		default:
-			if inotifyFd < 0 {
-				time.Sleep(100 * time.Millisecond)
-				continue
-			}
-
-			n, err := syscall.Read(inotifyFd, buf)
-			if err != nil {
-				if errors.Is(err, syscall.EAGAIN) || errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EINTR) {
-					time.Sleep(50 * time.Millisecond)
 					continue
 				}
-				time.Sleep(50 * time.Millisecond)
-				continue
 			}
 
-			if n < syscall.SizeofInotifyEvent {
-				time.Sleep(50 * time.Millisecond)
-				continue
-			}
-
-			offset := 0
-			var rotatedOrDeleted bool
-			for offset+syscall.SizeofInotifyEvent <= n {
-				rawEvent := (*syscall.InotifyEvent)(unsafe.Pointer(&buf[offset]))
-				mask := rawEvent.Mask
-
-				if mask&(syscall.IN_MOVE_SELF|syscall.IN_DELETE_SELF) != 0 {
-					rotatedOrDeleted = true
+			// Event-driven wait: returns immediately (0ms delay) on inotify events
+			nEvents, err := unix.Poll(pollFds, 200)
+			if err != nil {
+				if errors.Is(err, unix.EINTR) {
+					continue
 				}
-				offset += syscall.SizeofInotifyEvent + int(rawEvent.Len)
+				select {
+				case <-ctx.Done():
+					return nil
+				default:
+					continue
+				}
 			}
 
-			// Read newly available lines
-			currentOffset = t.readLines(reader, file, currentOffset)
-			t.offsetManager.SetOffset(t.filePath, currentOffset)
+			if nEvents > 0 && (pollFds[0].Revents&unix.POLLIN) != 0 {
+				n, err := unix.Read(inotifyFd, buf)
+				if err != nil {
+					if errors.Is(err, unix.EAGAIN) || errors.Is(err, unix.EWOULDBLOCK) || errors.Is(err, unix.EINTR) {
+						continue
+					}
+					continue
+				}
 
-			if rotatedOrDeleted {
-				log.Printf("[INFO] Inotify detected rotation/deletion on %s. Reopening file...", t.filePath)
-				return nil
+				if n >= unix.SizeofInotifyEvent {
+					offset := 0
+					var rotatedOrDeleted bool
+					for offset+unix.SizeofInotifyEvent <= n {
+						rawEvent := (*unix.InotifyEvent)(unsafe.Pointer(&buf[offset]))
+						mask := rawEvent.Mask
+
+						if mask&(unix.IN_MOVE_SELF|unix.IN_DELETE_SELF) != 0 {
+							rotatedOrDeleted = true
+						}
+						offset += unix.SizeofInotifyEvent + int(rawEvent.Len)
+					}
+
+					// Read newly available lines immediately
+					currentOffset = t.readLines(reader, file, currentOffset)
+					t.offsetManager.SetOffset(t.filePath, currentOffset)
+
+					if rotatedOrDeleted {
+						log.Printf("[INFO] Inotify detected rotation/deletion on %s. Reopening file...", t.filePath)
+						return nil
+					}
+				}
 			}
 		}
 	}
@@ -290,13 +297,10 @@ func (t *Tailer) readLines(reader *bufio.Reader, file *os.File, currentOffset in
 					continue
 				}
 
-				// 1. Extract IP from log line
-				extractedIP := extractIPFromLine(line, t.source)
+				// 1. Gelen her satırı Edge Engine'e gönder
+				edgeEngine.InspectRawLine(line, t.source)
 
-				// 2. Direct Wire-up to Edge Autonomous SOAR Engine (Executes when Controller is offline)
-				edgeEngine.ProcessAutonomousInspection(line, t.source, extractedIP)
-
-				// 3. Dispatch to stream/buffer pipeline
+				// 2. Dispatch to stream/buffer pipeline
 				entry := LogEntry{
 					Source:    t.source,
 					Line:      line,
@@ -364,6 +368,187 @@ func (t *Tailer) sendLogNonBlocking(entry LogEntry) {
 	default:
 		// Queue saturated: skip line non-blockingly to guarantee zero reader lockup
 	}
+}
+
+// SuricataBase models Suricata Eve JSON log records.
+type SuricataBase struct {
+	Timestamp string `json:"timestamp"`
+	EventType string `json:"event_type"`
+	SrcIP     string `json:"src_ip"`
+	DestIP    string `json:"dest_ip"`
+	Alert     *struct {
+		Signature   string `json:"signature"`
+		Severity    int    `json:"severity"`
+		SignatureID int    `json:"signature_id"`
+	} `json:"alert,omitempty"`
+}
+
+// parseSuricataLine unmarshals Suricata eve.json lines directly without raw regex.
+func parseSuricataLine(line string) (*copsecproto.LogEvent, bool) {
+	var s SuricataBase
+	if err := json.Unmarshal([]byte(line), &s); err != nil {
+		return nil, false
+	}
+
+	threatScore := int32(0)
+	ruleID := "suricata_flow"
+	mitreID := ""
+
+	if s.EventType == "alert" && s.Alert != nil {
+		threatScore = 85
+		ruleID = s.Alert.Signature
+		if ruleID == "" {
+			ruleID = fmt.Sprintf("suricata_alert_%d", s.Alert.SignatureID)
+		}
+		if ruleID == "suricata_alert_0" || ruleID == "" {
+			ruleID = "suricata_ids_alert"
+		}
+		mitreID = "T1190"
+	}
+
+	ts := time.Now().UnixMilli()
+	if s.Timestamp != "" {
+		if t, err := time.Parse(time.RFC3339Nano, s.Timestamp); err == nil {
+			ts = t.UnixMilli()
+		} else if t, err := time.Parse(time.RFC3339, s.Timestamp); err == nil {
+			ts = t.UnixMilli()
+		}
+	}
+
+	return &copsecproto.LogEvent{
+		Source:           "suricata",
+		ClientIp:         s.SrcIP,
+		RawLine:          line,
+		ThreatScore:      threatScore,
+		RuleId:           ruleID,
+		MitreTechniqueId: mitreID,
+		TimestampMs:      ts,
+	}, true
+}
+
+// parseAuthLine extracts standard Linux SSH and Auth patterns.
+func parseAuthLine(line string) (*copsecproto.LogEvent, bool) {
+	ip := extractIPFromLine(line, "auth")
+	threatScore := int32(0)
+	ruleID := "auth_event"
+	mitreID := ""
+
+	if strings.Contains(line, "Failed password") || strings.Contains(line, "authentication failure") || strings.Contains(line, "Invalid user") {
+		threatScore = 70
+		ruleID = "ssh_failed_password"
+		mitreID = "T1110.001"
+	} else if strings.Contains(line, "Accepted password") || strings.Contains(line, "Accepted publickey") {
+		threatScore = 0
+		ruleID = "ssh_login_success"
+	} else if strings.Contains(line, "sudo:") && strings.Contains(line, "COMMAND=") {
+		threatScore = 20
+		ruleID = "sudo_execution"
+		mitreID = "T1078"
+	}
+
+	return &copsecproto.LogEvent{
+		Source:           "auth",
+		ClientIp:         ip,
+		RawLine:          line,
+		ThreatScore:      threatScore,
+		RuleId:           ruleID,
+		MitreTechniqueId: mitreID,
+		TimestampMs:      time.Now().UnixMilli(),
+	}, true
+}
+
+// parseLogLine normalizes raw lines across all source types (Suricata JSON, Auth regex, Nginx, Syslog, Audit).
+func parseLogLine(sourceName, raw string) *copsecproto.LogEvent {
+	nowMs := time.Now().UnixMilli()
+	srcLower := strings.ToLower(sourceName)
+
+	switch {
+	case srcLower == "suricata" || strings.Contains(srcLower, "eve.json") || strings.Contains(srcLower, "suricata"):
+		var s SuricataBase
+		if err := json.Unmarshal([]byte(raw), &s); err == nil {
+			threatScore := int32(0)
+			ruleID := "suricata_flow"
+			mitreID := ""
+			if s.EventType == "alert" && s.Alert != nil {
+				threatScore = 85
+				ruleID = s.Alert.Signature
+				if ruleID == "" {
+					ruleID = "suricata_ids_alert"
+				}
+				mitreID = "T1190"
+			}
+			ts := nowMs
+			if s.Timestamp != "" {
+				if t, err := time.Parse(time.RFC3339Nano, s.Timestamp); err == nil {
+					ts = t.UnixMilli()
+				} else if t, err := time.Parse(time.RFC3339, s.Timestamp); err == nil {
+					ts = t.UnixMilli()
+				}
+			}
+			return &copsecproto.LogEvent{
+				Source:           "suricata",
+				RawLine:          raw,
+				ClientIp:         s.SrcIP,
+				ThreatScore:      threatScore,
+				RuleId:           ruleID,
+				MitreTechniqueId: mitreID,
+				TimestampMs:      ts,
+			}
+		}
+		// JSON parse edilemezse ham log olarak ilet
+		return &copsecproto.LogEvent{
+			Source:      "suricata",
+			RawLine:     raw,
+			ClientIp:    extractIPFromLine(raw, "suricata"),
+			TimestampMs: nowMs,
+		}
+
+	case srcLower == "auth" || srcLower == "ssh" || strings.Contains(srcLower, "auth.log"):
+		threatScore := int32(0)
+		ruleID := "auth_event"
+		mitreID := ""
+		if strings.Contains(raw, "Failed password") || strings.Contains(raw, "authentication failure") || strings.Contains(raw, "Invalid user") {
+			threatScore = 70
+			ruleID = "ssh_failed_password"
+			mitreID = "T1110.001"
+		} else if strings.Contains(raw, "Accepted password") || strings.Contains(raw, "Accepted publickey") {
+			threatScore = 0
+			ruleID = "ssh_login_success"
+		} else if strings.Contains(raw, "sudo:") && strings.Contains(raw, "COMMAND=") {
+			threatScore = 20
+			ruleID = "sudo_execution"
+			mitreID = "T1078"
+		}
+		return &copsecproto.LogEvent{
+			Source:           "auth",
+			RawLine:          raw,
+			ClientIp:         extractIPFromLine(raw, "auth"),
+			ThreatScore:      threatScore,
+			RuleId:           ruleID,
+			MitreTechniqueId: mitreID,
+			TimestampMs:      nowMs,
+		}
+
+	default: // nginx, syslog, audit
+		ip := extractIPFromLine(raw, sourceName)
+		statusCode := int32(ExtractHTTPStatus(raw))
+		return &copsecproto.LogEvent{
+			Source:      sourceName,
+			RawLine:     raw,
+			ClientIp:    ip,
+			StatusCode:  statusCode,
+			TimestampMs: nowMs,
+		}
+	}
+}
+
+// ParseLogSourceLine dispatches raw line parsing based on source or filepath.
+func ParseLogSourceLine(source, line string, defaultTimestamp int64) *copsecproto.LogEvent {
+	ev := parseLogLine(source, line)
+	if defaultTimestamp > 0 && ev.TimestampMs == 0 {
+		ev.TimestampMs = defaultTimestamp
+	}
+	return ev
 }
 
 // isNoisyCollectorLog drops self-generated feedback loop lines and background noise.

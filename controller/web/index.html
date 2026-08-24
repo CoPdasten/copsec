@@ -1,0 +1,1199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CoPSeC // Autonomous Micro-SIEM & SOAR Defense Console</title>
+  <style>
+    :root {
+      --bg-dark: #070a13;
+      --bg-card: #0d121f;
+      --bg-card-hover: #131b2e;
+      --border-color: #1b2640;
+      --border-glow: #00f3ff33;
+      --cyan: #00f3ff;
+      --magenta: #ff0055;
+      --amber: #ffb800;
+      --emerald: #00ff66;
+      --blue: #3b82f6;
+      --gray: #64748b;
+      --text-main: #f1f5f9;
+      --text-muted: #94a3b8;
+      --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: var(--bg-dark);
+      color: var(--text-main);
+      font-family: var(--font-sans);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow-x: hidden;
+    }
+
+    /* Header & Cyber Status Bar */
+    header {
+      background: rgba(13, 18, 31, 0.95);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border-color);
+      padding: 0.75rem 1.5rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      position: sticky;
+      top: 0;
+      z-index: 50;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+    .brand-logo {
+      width: 32px;
+      height: 32px;
+      background: linear-gradient(135deg, var(--cyan), var(--magenta));
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 900;
+      font-size: 1.1rem;
+      color: #000;
+      box-shadow: 0 0 15px rgba(0, 243, 255, 0.4);
+    }
+    .brand-text h1 {
+      font-size: 1.15rem;
+      font-weight: 800;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      background: linear-gradient(90deg, #fff, var(--cyan));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .brand-text p {
+      font-size: 0.7rem;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+    }
+
+    .nav-tabs {
+      display: flex;
+      gap: 0.5rem;
+    }
+    .nav-tab {
+      background: transparent;
+      border: 1px solid transparent;
+      color: var(--text-muted);
+      padding: 0.45rem 0.9rem;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.8rem;
+      font-weight: 600;
+      transition: all 0.2s ease;
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+    .nav-tab:hover {
+      color: #fff;
+      background: var(--bg-card);
+    }
+    .nav-tab.active {
+      background: #00f3ff15;
+      border-color: var(--cyan);
+      color: var(--cyan);
+      box-shadow: 0 0 10px rgba(0, 243, 255, 0.2);
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+    .ws-indicator {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      padding: 0.3rem 0.6rem;
+      background: #000;
+      border: 1px solid var(--border-color);
+      border-radius: 20px;
+    }
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--emerald);
+      box-shadow: 0 0 8px var(--emerald);
+      animation: pulse 2s infinite;
+    }
+    .dot.disconnected {
+      background: var(--magenta);
+      box-shadow: 0 0 8px var(--magenta);
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    /* Layout Containers */
+    main {
+      padding: 1.5rem;
+      flex: 1;
+      max-width: 1600px;
+      margin: 0 auto;
+      width: 100%;
+    }
+
+    .stat-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+    .stat-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+      position: relative;
+      overflow: hidden;
+    }
+    .stat-card::after {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, var(--cyan), transparent);
+    }
+    .stat-title {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+      margin-bottom: 0.4rem;
+    }
+    .stat-value {
+      font-size: 1.8rem;
+      font-weight: 800;
+      font-family: var(--font-mono);
+      color: #fff;
+    }
+    .stat-sub {
+      font-size: 0.7rem;
+      color: var(--emerald);
+      margin-top: 0.3rem;
+      display: flex;
+      align-items: center;
+      gap: 0.3rem;
+    }
+
+    /* Tab Panels */
+    .tab-panel {
+      display: none;
+    }
+    .tab-panel.active {
+      display: block;
+      animation: fadeIn 0.2s ease-in-out;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Cyber Card & Table */
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      overflow: hidden;
+      margin-bottom: 1.5rem;
+    }
+    .card-header {
+      padding: 0.9rem 1.25rem;
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: #090e1a;
+    }
+    .card-title {
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .table-container {
+      overflow-x: auto;
+      max-height: 520px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.8rem;
+      text-align: left;
+    }
+    th {
+      background: #090e1a;
+      color: var(--text-muted);
+      font-weight: 600;
+      padding: 0.75rem 1rem;
+      border-bottom: 1px solid var(--border-color);
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    td {
+      padding: 0.75rem 1rem;
+      border-bottom: 1px solid #141c2e;
+      color: var(--text-main);
+    }
+    tr:hover td {
+      background: var(--bg-card-hover);
+    }
+
+    /* Badges & Tags */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 0.2rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.65rem;
+      font-weight: 700;
+      font-family: var(--font-mono);
+      text-transform: uppercase;
+    }
+    .badge-critical { background: rgba(255, 0, 85, 0.2); color: var(--magenta); border: 1px solid var(--magenta); }
+    .badge-high { background: rgba(255, 184, 0, 0.2); color: var(--amber); border: 1px solid var(--amber); }
+    .badge-medium { background: rgba(0, 243, 255, 0.15); color: var(--cyan); border: 1px solid var(--cyan); }
+    .badge-low { background: rgba(100, 116, 139, 0.2); color: var(--text-muted); border: 1px solid var(--border-color); }
+    .badge-success { background: rgba(0, 255, 102, 0.2); color: var(--emerald); border: 1px solid var(--emerald); }
+
+    .tag-mitre {
+      background: #111d33;
+      color: #38bdf8;
+      border: 1px solid #0284c7;
+      padding: 0.15rem 0.4rem;
+      border-radius: 4px;
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+    }
+
+    /* Buttons & Inputs */
+    .btn {
+      background: #1e293b;
+      color: #fff;
+      border: 1px solid var(--border-color);
+      padding: 0.45rem 0.9rem;
+      border-radius: 6px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      transition: all 0.2s ease;
+    }
+    .btn:hover { background: #334155; }
+    .btn-primary {
+      background: var(--cyan);
+      color: #000;
+      border-color: var(--cyan);
+    }
+    .btn-primary:hover {
+      background: #38f8ff;
+      box-shadow: 0 0 12px rgba(0, 243, 255, 0.4);
+    }
+    .btn-danger {
+      background: rgba(255, 0, 85, 0.2);
+      color: var(--magenta);
+      border-color: var(--magenta);
+    }
+    .btn-danger:hover {
+      background: var(--magenta);
+      color: #fff;
+    }
+
+    .input-group {
+      display: flex;
+      gap: 0.5rem;
+    }
+    .cyber-input {
+      background: #070b13;
+      border: 1px solid var(--border-color);
+      color: #fff;
+      padding: 0.45rem 0.8rem;
+      border-radius: 6px;
+      font-size: 0.8rem;
+      font-family: var(--font-mono);
+      outline: none;
+    }
+    .cyber-input:focus {
+      border-color: var(--cyan);
+      box-shadow: 0 0 8px rgba(0, 243, 255, 0.2);
+    }
+
+    /* Modal / Onboarding Wizard */
+    .modal-overlay {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(4, 7, 13, 0.85);
+      backdrop-filter: blur(8px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s ease;
+    }
+    .modal-overlay.open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .modal-box {
+      background: var(--bg-card);
+      border: 1px solid var(--cyan);
+      box-shadow: 0 0 30px rgba(0, 243, 255, 0.15);
+      border-radius: 10px;
+      width: 90%;
+      max-width: 650px;
+      padding: 1.75rem;
+      position: relative;
+    }
+    .modal-box h2 {
+      font-size: 1.25rem;
+      margin-bottom: 0.5rem;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .form-group {
+      margin-bottom: 1rem;
+    }
+    .form-group label {
+      display: block;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-bottom: 0.3rem;
+      text-transform: uppercase;
+      font-family: var(--font-mono);
+    }
+    .form-group input, .form-group select {
+      width: 100%;
+    }
+
+    /* Split Grid */
+    .split-grid {
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      gap: 1.5rem;
+    }
+    @media (max-width: 1024px) {
+      .split-grid { grid-template-columns: 1fr; }
+    }
+
+    /* MITRE Heatmap Pills */
+    .mitre-pill {
+      display: flex;
+      justify-content: space-between;
+      padding: 0.5rem 0.75rem;
+      background: #090e1a;
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      margin-bottom: 0.4rem;
+      font-size: 0.75rem;
+    }
+    .mitre-pill-tech {
+      font-family: var(--font-mono);
+      color: var(--cyan);
+      font-weight: 700;
+    }
+    .mitre-pill-count {
+      background: #1e293b;
+      padding: 0.1rem 0.4rem;
+      border-radius: 4px;
+      color: #fff;
+      font-weight: 700;
+    }
+
+    .raw-log-preview {
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      color: #cbd5e1;
+      word-break: break-all;
+      max-width: 480px;
+    }
+
+    /* Layer Indicators */
+    .layer-badge {
+      font-size: 0.65rem;
+      padding: 0.15rem 0.35rem;
+      border-radius: 3px;
+      font-family: var(--font-mono);
+      font-weight: 700;
+      margin-right: 2px;
+    }
+    .layer-l3 { background: #3b82f633; color: #60a5fa; border: 1px solid #3b82f6; }
+    .layer-l4 { background: #a855f733; color: #c084fc; border: 1px solid #a855f7; }
+    .layer-l7 { background: #06b6d433; color: #22d3ee; border: 1px solid #06b6d4; }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <header>
+    <div class="brand">
+      <div class="brand-logo">⚡</div>
+      <div class="brand-text">
+        <h1>CoPSeC Central SOC</h1>
+        <p>AUTONOMOUS MICRO-SIEM // SOAR SENSOR MATRIX</p>
+      </div>
+    </div>
+
+    <nav class="nav-tabs">
+      <button class="nav-tab active" onclick="switchTab('tab-telemetry')">📡 Live Telemetry</button>
+      <button class="nav-tab" onclick="switchTab('tab-soar')">🛡️ SOAR Quarantine</button>
+      <button class="nav-tab" onclick="switchTab('tab-sigma')">📜 Sigma HQ Rules</button>
+      <button class="nav-tab" onclick="switchTab('tab-honeypot')">🍯 Honeypot Traps</button>
+      <button class="nav-tab" onclick="switchTab('tab-config')">⚙️ Configuration</button>
+    </nav>
+
+    <div class="header-actions">
+      <div class="ws-indicator">
+        <div class="dot" id="ws-dot"></div>
+        <span id="ws-status">LIVE SYNC</span>
+      </div>
+      <button class="btn btn-primary" onclick="openBanModal()">⚡ Quick Ban</button>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main>
+    <!-- Live Stats Bar -->
+    <div class="stat-grid">
+      <div class="stat-card">
+        <div class="stat-title">Real-Time Ingestion EPS</div>
+        <div class="stat-value" id="stat-eps" style="color: var(--cyan);">0</div>
+        <div class="stat-sub">⚡ Sub-millisecond stream</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-title">Total Lifetime Events</div>
+        <div class="stat-value" id="stat-total">0</div>
+        <div class="stat-sub" style="color: var(--blue);">💾 WAL-mode SQLite storage</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-title">Active Fleet Nodes</div>
+        <div class="stat-value" id="stat-nodes" style="color: var(--emerald);">0</div>
+        <div class="stat-sub" style="color: var(--emerald);">✔ gRPC Keepalive verified</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-title">Quarantined Threats (SOAR)</div>
+        <div class="stat-value" id="stat-bans" style="color: var(--magenta);">0</div>
+        <div class="stat-sub" style="color: var(--amber);">⏳ Dynamic TTL Enforced</div>
+      </div>
+    </div>
+
+    <!-- TAB 1: Live Telemetry & MITRE Radar -->
+    <div id="tab-telemetry" class="tab-panel active">
+      <div class="split-grid">
+        <!-- Live Event Feed -->
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">📡 Real-Time Security Incident Stream</div>
+            <div class="input-group">
+              <input type="text" id="telemetry-filter" class="cyber-input" placeholder="Filter: ip:1.2.3.4 mitre:T1190 score:>50" style="width: 280px;" onkeyup="if(event.key==='Enter') applyEventFilter()">
+              <button class="btn" onclick="applyEventFilter()">Search</button>
+            </div>
+          </div>
+          <div class="table-container">
+            <table>
+              <thead>
+                <tr>
+                  <th>Timestamp</th>
+                  <th>Source / Node</th>
+                  <th>Client IP</th>
+                  <th>MITRE / Rule</th>
+                  <th>Threat Score</th>
+                  <th>Payload / AI Intent</th>
+                </tr>
+              </thead>
+              <tbody id="telemetry-tbody">
+                <tr><td colspan="6" style="text-align: center; color: var(--text-muted);">Listening for telemetry stream via WebSocket...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- MITRE ATT&CK Breakdown -->
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">🎯 MITRE ATT&CK Radar</div>
+            <span class="badge badge-medium">Active Top Hits</span>
+          </div>
+          <div style="padding: 1rem;" id="mitre-stats-container">
+            <div style="color: var(--text-muted); font-size: 0.8rem;">Aggregating technique distributions...</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 2: SOAR Quarantine & Mitigation (L3/L4/L7 Hybrid + TTL) -->
+    <div id="tab-soar" class="tab-panel">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">🛡️ Active Multi-Layer SOAR Quarantines (L3 RAW/INPUT + L4 Conntrack + L7 Nginx)</div>
+          <div style="display: flex; gap: 0.5rem;">
+            <button class="btn btn-primary" onclick="openBanModal()">+ Quarantine IP</button>
+            <button class="btn" onclick="refreshBans()">🔄 Refresh</button>
+          </div>
+        </div>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Target IP</th>
+                <th>Mitigation Layers</th>
+                <th>Penalty Tier</th>
+                <th>Quarantine Reason</th>
+                <th>Enforced At</th>
+                <th>Remaining TTL</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="bans-tbody">
+              <tr><td colspan="7" style="text-align: center; color: var(--text-muted);">No active bans currently in quarantine.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 3: Sigma Detection-as-Code Studio -->
+    <div id="tab-sigma" class="tab-panel">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">📜 Native In-Memory SigmaHQ Rules (Detection-as-Code)</div>
+          <button class="btn btn-primary" onclick="openSigmaModal()">+ Compile New Rule</button>
+        </div>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Rule ID</th>
+                <th>Rule Title</th>
+                <th>Severity Level</th>
+                <th>Threat Score</th>
+                <th>Mapped MITRE Technique</th>
+                <th>Condition Expression</th>
+              </tr>
+            </thead>
+            <tbody id="sigma-tbody">
+              <tr><td colspan="6" style="text-align: center; color: var(--text-muted);">Loading compiled Sigma rules...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 4: Honeypot & Deception Traps -->
+    <div id="tab-honeypot" class="tab-panel">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">🍯 High-Interaction Deception Interceptions (Fake SSH & Honey-URLs)</div>
+          <button class="btn" onclick="refreshHoneypotLogs()">🔄 Refresh Traps</button>
+        </div>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Trap Vector</th>
+                <th>Attacker IP:Port</th>
+                <th>Captured Credentials / Path</th>
+                <th>Client Fingerprint / UA</th>
+                <th>Mitigation</th>
+              </tr>
+            </thead>
+            <tbody id="honeypot-tbody">
+              <tr><td colspan="6" style="text-align: center; color: var(--text-muted);">Listening on Honeypot listeners...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 5: System Configuration & Onboarding -->
+    <div id="tab-config" class="tab-panel">
+      <div class="card" style="max-width: 800px; margin: 0 auto;">
+        <div class="card-header">
+          <div class="card-title">⚙️ CoPSeC Runtime Parameters & Threat Intel Onboarding</div>
+          <span class="badge badge-success">Zero-Restart Dynamic Sync</span>
+        </div>
+        <div style="padding: 1.5rem;">
+          <form id="config-form" onsubmit="saveConfiguration(event)">
+            <div class="form-group">
+              <label>gRPC Ingestion Listen Address</label>
+              <input type="text" id="cfg-grpc-addr" class="cyber-input" value="0.0.0.0:8443" required>
+            </div>
+            <div class="form-group">
+              <label>Telegram SOAR Bot Token</label>
+              <input type="password" id="cfg-tg-token" class="cyber-input" placeholder="123456789:ABCdefGHIjklMNOpqrSTUvwxYZ">
+            </div>
+            <div class="form-group">
+              <label>Telegram Incident Alert Chat ID</label>
+              <input type="text" id="cfg-tg-chat" class="cyber-input" placeholder="-1001234567890">
+            </div>
+            <div class="form-group">
+              <label>Fake SSH Honeypot Listen Port</label>
+              <input type="text" id="cfg-honeypot-ssh" class="cyber-input" value=":2222">
+            </div>
+            <div class="form-group">
+              <label>Autonomous Auto-Ban Threat Score Threshold (1 - 100)</label>
+              <input type="number" id="cfg-autoban-threshold" class="cyber-input" value="50" min="1" max="100">
+            </div>
+            <div class="form-group">
+              <label>Threat Intelligence API Key (AbuseIPDB / Shodan)</label>
+              <input type="password" id="cfg-intel-key" class="cyber-input" placeholder="Optional API Key">
+            </div>
+            <button type="submit" class="btn btn-primary" style="width: 100%; justify-content: center; margin-top: 1rem;">
+              💾 Save & Dynamically Apply Settings
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Modal 1: Quick Ban Modal -->
+  <div class="modal-overlay" id="ban-modal">
+    <div class="modal-box">
+      <h2>⚡ Enforce SOAR Quarantine</h2>
+      <p style="color: var(--text-muted); font-size: 0.8rem; margin-bottom: 1.25rem;">
+        Executes instant hybrid mitigation (L3 RAW/INPUT Drop + L4 Socket/Conntrack Kill + L7 Nginx Block).
+      </p>
+      <form onsubmit="submitBanForm(event)">
+        <div class="form-group">
+          <label>Target IP Address</label>
+          <input type="text" id="ban-ip-input" class="cyber-input" placeholder="198.51.100.45" required>
+        </div>
+        <div class="form-group">
+          <label>Penalty Tier & Time-To-Live (TTL)</label>
+          <select id="ban-duration-input" class="cyber-input">
+            <option value="300">Tier 1: Temporary Rate Limit (5 Minutes)</option>
+            <option value="3600" selected>Tier 2: Progressive Isolation (1 Hour)</option>
+            <option value="86400">Tier 3: Extended Quarantine (24 Hours)</option>
+            <option value="-1">Tier 4: Permanent Kernel Block (Indefinite)</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Reason / Incident Tag</label>
+          <input type="text" id="ban-reason-input" class="cyber-input" value="Manual SOC Operator Quarantine" required>
+        </div>
+        <div style="display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1.5rem;">
+          <button type="button" class="btn" onclick="closeBanModal()">Cancel</button>
+          <button type="submit" class="btn btn-danger">⚡ Execute Instant Ban</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal 2: Sigma HQ Rule Compiler Modal -->
+  <div class="modal-overlay" id="sigma-modal">
+    <div class="modal-box" style="max-width: 750px;">
+      <h2>📜 Compile Native Sigma HQ Rule</h2>
+      <p style="color: var(--text-muted); font-size: 0.8rem; margin-bottom: 1rem;">
+        Paste standard SigmaHQ YAML. The in-memory engine compiles it into sub-millisecond evaluation logic.
+      </p>
+      <form onsubmit="submitSigmaRule(event)">
+        <div class="form-group">
+          <textarea id="sigma-yaml-input" class="cyber-input" style="width: 100%; height: 250px; font-family: var(--font-mono); font-size: 0.75rem;" placeholder="title: Custom Detection&#10;id: custom-rule&#10;level: critical&#10;logsource:&#10;  category: webserver&#10;detection:&#10;  selection:&#10;    _raw|contains: 'malicious_string'&#10;  condition: selection"></textarea>
+        </div>
+        <div style="display: flex; gap: 0.5rem; justify-content: flex-end;">
+          <button type="button" class="btn" onclick="closeSigmaModal()">Cancel</button>
+          <button type="submit" class="btn btn-primary">⚡ Compile & Load In-Memory</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal 3: First-Boot Onboarding Setup Wizard -->
+  <div class="modal-overlay" id="wizard-modal">
+    <div class="modal-box">
+      <h2>🚀 Welcome to CoPSeC Defense Platform</h2>
+      <p style="color: var(--text-muted); font-size: 0.8rem; margin-bottom: 1.25rem;">
+        Zero-Config First Boot Initializer. Configure core runtime parameters to start real-time telemetry streaming.
+      </p>
+      <form onsubmit="completeOnboardingWizard(event)">
+        <div class="form-group">
+          <label>gRPC Ingestion Address</label>
+          <input type="text" id="wiz-grpc" class="cyber-input" value="0.0.0.0:8443" required>
+        </div>
+        <div class="form-group">
+          <label>Telegram SOAR Bot Token (Optional)</label>
+          <input type="password" id="wiz-tg-token" class="cyber-input" placeholder="Telegram Bot Token">
+        </div>
+        <div class="form-group">
+          <label>Telegram Alert Chat ID (Optional)</label>
+          <input type="text" id="wiz-tg-chat" class="cyber-input" placeholder="Telegram Chat ID">
+        </div>
+        <div class="form-group">
+          <label>Honey-SSH Deception Port</label>
+          <input type="text" id="wiz-honeypot" class="cyber-input" value=":2222">
+        </div>
+        <button type="submit" class="btn btn-primary" style="width: 100%; justify-content: center; margin-top: 1rem;">
+          🚀 Initialize & Transition to Live SOC Console
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    // State
+    let ws = null;
+    let eventsLog = [];
+    let isConfigured = true;
+
+    function switchTab(tabId) {
+      document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+      
+      const tabBtn = Array.from(document.querySelectorAll('.nav-tab')).find(b => b.getAttribute('onclick').includes(tabId));
+      if (tabBtn) tabBtn.classList.add('active');
+      const panel = document.getElementById(tabId);
+      if (panel) panel.classList.add('active');
+
+      if (tabId === 'tab-soar') refreshBans();
+      if (tabId === 'tab-sigma') refreshSigmaRules();
+      if (tabId === 'tab-honeypot') refreshHoneypotLogs();
+      if (tabId === 'tab-config') loadConfiguration();
+    }
+
+    // WebSocket Management
+    function initWebSocket() {
+      const loc = window.location;
+      const wsProto = loc.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${wsProto}//${loc.host}/ws/events`;
+
+      ws = new WebSocket(wsUrl);
+
+      ws.onopen = () => {
+        document.getElementById('ws-dot').classList.remove('disconnected');
+        document.getElementById('ws-status').textContent = 'LIVE SYNC';
+      };
+
+      ws.onclose = () => {
+        document.getElementById('ws-dot').classList.add('disconnected');
+        document.getElementById('ws-status').textContent = 'OFFLINE (RECONNECTING)';
+        setTimeout(initWebSocket, 2000);
+      };
+
+      ws.onmessage = (e) => {
+        try {
+          const msg = JSON.parse(e.data);
+          handleWebSocketMessage(msg);
+        } catch (err) {
+          console.error("WS Parse error", err);
+        }
+      };
+    }
+
+    function handleWebSocketMessage(msg) {
+      if (msg.type === 'event') {
+        prependEventRow(msg.payload);
+      } else if (msg.type === 'stats') {
+        updateStats(msg.payload);
+      } else if (msg.type === 'ban_change') {
+        refreshBans();
+      } else if (msg.type === 'honeypot_hit') {
+        prependHoneypotRow(msg.payload);
+      }
+    }
+
+    function updateStats(stats) {
+      if (stats.eps !== undefined) document.getElementById('stat-eps').textContent = stats.eps;
+      if (stats.total_events !== undefined) document.getElementById('stat-total').textContent = Number(stats.total_events).toLocaleString();
+      if (stats.nodes_count !== undefined) document.getElementById('stat-nodes').textContent = stats.nodes_count;
+      if (stats.active_bans !== undefined) document.getElementById('stat-bans').textContent = stats.active_bans;
+
+      if (stats.mitre_stats) {
+        renderMITREStats(stats.mitre_stats);
+      }
+    }
+
+    function prependEventRow(ev) {
+      eventsLog.unshift(ev);
+      if (eventsLog.length > 100) eventsLog.pop();
+
+      const tbody = document.getElementById('telemetry-tbody');
+      // If default placeholder row exists, clear it
+      if (tbody.children.length === 1 && tbody.children[0].innerText.includes('Listening')) {
+        tbody.innerHTML = '';
+      }
+
+      const tr = document.createElement('tr');
+      const scoreBadge = getScoreBadge(ev.threat_score);
+      const timeStr = new Date(ev.timestamp_ms || Date.now()).toLocaleTimeString();
+      
+      tr.innerHTML = `
+        <td style="font-family: var(--font-mono); color: var(--text-muted); font-size: 0.75rem;">${timeStr}</td>
+        <td><span class="badge badge-low">${escapeHtml(ev.source || 'edge')}</span> <span style="font-size: 0.7rem; color: var(--text-muted);">${escapeHtml(ev.node_id || '')}</span></td>
+        <td style="font-family: var(--font-mono); font-weight: 700; color: var(--cyan);">${escapeHtml(ev.client_ip || '-')}</td>
+        <td><span class="tag-mitre">${escapeHtml(ev.mitre_technique_id || 'T1190')}</span> <span style="font-size: 0.75rem;">${escapeHtml(ev.rule_id || '')}</span></td>
+        <td>${scoreBadge}</td>
+        <td>
+          <div class="raw-log-preview">${escapeHtml(ev.raw_line || '')}</div>
+          ${ev.ai_analysis ? `<div style="font-size: 0.68rem; color: var(--amber); margin-top: 3px;">🤖 ${escapeHtml(ev.ai_analysis)}</div>` : ''}
+        </td>
+      `;
+      tbody.insertBefore(tr, tbody.firstChild);
+      if (tbody.children.length > 50) tbody.removeChild(tbody.lastChild);
+    }
+
+    function getScoreBadge(score) {
+      if (score >= 80) return `<span class="badge badge-critical">${score} CRITICAL</span>`;
+      if (score >= 50) return `<span class="badge badge-high">${score} HIGH</span>`;
+      if (score >= 30) return `<span class="badge badge-medium">${score} MEDIUM</span>`;
+      return `<span class="badge badge-low">${score} LOW</span>`;
+    }
+
+    function renderMITREStats(stats) {
+      const container = document.getElementById('mitre-stats-container');
+      if (!stats || stats.length === 0) {
+        container.innerHTML = '<div style="color: var(--text-muted); font-size: 0.8rem;">No technique data yet.</div>';
+        return;
+      }
+      container.innerHTML = stats.slice(0, 10).map(s => `
+        <div class="mitre-pill">
+          <span class="mitre-pill-tech">${escapeHtml(s.technique_id)}</span>
+          <span class="mitre-pill-count">${s.count} hits</span>
+        </div>
+      `).join('');
+    }
+
+    // SOAR Quarantine Fetcher
+    async function refreshBans() {
+      try {
+        const res = await fetch('/api/bans');
+        const data = await res.json();
+        const tbody = document.getElementById('bans-tbody');
+        if (!data || data.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--text-muted);">No active bans currently in quarantine.</td></tr>';
+          return;
+        }
+        tbody.innerHTML = data.map(b => {
+          const remText = b.remaining_sec > 0 ? `${b.remaining_sec}s remaining` : (b.remaining_sec === -1 ? 'PERMANENT' : 'EXPIRED');
+          return `
+            <tr>
+              <td style="font-family: var(--font-mono); font-weight: 700; color: var(--magenta);">${escapeHtml(b.ip)}</td>
+              <td>
+                <span class="layer-badge layer-l3">L3 RAW</span>
+                <span class="layer-badge layer-l4">L4 SOCK</span>
+                <span class="layer-badge layer-l7">L7 NGINX</span>
+              </td>
+              <td><span class="badge badge-high">${escapeHtml(b.penalty_tier || 'TEMP_ISOLATION')}</span></td>
+              <td style="font-size: 0.75rem;">${escapeHtml(b.reason || 'Auto-Ban')}</td>
+              <td style="font-family: var(--font-mono); color: var(--text-muted); font-size: 0.75rem;">${new Date(b.ban_time_ms).toLocaleTimeString()}</td>
+              <td style="font-family: var(--font-mono); font-weight: 700; color: var(--amber);">${remText}</td>
+              <td>
+                <button class="btn btn-danger" style="padding: 0.25rem 0.6rem; font-size: 0.7rem;" onclick="unbanIP('${escapeHtml(b.ip)}')">Release Unban</button>
+              </td>
+            </tr>
+          `;
+        }).join('');
+      } catch (err) {
+        console.error("Failed to fetch bans", err);
+      }
+    }
+
+    async function unbanIP(ip) {
+      if (!confirm(`Are you sure you want to release quarantine for ${ip}?`)) return;
+      try {
+        const res = await fetch('/api/soar/unban', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ip })
+        });
+        if (res.ok) refreshBans();
+      } catch (err) {
+        alert("Failed to unban: " + err);
+      }
+    }
+
+    // Sigma HQ Rules Fetcher
+    async function refreshSigmaRules() {
+      try {
+        const res = await fetch('/api/sigma/rules');
+        const data = await res.json();
+        const tbody = document.getElementById('sigma-tbody');
+        if (!data || data.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: var(--text-muted);">No Sigma rules found.</td></tr>';
+          return;
+        }
+        tbody.innerHTML = data.map(r => `
+          <tr>
+            <td style="font-family: var(--font-mono); color: var(--cyan); font-weight: 700;">${escapeHtml(r.id)}</td>
+            <td style="font-weight: 600;">${escapeHtml(r.title)}</td>
+            <td><span class="badge badge-${r.level === 'critical' ? 'critical' : (r.level === 'high' ? 'high' : 'medium')}">${escapeHtml(r.level)}</span></td>
+            <td style="font-family: var(--font-mono);">${r.threat_score}</td>
+            <td><span class="tag-mitre">${escapeHtml(r.mitre_technique_id)}</span> <span style="font-size: 0.75rem; color: var(--text-muted);">${escapeHtml(r.mitre_technique_name || '')}</span></td>
+            <td style="font-family: var(--font-mono); font-size: 0.75rem; color: var(--amber);">${escapeHtml(r.condition || '1 of them')}</td>
+          </tr>
+        `).join('');
+      } catch (err) {
+        console.error("Failed to fetch sigma rules", err);
+      }
+    }
+
+    // Honeypot Logs Fetcher
+    async function refreshHoneypotLogs() {
+      try {
+        const res = await fetch('/api/honeypot/logs');
+        const data = await res.json();
+        const tbody = document.getElementById('honeypot-tbody');
+        if (!data || data.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: var(--text-muted);">No honeypot captures recorded yet.</td></tr>';
+          return;
+        }
+        tbody.innerHTML = data.map(h => `
+          <tr>
+            <td style="font-family: var(--font-mono); color: var(--text-muted); font-size: 0.75rem;">${new Date(h.timestamp_ms).toLocaleTimeString()}</td>
+            <td><span class="badge ${h.trap_type === 'SSH' ? 'badge-critical' : 'badge-high'}">${escapeHtml(h.trap_type)}</span></td>
+            <td style="font-family: var(--font-mono); font-weight: 700; color: var(--magenta);">${escapeHtml(h.client_ip)}:${h.port || 0}</td>
+            <td style="font-family: var(--font-mono); font-size: 0.75rem;">
+              ${h.username ? `User: <b style="color: var(--cyan);">${escapeHtml(h.username)}</b> Pass: <b style="color: var(--amber);">${escapeHtml(h.password || '')}</b>` : escapeHtml(h.requested_url || '-')}
+            </td>
+            <td style="font-size: 0.75rem; color: var(--text-muted); max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+              ${escapeHtml(h.client_version || h.user_agent || '-')}
+            </td>
+            <td><span class="badge badge-success">⚡ AUTO-BANNED</span></td>
+          </tr>
+        `).join('');
+      } catch (err) {
+        console.error("Failed to fetch honeypot logs", err);
+      }
+    }
+
+    function prependHoneypotRow(h) {
+      const tbody = document.getElementById('honeypot-tbody');
+      if (tbody.children.length === 1 && tbody.children[0].innerText.includes('No honeypot')) {
+        tbody.innerHTML = '';
+      }
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td style="font-family: var(--font-mono); color: var(--text-muted); font-size: 0.75rem;">${new Date(h.timestamp_ms || Date.now()).toLocaleTimeString()}</td>
+        <td><span class="badge ${h.trap_type === 'SSH' ? 'badge-critical' : 'badge-high'}">${escapeHtml(h.trap_type)}</span></td>
+        <td style="font-family: var(--font-mono); font-weight: 700; color: var(--magenta);">${escapeHtml(h.client_ip)}:${h.port || 0}</td>
+        <td style="font-family: var(--font-mono); font-size: 0.75rem;">
+          ${h.username ? `User: <b style="color: var(--cyan);">${escapeHtml(h.username)}</b> Pass: <b style="color: var(--amber);">${escapeHtml(h.password || '')}</b>` : escapeHtml(h.requested_url || '-')}
+        </td>
+        <td style="font-size: 0.75rem; color: var(--text-muted);">${escapeHtml(h.client_version || h.user_agent || '-')}</td>
+        <td><span class="badge badge-success">⚡ AUTO-BANNED</span></td>
+      `;
+      tbody.insertBefore(tr, tbody.firstChild);
+    }
+
+    // Modal Handlers
+    function openBanModal() {
+      document.getElementById('ban-modal').classList.add('open');
+      document.getElementById('ban-ip-input').focus();
+    }
+    function closeBanModal() {
+      document.getElementById('ban-modal').classList.remove('open');
+    }
+
+    async function submitBanForm(e) {
+      e.preventDefault();
+      const ip = document.getElementById('ban-ip-input').value.trim();
+      const duration = parseInt(document.getElementById('ban-duration-input').value);
+      const reason = document.getElementById('ban-reason-input').value.trim();
+
+      try {
+        const res = await fetch('/api/soar/ban', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ip, duration_seconds: duration, reason })
+        });
+        if (res.ok) {
+          closeBanModal();
+          refreshBans();
+        } else {
+          alert("Ban failed");
+        }
+      } catch (err) {
+        alert("Error executing ban: " + err);
+      }
+    }
+
+    function openSigmaModal() {
+      document.getElementById('sigma-modal').classList.add('open');
+    }
+    function closeSigmaModal() {
+      document.getElementById('sigma-modal').classList.remove('open');
+    }
+
+    async function submitSigmaRule(e) {
+      e.preventDefault();
+      const yaml = document.getElementById('sigma-yaml-input').value.trim();
+      if (!yaml) return;
+
+      try {
+        const res = await fetch('/api/sigma/rule', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ yaml })
+        });
+        if (res.ok) {
+          closeSigmaModal();
+          refreshSigmaRules();
+          alert("Sigma rule compiled and loaded into in-memory engine successfully!");
+        } else {
+          const errText = await res.text();
+          alert("Compilation failed: " + errText);
+        }
+      } catch (err) {
+        alert("Error submitting Sigma rule: " + err);
+      }
+    }
+
+    // Onboarding Wizard & Configuration
+    async function checkFirstBootOnboarding() {
+      try {
+        const res = await fetch('/api/config');
+        const cfg = await res.json();
+        if (cfg && !cfg.configured) {
+          document.getElementById('wizard-modal').classList.add('open');
+        }
+      } catch (err) {
+        console.error("Config check failed", err);
+      }
+    }
+
+    async function completeOnboardingWizard(e) {
+      e.preventDefault();
+      const grpcAddr = document.getElementById('wiz-grpc').value.trim();
+      const tgToken = document.getElementById('wiz-tg-token').value.trim();
+      const tgChat = document.getElementById('wiz-tg-chat').value.trim();
+      const honeypotSSH = document.getElementById('wiz-honeypot').value.trim();
+
+      try {
+        const res = await fetch('/api/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            grpc_addr: grpcAddr,
+            telegram_token: tgToken,
+            telegram_chat: tgChat,
+            honeypot_ssh_addr: honeypotSSH,
+            configured: true
+          })
+        });
+        if (res.ok) {
+          document.getElementById('wizard-modal').classList.remove('open');
+          alert("🚀 Onboarding complete! Real-time SOC defense matrix is active.");
+        }
+      } catch (err) {
+        alert("Setup failed: " + err);
+      }
+    }
+
+    async function loadConfiguration() {
+      try {
+        const res = await fetch('/api/config');
+        const cfg = await res.json();
+        if (cfg) {
+          if (cfg.grpc_addr) document.getElementById('cfg-grpc-addr').value = cfg.grpc_addr;
+          if (cfg.telegram_token) document.getElementById('cfg-tg-token').value = cfg.telegram_token;
+          if (cfg.telegram_chat) document.getElementById('cfg-tg-chat').value = cfg.telegram_chat;
+          if (cfg.honeypot_ssh_addr) document.getElementById('cfg-honeypot-ssh').value = cfg.honeypot_ssh_addr;
+          if (cfg.autoban_threshold) document.getElementById('cfg-autoban-threshold').value = cfg.autoban_threshold;
+          if (cfg.threat_intel_key) document.getElementById('cfg-intel-key').value = cfg.threat_intel_key;
+        }
+      } catch (err) {
+        console.error("Load config failed", err);
+      }
+    }
+
+    async function saveConfiguration(e) {
+      e.preventDefault();
+      const payload = {
+        grpc_addr: document.getElementById('cfg-grpc-addr').value.trim(),
+        telegram_token: document.getElementById('cfg-tg-token').value.trim(),
+        telegram_chat: document.getElementById('cfg-tg-chat').value.trim(),
+        honeypot_ssh_addr: document.getElementById('cfg-honeypot-ssh').value.trim(),
+        autoban_threshold: parseInt(document.getElementById('cfg-autoban-threshold').value) || 50,
+        threat_intel_key: document.getElementById('cfg-intel-key').value.trim(),
+        configured: true
+      };
+
+      try {
+        const res = await fetch('/api/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (res.ok) {
+          alert("✔ Runtime configuration updated and dynamically applied with zero restarts!");
+        }
+      } catch (err) {
+        alert("Failed to save configuration: " + err);
+      }
+    }
+
+    function applyEventFilter() {
+      const q = document.getElementById('telemetry-filter').value.trim();
+      fetch('/api/events?q=' + encodeURIComponent(q))
+        .then(res => res.json())
+        .then(events => {
+          const tbody = document.getElementById('telemetry-tbody');
+          tbody.innerHTML = '';
+          if (!events || events.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: var(--text-muted);">No matching telemetry incidents found.</td></tr>';
+            return;
+          }
+          events.forEach(prependEventRow);
+        });
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    // Auto-init
+    window.addEventListener('DOMContentLoaded', () => {
+      initWebSocket();
+      checkFirstBootOnboarding();
+      refreshBans();
+      refreshSigmaRules();
+      
+      // Auto-poll stats every 3s as fallback
+      setInterval(() => {
+        fetch('/api/stats')
+          .then(res => res.json())
+          .then(updateStats)
+          .catch(() => {});
+      }, 3000);
+    });
+  </script>
+</body>
+</html>

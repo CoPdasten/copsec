@@ -27,12 +27,22 @@ var (
 	// Pre-cached Styles
 	styleBasePanel = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(colorPanelBorder).
+			BorderForeground(lipgloss.Color("#334155")).
 			Padding(0, 1)
 
 	styleActivePanel = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
 				BorderForeground(colorCyberCyan).
+				Padding(0, 1)
+
+	styleActiveFocusPanel = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(lipgloss.Color("#00F0FF")).
+				Padding(0, 1)
+
+	styleInactivePanel = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(lipgloss.Color("#334155")).
 				Padding(0, 1)
 
 	styleHeader = lipgloss.NewStyle().
@@ -72,18 +82,21 @@ var (
 	styleModalBox = lipgloss.NewStyle().
 			Border(lipgloss.DoubleBorder()).
 			BorderForeground(colorAlertPink).
+			Background(lipgloss.Color("#0D1117")).
 			Padding(1, 2).
 			Width(68)
 
 	styleSearchBox = lipgloss.NewStyle().
 			Border(lipgloss.DoubleBorder()).
 			BorderForeground(colorCyberCyan).
+			Background(lipgloss.Color("#0D1117")).
 			Padding(1, 2).
 			Width(72)
 
 	styleInspectionCard = lipgloss.NewStyle().
 				Border(lipgloss.RoundedBorder()).
 				BorderForeground(colorCyberCyan).
+				Background(lipgloss.Color("#0D1117")).
 				Padding(1, 2).
 				Width(74)
 )
@@ -99,6 +112,45 @@ const (
 	modalSearch
 	modalLogDetail
 )
+
+// FocusPanel represents which panel currently holds user keyboard focus.
+type FocusPanel int
+
+const (
+	FocusTree FocusPanel = iota // 0: Sol Ağaç
+	FocusLogs                   // 1: Orta Log Akışı
+)
+
+// LogTab represents the active stream filter tab.
+type LogTab int
+
+const (
+	TabIncidents   LogTab = iota // 0: Sadece Kural İhlalleri & Banlar
+	TabAll                       // 1: Tüm Canlı Akış
+	TabNginx                     // 2: Web İstekleri
+	TabAuth                      // 3: SSH & Sudo & Auth
+	TabSuricata                  // 4: IDS / IPS Uyarıları
+	TabAuditSyslog               // 5: Audit & Kernel
+)
+
+// TreeNodeType defines whether a tree item is a Host or a Sensor.
+type TreeNodeType int
+
+const (
+	NodeHost TreeNodeType = iota
+	NodeSensor
+)
+
+// FleetTreeNode represents a hierarchical item in the VS Code style explorer tree.
+type FleetTreeNode struct {
+	ID         string
+	Label      string
+	Type       TreeNodeType
+	ParentHost string
+	SensorKey  string
+	Expanded   bool
+	Children   []*FleetTreeNode
+}
 
 type techniqueStat struct {
 	ID     string
@@ -133,6 +185,7 @@ type SIEMModel struct {
 	targetMap      map[string]int
 	totalTargetReq int
 	activeTab      int // 0: Fleet, 1: Live Stream, 2: Critical Incidents, 3: MITRE
+	activeLogTab   LogTab
 	rateHistory    []int
 	peakEPS        int
 	statusPrompt   string
@@ -148,11 +201,16 @@ type SIEMModel struct {
 	isFilterActive bool
 	inputSearch    string
 
-	// Multi-Node Fleet Switcher State
-	selectedNodeIndex  int
-	selectedNodeFilter string // Empty string = All Nodes, otherwise filtered to specific NodeID
+	// Multi-Node Fleet & Sensor Tree State
+	fleetTree            []*FleetTreeNode
+	treeExpansionState   map[string]bool
+	selectedTreeIndex    int
+	selectedNodeFilter   string // Empty string = All Nodes, otherwise filtered to specific NodeID
+	selectedSensorFilter string // Empty string = All Sensors, otherwise "nginx", "auth", "suricata", "audit", "syslog"
 
-	// Viewport Scroll & Cursor State
+	// Dual-Panel Focus & Scroll State
+	activeFocus      FocusPanel
+	logScroll        int
 	selectedLogIndex int
 	logScrollOffset  int
 
@@ -195,17 +253,19 @@ type LogEventMsg struct {
 // NewSIEMModel creates a high-performance strictly-bounded 6-panel TUI model.
 func NewSIEMModel(server *CentralServer, storage *StorageEngine) *SIEMModel {
 	m := &SIEMModel{
-		server:          server,
-		storage:         storage,
-		activeTab:       1,
-		mitreMap:        make(map[string]int),
-		attackerMap:     make(map[string]*attackerIntel),
-		targetMap:       make(map[string]int),
-		killChainHits:   make(map[string]int),
-		rateHistory:     make([]int, 20),
-		recentEntropies: make([]float64, 0, 30),
-		events:          make([]*StoredEvent, 0, 250),
-		incidents:       make([]*StoredEvent, 0, 120),
+		server:             server,
+		storage:            storage,
+		activeTab:          1,
+		activeLogTab:       TabAll,
+		treeExpansionState: make(map[string]bool),
+		mitreMap:           make(map[string]int),
+		attackerMap:        make(map[string]*attackerIntel),
+		targetMap:          make(map[string]int),
+		killChainHits:      make(map[string]int),
+		rateHistory:        make([]int, 20),
+		recentEntropies:    make([]float64, 0, 30),
+		events:             make([]*StoredEvent, 0, 250),
+		incidents:          make([]*StoredEvent, 0, 120),
 	}
 
 	defaultCore := []string{"T1190", "T1059.004", "T1203", "T1078", "T1053.003", "T1548.001", "T1027", "T1070.003", "T1562.001", "T1110.001", "T1003.008", "T1552.001", "T1595.002", "T1082", "T1087.001", "T1046", "T1071.001", "T1041", "T1567"}
@@ -230,6 +290,8 @@ func NewSIEMModel(server *CentralServer, storage *StorageEngine) *SIEMModel {
 	if actions, err := storage.GetRecentSOARActions(5); err == nil {
 		m.soarActions = actions
 	}
+
+	m.rebuildFleetTree()
 
 	// Async non-blocking subscriber
 	go func() {
@@ -296,19 +358,183 @@ func extractTarget(rawLine string) string {
 	return "web:root"
 }
 
-// hardTruncate cuts line cleanly without causing line-wrapping.
-func hardTruncate(s string, maxLen int) string {
-	if maxLen <= 0 {
+// safeText cuts text cleanly at limit only if it actually exceeds limit.
+func safeText(s string, limit int) string {
+	if limit <= 0 {
 		return ""
 	}
 	runes := []rune(s)
-	if len(runes) <= maxLen {
+	if len(runes) <= limit {
 		return s
 	}
-	if maxLen <= 3 {
-		return string(runes[:maxLen])
+	return string(runes[:limit])
+}
+
+// hardTruncate delegates to safeText without forcing ellipsis.
+func hardTruncate(s string, maxLen int) string {
+	return safeText(s, maxLen)
+}
+
+// cleanForTerminal cleans non-printable ASCII, null-bytes, and control codes that break terminal layout.
+func cleanForTerminal(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if (r >= 32 && r <= 126) || r == '\n' || r == '\t' {
+			b.WriteRune(r)
+		} else {
+			b.WriteString(".")
+		}
 	}
-	return string(runes[:maxLen-3]) + "..."
+	res := b.String()
+	res = strings.ReplaceAll(res, "\n", " ")
+	res = strings.ReplaceAll(res, "\r", " ")
+	return res
+}
+
+// renderModal isolates the modal layer with a solid background and centered placement.
+func renderModal(content string, width, height int) string {
+	modalStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#00F0FF")).
+		Background(lipgloss.Color("#0D1117")).
+		Padding(1, 2).
+		Width(min(80, max(20, width-10))).
+		MaxHeight(max(10, height-4))
+
+	modalBox := modalStyle.Render(content)
+
+	return lipgloss.Place(
+		width,
+		height,
+		lipgloss.Center,
+		lipgloss.Center,
+		modalBox,
+		lipgloss.WithWhitespaceChars(" "),
+		lipgloss.WithWhitespaceForeground(lipgloss.Color("#000000")),
+	)
+}
+
+func (m *SIEMModel) rebuildFleetTree() {
+	if len(m.nodes) == 0 {
+		localID := "vps-df28810e"
+		expanded, ok := m.treeExpansionState[localID]
+		if !ok {
+			expanded = true
+			m.treeExpansionState[localID] = true
+		}
+		m.fleetTree = []*FleetTreeNode{
+			{
+				ID:         localID,
+				Label:      localID + " [ONLINE]",
+				Type:       NodeHost,
+				ParentHost: "",
+				Expanded:   expanded,
+				Children: []*FleetTreeNode{
+					{ID: localID + ":nginx", Label: "Nginx Web Server", Type: NodeSensor, ParentHost: localID, SensorKey: "nginx"},
+					{ID: localID + ":auth", Label: "OpenSSH & Auth", Type: NodeSensor, ParentHost: localID, SensorKey: "auth"},
+					{ID: localID + ":suricata", Label: "Suricata IDS/IPS", Type: NodeSensor, ParentHost: localID, SensorKey: "suricata"},
+					{ID: localID + ":audit", Label: "Linux Kernel Audit", Type: NodeSensor, ParentHost: localID, SensorKey: "audit"},
+					{ID: localID + ":syslog", Label: "Systemd Syslog", Type: NodeSensor, ParentHost: localID, SensorKey: "syslog"},
+				},
+			},
+		}
+		return
+	}
+
+	var tree []*FleetTreeNode
+	for _, n := range m.nodes {
+		expanded, ok := m.treeExpansionState[n.NodeID]
+		if !ok {
+			expanded = true
+			m.treeExpansionState[n.NodeID] = true
+		}
+
+		hostNode := &FleetTreeNode{
+			ID:         n.NodeID,
+			Label:      n.NodeID + " [ONLINE]",
+			Type:       NodeHost,
+			ParentHost: "",
+			Expanded:   expanded,
+			Children: []*FleetTreeNode{
+				{ID: n.NodeID + ":nginx", Label: "Nginx Web Server", Type: NodeSensor, ParentHost: n.NodeID, SensorKey: "nginx"},
+				{ID: n.NodeID + ":auth", Label: "OpenSSH & Auth", Type: NodeSensor, ParentHost: n.NodeID, SensorKey: "auth"},
+				{ID: n.NodeID + ":suricata", Label: "Suricata IDS/IPS", Type: NodeSensor, ParentHost: n.NodeID, SensorKey: "suricata"},
+				{ID: n.NodeID + ":audit", Label: "Linux Kernel Audit", Type: NodeSensor, ParentHost: n.NodeID, SensorKey: "audit"},
+				{ID: n.NodeID + ":syslog", Label: "Systemd Syslog", Type: NodeSensor, ParentHost: n.NodeID, SensorKey: "syslog"},
+			},
+		}
+		tree = append(tree, hostNode)
+	}
+	m.fleetTree = tree
+}
+
+func (m *SIEMModel) getFlattenedTree() []*FleetTreeNode {
+	var flat []*FleetTreeNode
+	for _, node := range m.fleetTree {
+		flat = append(flat, node)
+		if node.Expanded {
+			for _, child := range node.Children {
+				flat = append(flat, child)
+			}
+		}
+	}
+	return flat
+}
+
+func (m *SIEMModel) renderTabBar() string {
+	tabs := []string{"[1] INCIDENTS", "[2] ALL", "[3] NGINX", "[4] AUTH", "[5] SURICATA", "[6] AUDIT"}
+	var items []string
+	for i, t := range tabs {
+		if LogTab(i) == m.activeLogTab {
+			items = append(items, lipgloss.NewStyle().
+				Bold(true).
+				Foreground(lipgloss.Color("#0D1117")).
+				Background(lipgloss.Color("#00FFC2")).
+				Padding(0, 1).
+				Render(t))
+		} else {
+			items = append(items, lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#64748B")).
+				Padding(0, 1).
+				Render(t))
+		}
+	}
+	return strings.Join(items, " ")
+}
+
+func renderTree(nodes []*FleetTreeNode, selectedIdx int, currentIdx *int) string {
+	var b strings.Builder
+	for _, node := range nodes {
+		cursor := "  "
+		if *currentIdx == selectedIdx {
+			cursor = "👉"
+		}
+
+		if node.Type == NodeHost {
+			icon := "▼"
+			if !node.Expanded {
+				icon = "▶"
+			}
+			b.WriteString(fmt.Sprintf("%s %s %s\n", cursor, icon, node.Label))
+			*currentIdx++
+			if node.Expanded {
+				numChildren := len(node.Children)
+				for ci, child := range node.Children {
+					childCursor := "    "
+					if *currentIdx == selectedIdx {
+						childCursor = "  👉"
+					}
+					branch := "├──"
+					if ci == numChildren-1 {
+						branch = "└──"
+					}
+					b.WriteString(fmt.Sprintf("%s %s %s\n", childCursor, branch, child.Label))
+					*currentIdx++
+				}
+			}
+		}
+	}
+	return b.String()
 }
 
 func (m *SIEMModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -378,22 +604,50 @@ func (m *SIEMModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m, tea.Quit
-		case "tab":
-			m.activeTab = (m.activeTab + 1) % 3
-		case "f1":
-			m.activeTab = 0
-			m.statusPrompt = "🌐 Focus: FLEET MATRIX"
-		case "f2":
-			m.activeTab = 1
-			m.statusPrompt = "📊 Focus: LIVE STREAM"
-		case "f3":
-			m.activeTab = 2
-			m.statusPrompt = "🚨 Focus: CRITICAL INCIDENTS"
-		case "a", "A":
-			m.selectedNodeFilter = ""
+		case "1":
+			m.activeLogTab = TabIncidents
 			m.selectedLogIndex = 0
 			m.logScrollOffset = 0
-			m.statusPrompt = "🌐 Fleet Focus: ALL NODES"
+			m.statusPrompt = "🔥 Tab: [1] INCIDENTS"
+		case "2":
+			m.activeLogTab = TabAll
+			m.selectedLogIndex = 0
+			m.logScrollOffset = 0
+			m.statusPrompt = "🌐 Tab: [2] ALL LIVE STREAM"
+		case "3":
+			m.activeLogTab = TabNginx
+			m.selectedLogIndex = 0
+			m.logScrollOffset = 0
+			m.statusPrompt = "⚡ Tab: [3] NGINX ACCESS"
+		case "4":
+			m.activeLogTab = TabAuth
+			m.selectedLogIndex = 0
+			m.logScrollOffset = 0
+			m.statusPrompt = "🔑 Tab: [4] SSH & AUTH"
+		case "5":
+			m.activeLogTab = TabSuricata
+			m.selectedLogIndex = 0
+			m.logScrollOffset = 0
+			m.statusPrompt = "🛡️ Tab: [5] SURICATA IDS"
+		case "6":
+			m.activeLogTab = TabAuditSyslog
+			m.selectedLogIndex = 0
+			m.logScrollOffset = 0
+			m.statusPrompt = "🔬 Tab: [6] AUDIT & KERNEL"
+		case "tab", "shift+tab":
+			if m.activeFocus == FocusTree {
+				m.activeFocus = FocusLogs
+				m.statusPrompt = "🎯 Focus: [MIDDLE LOG STREAM] (j/k: scroll, Enter/i: inspect, G: latest)"
+			} else {
+				m.activeFocus = FocusTree
+				m.statusPrompt = "🎯 Focus: [LEFT FLEET TREE] (↑/↓: select, Enter/Space: expand/lock)"
+			}
+		case "a", "A":
+			m.selectedNodeFilter = ""
+			m.selectedSensorFilter = ""
+			m.selectedLogIndex = 0
+			m.logScrollOffset = 0
+			m.statusPrompt = "🌐 Fleet Focus: ALL NODES & SENSORS"
 		case "/", "f":
 			m.mode = modalSearch
 			m.inputSearch = m.searchQuery
@@ -404,24 +658,18 @@ func (m *SIEMModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.filteredEvents = nil
 				m.selectedLogIndex = 0
 				m.logScrollOffset = 0
-				m.statusPrompt = "🔍 Filter cleared"
-			} else if m.selectedNodeFilter != "" {
+				m.statusPrompt = "🔍 Search filter cleared"
+			} else if m.selectedSensorFilter != "" || m.selectedNodeFilter != "" {
+				m.selectedSensorFilter = ""
 				m.selectedNodeFilter = ""
 				m.selectedLogIndex = 0
 				m.logScrollOffset = 0
-				m.statusPrompt = "🌐 Fleet Focus: ALL NODES"
+				m.statusPrompt = "🌐 Sensor filter lock cleared (Showing all streams)"
 			}
-		case "up", "k":
-			if m.activeTab == 0 {
-				if m.selectedNodeIndex > 0 {
-					m.selectedNodeIndex--
-				}
-			} else if m.activeTab == 2 {
-				if m.selectedIncIndex > 0 {
-					m.selectedIncIndex--
-					if m.selectedIncIndex < m.incScrollOffset {
-						m.incScrollOffset = m.selectedIncIndex
-					}
+		case "up", "w":
+			if m.activeFocus == FocusTree {
+				if m.selectedTreeIndex > 0 {
+					m.selectedTreeIndex--
 				}
 			} else {
 				if m.selectedLogIndex > 0 {
@@ -431,15 +679,36 @@ func (m *SIEMModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 			}
-		case "down", "j":
-			if m.activeTab == 0 {
-				if m.selectedNodeIndex < len(m.nodes)-1 {
-					m.selectedNodeIndex++
+		case "down", "s":
+			if m.activeFocus == FocusTree {
+				flat := m.getFlattenedTree()
+				if m.selectedTreeIndex < len(flat)-1 {
+					m.selectedTreeIndex++
 				}
-			} else if m.activeTab == 2 {
-				currentIncs := m.getCurrentIncidentsList()
-				if m.selectedIncIndex < len(currentIncs)-1 {
-					m.selectedIncIndex++
+			} else {
+				currentList := m.getCurrentEventsList()
+				if m.selectedLogIndex < len(currentList)-1 {
+					m.selectedLogIndex++
+				}
+			}
+		case "k":
+			if m.activeFocus == FocusTree {
+				if m.selectedTreeIndex > 0 {
+					m.selectedTreeIndex--
+				}
+			} else {
+				if m.selectedLogIndex > 0 {
+					m.selectedLogIndex--
+					if m.selectedLogIndex < m.logScrollOffset {
+						m.logScrollOffset = m.selectedLogIndex
+					}
+				}
+			}
+		case "j":
+			if m.activeFocus == FocusTree {
+				flat := m.getFlattenedTree()
+				if m.selectedTreeIndex < len(flat)-1 {
+					m.selectedTreeIndex++
 				}
 			} else {
 				currentList := m.getCurrentEventsList()
@@ -448,40 +717,50 @@ func (m *SIEMModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		case "pgup", "ctrl+u":
-			if m.activeTab == 2 {
-				m.selectedIncIndex = max(0, m.selectedIncIndex-5)
-				m.incScrollOffset = max(0, m.incScrollOffset-5)
-			} else if m.activeTab == 1 {
-				m.selectedLogIndex = max(0, m.selectedLogIndex-5)
-				m.logScrollOffset = max(0, m.logScrollOffset-5)
-			}
+			m.selectedLogIndex = max(0, m.selectedLogIndex-10)
+			m.logScrollOffset = max(0, m.logScrollOffset-10)
 		case "pgdown", "ctrl+d":
-			if m.activeTab == 2 {
-				currentIncs := m.getCurrentIncidentsList()
-				m.selectedIncIndex = min(len(currentIncs)-1, m.selectedIncIndex+5)
-			} else if m.activeTab == 1 {
-				currentList := m.getCurrentEventsList()
-				m.selectedLogIndex = min(len(currentList)-1, m.selectedLogIndex+5)
+			currentList := m.getCurrentEventsList()
+			if len(currentList) > 0 {
+				m.selectedLogIndex = min(len(currentList)-1, m.selectedLogIndex+10)
+			}
+		case "G", "end":
+			m.selectedLogIndex = 0
+			m.logScrollOffset = 0
+			m.statusPrompt = "⚡ Auto-scroll: Locked to newest live logs"
+		case "g", "home":
+			currentList := m.getCurrentEventsList()
+			if len(currentList) > 0 {
+				m.selectedLogIndex = len(currentList) - 1
+				m.statusPrompt = "📜 Scrolled to oldest retained log"
 			}
 		case "enter":
-			if m.activeTab == 0 {
-				if len(m.nodes) > 0 && m.selectedNodeIndex < len(m.nodes) {
-					targetNode := m.nodes[m.selectedNodeIndex].NodeID
-					if m.selectedNodeFilter == targetNode {
-						m.selectedNodeFilter = ""
-						m.statusPrompt = "🌐 Fleet Focus: ALL NODES"
-					} else {
-						m.selectedNodeFilter = targetNode
-						m.selectedLogIndex = 0
-						m.logScrollOffset = 0
-						m.statusPrompt = fmt.Sprintf("🎯 Focused Node: %s (Press 'A' for All)", targetNode)
+			if m.activeFocus == FocusTree {
+				flat := m.getFlattenedTree()
+				if len(flat) > 0 && m.selectedTreeIndex >= 0 && m.selectedTreeIndex < len(flat) {
+					node := flat[m.selectedTreeIndex]
+					if node.Type == NodeHost {
+						node.Expanded = !node.Expanded
+						m.treeExpansionState[node.ID] = node.Expanded
+						m.rebuildFleetTree()
+						stateStr := "Expanded"
+						if !node.Expanded {
+							stateStr = "Collapsed"
+						}
+						m.statusPrompt = fmt.Sprintf("🖥️ Host %s: %s", node.ID, stateStr)
+					} else if node.Type == NodeSensor {
+						if m.selectedNodeFilter == node.ParentHost && m.selectedSensorFilter == node.SensorKey {
+							m.selectedNodeFilter = ""
+							m.selectedSensorFilter = ""
+							m.statusPrompt = "🌐 Sensor Lock Cleared (All Streams)"
+						} else {
+							m.selectedNodeFilter = node.ParentHost
+							m.selectedSensorFilter = node.SensorKey
+							m.selectedLogIndex = 0
+							m.logScrollOffset = 0
+							m.statusPrompt = fmt.Sprintf("🔒 Filter Locked: Host=%s Sensor=%s (Press ESC to Reset)", node.ParentHost, node.SensorKey)
+						}
 					}
-				}
-			} else if m.activeTab == 2 {
-				currentIncs := m.getCurrentIncidentsList()
-				if len(currentIncs) > 0 && m.selectedIncIndex < len(currentIncs) {
-					m.inspectEvent = currentIncs[m.selectedIncIndex]
-					m.mode = modalLogDetail
 				}
 			} else {
 				currentList := m.getCurrentEventsList()
@@ -491,6 +770,41 @@ func (m *SIEMModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		case " ":
+			if m.activeFocus == FocusTree {
+				flat := m.getFlattenedTree()
+				if len(flat) > 0 && m.selectedTreeIndex >= 0 && m.selectedTreeIndex < len(flat) {
+					node := flat[m.selectedTreeIndex]
+					if node.Type == NodeHost {
+						node.Expanded = !node.Expanded
+						m.treeExpansionState[node.ID] = node.Expanded
+						m.rebuildFleetTree()
+					} else if node.Type == NodeSensor {
+						if m.selectedNodeFilter == node.ParentHost && m.selectedSensorFilter == node.SensorKey {
+							m.selectedNodeFilter = ""
+							m.selectedSensorFilter = ""
+						} else {
+							m.selectedNodeFilter = node.ParentHost
+							m.selectedSensorFilter = node.SensorKey
+							m.selectedLogIndex = 0
+							m.logScrollOffset = 0
+						}
+					}
+				}
+			} else {
+				m.isPaused = !m.isPaused
+				if m.isPaused {
+					m.statusPrompt = "⏸️ Stream Paused"
+				} else {
+					m.statusPrompt = "▶️ Stream Resumed"
+				}
+			}
+		case "i", "o":
+			currentList := m.getCurrentEventsList()
+			if len(currentList) > 0 && m.selectedLogIndex < len(currentList) {
+				m.inspectEvent = currentList[m.selectedLogIndex]
+				m.mode = modalLogDetail
+			}
+		case "p":
 			m.isPaused = !m.isPaused
 			if m.isPaused {
 				m.statusPrompt = "⏸️ Stream Paused"
@@ -529,6 +843,8 @@ func (m *SIEMModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		m.nodes = m.server.GetNodesSnapshot()
+		m.rebuildFleetTree()
+
 		if bans, err := m.storage.GetActiveBans(); err == nil {
 			m.activeBans = bans
 		}
@@ -633,14 +949,57 @@ func (m *SIEMModel) getCurrentEventsList() []*StoredEvent {
 	if m.isFilterActive {
 		list = m.filteredEvents
 	}
-	if m.selectedNodeFilter == "" {
-		return list
-	}
+
 	var filtered []*StoredEvent
 	for _, ev := range list {
-		if ev.NodeID == m.selectedNodeFilter {
-			filtered = append(filtered, ev)
+		// 1. Tab Filter
+		switch m.activeLogTab {
+		case TabIncidents:
+			if ev.ThreatScore < 40 && ev.StatusCode < 400 && ev.RuleID == "" {
+				continue
+			}
+		case TabSuricata:
+			if ev.Source != "suricata" && !strings.Contains(strings.ToLower(ev.RawLine), "suricata") {
+				continue
+			}
+		case TabNginx:
+			if ev.Source != "nginx" {
+				continue
+			}
+		case TabAuth:
+			if ev.Source != "auth" && ev.Source != "ssh" {
+				continue
+			}
+		case TabAuditSyslog:
+			if ev.Source != "audit" && ev.Source != "syslog" {
+				continue
+			}
+		case TabAll:
+			// No source filtering
 		}
+
+		// 2. Tree Host Filter Lock
+		if m.selectedNodeFilter != "" && ev.NodeID != m.selectedNodeFilter {
+			continue
+		}
+
+		// 3. Tree Sensor Filter Lock
+		if m.selectedSensorFilter != "" {
+			src := ev.Source
+			if m.selectedSensorFilter == "auth" {
+				if src != "auth" && src != "ssh" {
+					continue
+				}
+			} else if m.selectedSensorFilter == "audit" {
+				if src != "audit" {
+					continue
+				}
+			} else if src != m.selectedSensorFilter {
+				continue
+			}
+		}
+
+		filtered = append(filtered, ev)
 	}
 	return filtered
 }
@@ -716,104 +1075,148 @@ func fitLines(content string, maxLines int) string {
 	return strings.Join(lines, "\n")
 }
 
+func (m *SIEMModel) getBorderColor(panel FocusPanel) string {
+	if m.activeFocus == panel {
+		return "#00FFC2" // Aktif panel vurgusu (Cyan/Mint)
+	}
+	return "#1E293B" // Pasif panel sınırları (Koyu Gri/Mavi)
+}
+
 func (m *SIEMModel) View() string {
-	if m.width == 0 {
-		return "Initializing CoPSeC Enterprise Cyber-Defense Cockpit..."
+	if m.width < 100 || m.height < 20 {
+		return lipgloss.Place(
+			m.width,
+			m.height,
+			lipgloss.Center,
+			lipgloss.Center,
+			"Terminal boyutu çok küçük. Lütfen terminali genişletin (Min: 100x20).",
+		)
 	}
-
-	// 1. Column Width Calculations (27% Left, 43% Center, 30% Right)
-	leftWidth := int(float64(m.width) * 0.27)
-	if leftWidth < 34 {
-		leftWidth = 34
-	}
-
-	rightWidth := int(float64(m.width) * 0.30)
-	if rightWidth < 38 {
-		rightWidth = 38
-	}
-
-	centerWidth := m.width - leftWidth - rightWidth - 6
-	if centerWidth < 30 {
-		centerWidth = 30
-	}
-
-	// 2. Strict Row Height Calculations (Budget: 1 line header + mainGrid + 1 line bottom = m.height)
-	mainHeight := m.height - 2
-	if mainHeight < 14 {
-		mainHeight = 14
-	}
-
-	topHeight := mainHeight / 2
-	bottomHeight := mainHeight - topHeight
-
-	// Inner body height available per box (excluding top/bottom border lines)
-	innerTopHeight := topHeight - 2
-	innerBottomHeight := bottomHeight - 2
-	if innerTopHeight < 2 {
-		innerTopHeight = 2
-	}
-	if innerBottomHeight < 2 {
-		innerBottomHeight = 2
-	}
-
-	// 3. Left Column: Fleet Matrix + SOAR Jail
-	leftTopStyle := styleBasePanel
-	if m.activeTab == 0 {
-		leftTopStyle = styleActivePanel
-	}
-	leftTopBody := fitLines(m.renderFleetPanel(leftWidth-4, innerTopHeight), innerTopHeight)
-	leftTopPanel := leftTopStyle.Width(leftWidth).Height(topHeight).MaxHeight(topHeight).MaxWidth(leftWidth).Render(leftTopBody)
-
-	leftBottomBody := fitLines(m.renderJailPanel(leftWidth-4, innerBottomHeight), innerBottomHeight)
-	leftBottomPanel := styleBasePanel.Width(leftWidth).Height(bottomHeight).MaxHeight(bottomHeight).MaxWidth(leftWidth).Render(leftBottomBody)
-	leftColumn := lipgloss.JoinVertical(lipgloss.Left, leftTopPanel, leftBottomPanel)
-
-	// 4. Center Column: Live Stream + Critical Incidents
-	topStyle := styleBasePanel
-	if m.activeTab == 1 {
-		topStyle = styleActivePanel
-	}
-	centerTopBody := fitLines(m.renderThreatStream(centerWidth-4, innerTopHeight), innerTopHeight)
-	centerTopPanel := topStyle.Width(centerWidth).Height(topHeight).MaxHeight(topHeight).MaxWidth(centerWidth).Render(centerTopBody)
-
-	bottomStyle := styleBasePanel
-	if m.activeTab == 2 {
-		bottomStyle = styleActivePanel
-	}
-	centerBottomBody := fitLines(m.renderIncidentStream(centerWidth-4, innerBottomHeight), innerBottomHeight)
-	centerBottomPanel := bottomStyle.Width(centerWidth).Height(bottomHeight).MaxHeight(bottomHeight).MaxWidth(centerWidth).Render(centerBottomBody)
-	centerColumn := lipgloss.JoinVertical(lipgloss.Left, centerTopPanel, centerBottomPanel)
-
-	// 5. Right Column: Enterprise MITRE + Geo Threat Radar
-	rightTopStyle := styleBasePanel
-	if m.activeTab == 3 {
-		rightTopStyle = styleActivePanel
-	}
-	rightTopBody := fitLines(m.renderMITREPanel(rightWidth-4, innerTopHeight), innerTopHeight)
-	rightTopPanel := rightTopStyle.Width(rightWidth).Height(topHeight).MaxHeight(topHeight).MaxWidth(rightWidth).Render(rightTopBody)
-
-	rightBottomBody := fitLines(m.renderThreatIntelPanel(rightWidth-4, innerBottomHeight), innerBottomHeight)
-	rightBottomPanel := styleBasePanel.Width(rightWidth).Height(bottomHeight).MaxHeight(bottomHeight).MaxWidth(rightWidth).Render(rightBottomBody)
-	rightColumn := lipgloss.JoinVertical(lipgloss.Left, rightTopPanel, rightBottomPanel)
-
-	// 6. Horizontal Main Grid Join
-	mainGrid := lipgloss.JoinHorizontal(lipgloss.Top, leftColumn, centerColumn, rightColumn)
-
-	// 7. Single Bottom Bar Render
-	bottom := m.renderBottomPanel(m.width)
-
-	// 8. Clean Join
-	baseView := lipgloss.JoinVertical(lipgloss.Left, mainGrid, bottom)
 
 	if m.mode == modalLogDetail {
-		return m.renderInspectionModal(baseView)
+		return m.renderInspectionModal()
 	} else if m.mode == modalSearch {
-		return m.renderSearchModalOverlay(baseView)
+		return m.renderSearchModalOverlay()
 	} else if m.mode != modalNone {
-		return m.renderModalOverlay(baseView)
+		return m.renderModalOverlay()
 	}
 
-	return baseView
+	availH := m.height - 2 // Alt footer durum çubuğu payı
+
+	// --- 1. SİMETRİK GRID GENİŞLİK DAĞILIMI ---
+	leftW := 30  // "📁 FLEET TREE" ve sensörler için ideal genişlik
+	rightW := 34 // MITRE ve SOAR için taşmayan genişlik
+	centerW := m.width - leftW - rightW - 2
+
+	if centerW < 40 {
+		centerW = 40
+	}
+
+	// --- 2. SOL PANEL (FLEET TREE) ---
+	treeHeaderStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#00FFC2"))
+	leftInner := fmt.Sprintf("%s\n%s\n%s",
+		treeHeaderStyle.Render("📁 FLEET TREE"),
+		lipgloss.NewStyle().Foreground(lipgloss.Color("#334155")).Render(strings.Repeat("─", leftW-4)),
+		m.renderTreeLines(leftW-4, availH-5),
+	)
+
+	leftPanel := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color(m.getBorderColor(FocusTree))).
+		Width(leftW - 2).
+		Height(availH - 2).
+		Render(leftInner)
+
+	// --- 3. ORTA PANEL (UNIFIED TAB STREAM) ---
+	centerPanel := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color(m.getBorderColor(FocusLogs))).
+		Width(centerW - 2).
+		Height(availH - 2).
+		Render(fitLines(m.renderCenterPanelContent(centerW-4, availH-4), availH-4))
+
+	// --- 4. SAĞ PANEL (MITRE + SOAR DİKEY BÖLÜNMÜŞ) ---
+	totalRightInnerH := availH - 2
+	mitreH := totalRightInnerH / 2
+	soarH := totalRightInnerH - mitreH
+
+	mitreInner := fmt.Sprintf("%s\n%s",
+		lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#00FFC2")).Render("🛡️ MITRE ATT&CK"),
+		m.renderMitreList(rightW-4, mitreH-3),
+	)
+
+	soarInner := fmt.Sprintf("%s\n%s",
+		lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FF3366")).Render("🛑 SOAR MITIGATION"),
+		m.renderSoarList(rightW-4, soarH-3),
+	)
+
+	mitreBox := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#334155")).
+		Width(rightW - 2).
+		Height(mitreH).
+		Render(mitreInner)
+
+	soarBox := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#334155")).
+		Width(rightW - 2).
+		Height(soarH).
+		Render(soarInner)
+
+	rightPanel := lipgloss.JoinVertical(lipgloss.Left, mitreBox, soarBox)
+
+	// --- 5. ANA EKRAN BİRLEŞTİRME ---
+	mainView := lipgloss.JoinHorizontal(lipgloss.Top, leftPanel, centerPanel, rightPanel)
+	footer := m.renderFooterBar()
+
+	return lipgloss.JoinVertical(lipgloss.Left, mainView, footer)
+}
+
+func (m *SIEMModel) renderTreeLines(width, maxLines int) string {
+	m.rebuildFleetTree()
+
+	currentIdx := 0
+	treeStr := renderTree(m.fleetTree, m.selectedTreeIndex, &currentIdx)
+	treeLines := strings.Split(strings.TrimRight(treeStr, "\n"), "\n")
+
+	var b strings.Builder
+	linesWritten := 0
+	for _, line := range treeLines {
+		if linesWritten >= maxLines-1 {
+			break
+		}
+		b.WriteString(safeText(line, width) + "\n")
+		linesWritten++
+	}
+
+	if linesWritten < maxLines {
+		hint := "[↑/↓] Move [Enter] Lock"
+		b.WriteString(safeText(styleMuted.Render(hint), width))
+	}
+
+	return b.String()
+}
+
+func (m *SIEMModel) renderCenterPanelContent(w, h int) string {
+	header := m.renderTabBar()
+	divider := styleMuted.Render(strings.Repeat("─", max(2, w)))
+
+	availLogLines := h - 2
+	if availLogLines < 1 {
+		availLogLines = 1
+	}
+
+	var logLines []string
+	if m.activeLogTab == TabIncidents {
+		// Sekme 1 ise SADECE Incident listesini tam boy bas
+		logLines = m.renderIncidentLogs(w, availLogLines)
+	} else {
+		// Diğer sekmeler ise seçili filtrenin ham log akışını tam boy bas
+		logLines = m.renderStreamLogs(w, availLogLines)
+	}
+
+	return fmt.Sprintf("%s\n%s\n%s", header, divider, strings.Join(logLines, "\n"))
 }
 
 func renderMiniBar(pct float64, width int) string {
@@ -832,149 +1235,99 @@ func renderMiniBar(pct float64, width int) string {
 
 func (m *SIEMModel) renderFleetPanel(width, maxLines int) string {
 	var b strings.Builder
-	titleText := "🌐 FLEET MATRIX & TELEMETRY"
-	if m.selectedNodeFilter != "" {
-		titleText = fmt.Sprintf("🌐 FLEET [FOCUS: %s]", hardTruncate(m.selectedNodeFilter, 12))
+	titleText := "📁 FLEET TREE"
+	if m.selectedNodeFilter != "" || m.selectedSensorFilter != "" {
+		tag := m.selectedNodeFilter
+		if m.selectedSensorFilter != "" {
+			tag += ":" + m.selectedSensorFilter
+		}
+		titleText = fmt.Sprintf("📁 FLEET [%s]", safeText(tag, 16))
 	}
-	b.WriteString(hardTruncate(styleMatrixTitle.Render(titleText), width) + "\n")
+	b.WriteString(safeText(styleMatrixTitle.Render(titleText), width) + "\n")
 	b.WriteString(styleMuted.Render(strings.Repeat("─", max(2, width))) + "\n")
 
-	if len(m.nodes) == 0 {
-		b.WriteString(hardTruncate(styleMuted.Render("No edge nodes connected."), width) + "\n")
-		b.WriteString(hardTruncate(styleMuted.Render("(gRPC 0.0.0.0:8443)"), width) + "\n")
-		b.WriteString(hardTruncate(styleMuted.Render("Waiting for edge agent heartbeat..."), width))
-		return b.String()
-	}
+	m.rebuildFleetTree()
+
+	currentIdx := 0
+	treeStr := renderTree(m.fleetTree, m.selectedTreeIndex, &currentIdx)
+	treeLines := strings.Split(strings.TrimRight(treeStr, "\n"), "\n")
 
 	linesWritten := 2
-	for idx, n := range m.nodes {
-		if linesWritten >= maxLines {
+	for _, line := range treeLines {
+		if linesWritten >= maxLines-1 {
 			break
 		}
-		isOnline := time.Since(n.LastSeen) <= 20*time.Second
-		statusBadge := styleGreen.Render("🟢")
-		statusText := "ONLINE"
-		if !isOnline {
-			statusBadge = styleAlert.Render("🔴")
-			statusText = "OFFLINE"
-		}
-
-		cursor := " "
-		if m.activeTab == 0 && idx == m.selectedNodeIndex {
-			cursor = "►"
-		}
-
-		isFocused := m.selectedNodeFilter == n.NodeID
-		focusBadge := ""
-		if isFocused {
-			focusBadge = " " + styleAlert.Render("🎯[FOCUSED]")
-		}
-
-		nodeName := hardTruncate(n.NodeID, max(4, width-12))
-		cpuBar := renderMiniBar(n.CPUUsage, 8)
-		ramUsageMB := n.MemoryUsage
-		if ramUsageMB <= 0 {
-			ramUsageMB = 480.0
-		}
-		ramBar := renderMiniBar(ramUsageMB/2048.0*100.0, 8)
-
-		// 1. Node Header
-		groupTag := n.Group
-		if groupTag == "" {
-			groupTag = "VDS-Edge"
-		}
-		row1 := fmt.Sprintf("%s%s %s (%s)%s", cursor, statusBadge, lipgloss.NewStyle().Bold(true).Foreground(colorCyberCyan).Render(nodeName), styleWarning.Render(groupTag), focusBadge)
-		b.WriteString(hardTruncate(row1, width) + "\n")
+		b.WriteString(safeText(line, width) + "\n")
 		linesWritten++
-		if linesWritten >= maxLines {
-			break
-		}
-
-		// 2. Health & Uptime
-		uptimeDays := n.UptimeSeconds / 86400
-		uptimeHours := (n.UptimeSeconds % 86400) / 3600
-		uptimeStr := fmt.Sprintf("%dd %dh", uptimeDays, uptimeHours)
-		if uptimeDays == 0 {
-			uptimeMinutes := (n.UptimeSeconds % 3600) / 60
-			uptimeStr = fmt.Sprintf("%dh %dm", uptimeHours, uptimeMinutes)
-		}
-		row2 := fmt.Sprintf("├─ Status: %s | Ping:~12ms | Up:%s", styleGreen.Render(statusText), uptimeStr)
-		b.WriteString(hardTruncate(row2, width) + "\n")
-		linesWritten++
-		if linesWritten >= maxLines {
-			break
-		}
-
-		// 3. CPU Bar
-		row3 := fmt.Sprintf("├─ CPU:  [%s] %0.0f%% (2 Cores)", styleGreen.Render(cpuBar), n.CPUUsage)
-		b.WriteString(hardTruncate(row3, width) + "\n")
-		linesWritten++
-		if linesWritten >= maxLines {
-			break
-		}
-
-		// 4. RAM Bar
-		row4 := fmt.Sprintf("├─ RAM:  [%s] %0.1fG / 2.0G", styleCyan.Render(ramBar), ramUsageMB/1024.0)
-		b.WriteString(hardTruncate(row4, width) + "\n")
-		linesWritten++
-		if linesWritten >= maxLines {
-			break
-		}
-
-		// 5. Disk Bar
-		diskBar := renderMiniBar(22.0, 8)
-		row5 := fmt.Sprintf("└─ Disk: [%s] 22%% (NVMe SSD)", styleMuted.Render(diskBar))
-		b.WriteString(hardTruncate(row5, width) + "\n")
-		linesWritten++
-		if linesWritten >= maxLines {
-			break
-		}
-
-		// 6. Active Sensors
-		row6 := styleMatrixTitle.Render("📊 ACTIVE SENSORS:")
-		b.WriteString(hardTruncate(row6, width) + "\n")
-		linesWritten++
-		if linesWritten >= maxLines {
-			break
-		}
-
-		sensors := []string{
-			" • /var/log/nginx/access.log  -> [ONLINE ●]",
-			" • /var/log/auth.log          -> [ONLINE ●]",
-			" • /var/log/syslog            -> [ONLINE ●]",
-		}
-		for _, s := range sensors {
-			if linesWritten >= maxLines {
-				break
-			}
-			b.WriteString(hardTruncate(styleLight.Render(s), width) + "\n")
-			linesWritten++
-		}
-
-		if linesWritten < maxLines {
-			pipeLine := fmt.Sprintf("⚡ Ingest Buffer: 0/1024 | SOAR: %d Bans", n.ActiveBansCount)
-			b.WriteString(hardTruncate(styleGreen.Render(pipeLine), width) + "\n")
-			linesWritten++
-		}
 	}
 
 	if linesWritten < maxLines {
-		hint := "[↑/↓] Select  [Enter] Focus  [A] All Nodes"
-		b.WriteString(hardTruncate(styleMuted.Render(hint), width))
+		hint := "[↑/↓] Move [Enter] Lock"
+		b.WriteString(safeText(styleMuted.Render(hint), width))
 	}
 
 	return b.String()
 }
 
-func (m *SIEMModel) renderJailPanel(width, maxLines int) string {
+func (m *SIEMModel) renderMitreList(width, maxLines int) string {
 	var b strings.Builder
-	b.WriteString(hardTruncate(styleAlert.Render("🛡 SOAR JAIL & MITIGATIONS"), width) + "\n")
-	b.WriteString(styleMuted.Render(strings.Repeat("─", max(2, width))) + "\n")
+	b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#334155")).Render(strings.Repeat("─", max(2, width))) + "\n")
+
+	colHeader := fmt.Sprintf("%-10s %-12s %s", styleMuted.Render("[ID]"), styleMuted.Render("[Technique]"), styleMuted.Render("[Hits]"))
+	b.WriteString(safeText(colHeader, width) + "\n")
 
 	linesWritten := 2
+	analyzer := m.server.GetAnalyzer()
+
+	var list []techniqueStat
+	for k, v := range m.mitreMap {
+		name, tactic := "", ""
+		if analyzer != nil {
+			name, tactic = analyzer.GetTechniqueMeta(k)
+		}
+		if name == "" {
+			name = k
+		}
+		list = append(list, techniqueStat{ID: k, Name: name, Tactic: tactic, Count: v})
+	}
+	sort.Slice(list, func(i, j int) bool {
+		if list[i].Count == list[j].Count {
+			return list[i].ID < list[j].ID
+		}
+		return list[i].Count > list[j].Count
+	})
+
+	for _, st := range list {
+		if linesWritten >= maxLines {
+			break
+		}
+
+		color := colorCyberCyan
+		if st.Count >= 20 {
+			color = colorAlertPink
+		} else if st.Count >= 5 {
+			color = colorWarningGold
+		}
+
+		techStr := lipgloss.NewStyle().Bold(true).Foreground(color).Render(fmt.Sprintf("%-10s", st.ID))
+		hitsBadge := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#00FFC2")).Render(fmt.Sprintf("[%3d]", st.Count))
+		nameLen := max(6, width-20)
+		row := fmt.Sprintf("%s %-12s %s", techStr, styleLight.Render(safeText(st.Name, nameLen)), hitsBadge)
+		b.WriteString(safeText(row, width) + "\n")
+		linesWritten++
+	}
+
+	return b.String()
+}
+
+func (m *SIEMModel) renderSoarList(width, maxLines int) string {
+	var b strings.Builder
+	b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#334155")).Render(strings.Repeat("─", max(2, width))) + "\n")
+
+	linesWritten := 1
 	if len(m.activeBans) == 0 {
-		b.WriteString(hardTruncate(styleMuted.Render("No active IP isolations."), width) + "\n")
-		b.WriteString(hardTruncate(styleMuted.Render("Perimeter defense idle."), width) + "\n")
+		b.WriteString(safeText(styleMuted.Render("No active IP isolations."), width) + "\n")
+		b.WriteString(safeText(styleMuted.Render("Perimeter defense idle."), width) + "\n")
 		linesWritten += 2
 	} else {
 		for _, ban := range m.activeBans {
@@ -989,81 +1342,39 @@ func (m *SIEMModel) renderJailPanel(width, maxLines int) string {
 			}
 
 			reason := ban.Reason
-			if len(reason) > 16 {
-				reason = reason[:16]
+			if len(reason) > 8 {
+				reason = reason[:8]
 			}
 
-			line := fmt.Sprintf("🚫 %-15s %s %s", hardTruncate(ban.IP, 15), styleWarning.Render(reason), remStr)
-			b.WriteString(hardTruncate(line, width) + "\n")
+			line := fmt.Sprintf("🚫 %-15s %-7s %s", safeText(ban.IP, 15), styleWarning.Render(reason), remStr)
+			b.WriteString(safeText(line, width) + "\n")
 			linesWritten++
 		}
 	}
 
 	if linesWritten < maxLines && len(m.soarActions) > 0 {
 		act := m.soarActions[0]
-		ackLine := fmt.Sprintf("[ACK] %s %s (%dn)", act.ActionType, hardTruncate(act.TargetIP, 16), act.NodesCount)
-		b.WriteString(hardTruncate(styleGreen.Render(ackLine), width))
+		ackLine := fmt.Sprintf("[ACK] %s %s (%dn)", act.ActionType, safeText(act.TargetIP, 14), act.NodesCount)
+		b.WriteString(safeText(styleGreen.Render(ackLine), width))
 	}
 	return b.String()
 }
 
-func (m *SIEMModel) renderThreatStream(width, maxLines int) string {
-	var b strings.Builder
-	eps := m.server.GetEPS()
-	pauseTag := ""
-	if m.isPaused {
-		pauseTag = " [PAUSED]"
-	}
+func (m *SIEMModel) renderJailPanel(width, maxLines int) string {
+	return m.renderSoarList(width, maxLines)
+}
 
-	var spark strings.Builder
-	for _, val := range m.rateHistory[len(m.rateHistory)-6:] {
-		if val == 0 {
-			spark.WriteString(" ")
-		} else if val < 10 {
-			spark.WriteString("▃")
-		} else if val < 50 {
-			spark.WriteString("▅")
-		} else {
-			spark.WriteString("█")
-		}
-	}
-
-	entBadge := fmt.Sprintf("Ent:%0.2fb", m.avgEntropy)
-	if m.avgEntropy > 5.0 {
-		entBadge = styleAlert.Render(fmt.Sprintf("Ent:%0.2fb", m.avgEntropy))
-	} else {
-		entBadge = styleCyan.Render(entBadge)
-	}
-
+func (m *SIEMModel) renderStreamLogs(width, availableLines int) []string {
 	currentList := m.getCurrentEventsList()
-	title := "⚡ LIVE STREAM"
-	if m.selectedNodeFilter != "" {
-		title = fmt.Sprintf("⚡ LIVE [%s]", hardTruncate(m.selectedNodeFilter, 10))
-	}
-	if m.isFilterActive {
-		title = fmt.Sprintf("🔍 FILTER: [%s]", hardTruncate(m.searchQuery, 10))
-	}
-
-	header := fmt.Sprintf("%s %s [%s|Pk:%d|%s]%s",
-		styleHeader.Render(title),
-		styleGreen.Render(spark.String()),
-		styleGreen.Render(fmt.Sprintf("EPS:%d", eps)),
-		m.peakEPS,
-		entBadge,
-		styleAlert.Render(pauseTag))
-	b.WriteString(hardTruncate(header, width) + "\n")
-	b.WriteString(styleMuted.Render(strings.Repeat("─", max(2, width))) + "\n")
-
 	if len(currentList) == 0 {
 		if m.isFilterActive {
-			b.WriteString(hardTruncate(styleWarning.Render("No entries match query filter. [Esc] to Clear."), width))
-		} else {
-			b.WriteString(hardTruncate(styleMuted.Render("Listening for edge node stream events..."), width))
+			return []string{hardTruncate(styleWarning.Render("No entries match search query. [Esc] to Clear."), width)}
+		} else if m.selectedSensorFilter != "" {
+			return []string{hardTruncate(styleWarning.Render(fmt.Sprintf("No logs for sensor [%s]. Waiting for events...", m.selectedSensorFilter)), width)}
 		}
-		return b.String()
+		return []string{hardTruncate(styleMuted.Render("Listening for edge node stream events..."), width)}
 	}
 
-	availableLines := maxLines - 2
 	visibleItems := availableLines / 2
 	if visibleItems <= 0 {
 		visibleItems = 1
@@ -1075,6 +1386,7 @@ func (m *SIEMModel) renderThreatStream(width, maxLines int) string {
 		m.logScrollOffset = m.selectedLogIndex - visibleItems + 1
 	}
 
+	var lines []string
 	for i := 0; i < visibleItems; i++ {
 		idx := m.logScrollOffset + i
 		if idx >= len(currentList) {
@@ -1084,10 +1396,15 @@ func (m *SIEMModel) renderThreatStream(width, maxLines int) string {
 		ev := currentList[idx]
 		timeStr := time.UnixMilli(ev.TimestampMs).Format("15:04:05")
 		srcIcon := "🌐 HTTP"
-		if ev.Source == "ssh" {
+		switch ev.Source {
+		case "auth", "ssh":
 			srcIcon = "🔑 AUTH"
-		} else if ev.Source == "syslog" {
-			srcIcon = "⚡ SYS"
+		case "suricata":
+			srcIcon = "🛡️ SURICATA"
+		case "audit":
+			srcIcon = "🔬 AUDIT"
+		case "syslog":
+			srcIcon = "📜 SYS"
 		}
 
 		scoreBadge := styleGreen.Render(fmt.Sprintf("[%d]", ev.ThreatScore))
@@ -1098,7 +1415,7 @@ func (m *SIEMModel) renderThreatStream(width, maxLines int) string {
 		}
 
 		prefix := "  "
-		if m.activeTab == 1 && idx == m.selectedLogIndex {
+		if idx == m.selectedLogIndex {
 			prefix = "▶ "
 		}
 
@@ -1111,119 +1428,133 @@ func (m *SIEMModel) renderThreatStream(width, maxLines int) string {
 		}
 
 		contentWidth := max(10, width-2)
+		clientIP := ev.ClientIP
+		if clientIP == "" {
+			clientIP = "local"
+		}
+		techID := ev.MitreTechniqueID
+		if techID == "" {
+			techID = "INFO"
+		}
+
 		line1 := fmt.Sprintf("%s%s %s %s 🎯 %s 🏷 %s",
 			prefix,
 			styleMuted.Render(timeStr),
 			scoreBadge,
 			styleCyan.Render(srcIcon),
-			lipgloss.NewStyle().Bold(true).Foreground(colorTextLight).Render(ev.ClientIP),
-			styleWarning.Render(ev.MitreTechniqueID),
+			lipgloss.NewStyle().Bold(true).Foreground(colorTextLight).Render(clientIP),
+			styleWarning.Render(techID),
 		)
-		line2 := fmt.Sprintf("    %s", styleMuted.Render(hardTruncate(ev.RawLine, contentWidth-4)))
+		line2 := fmt.Sprintf("    %s", styleMuted.Render(hardTruncate(cleanForTerminal(ev.RawLine), contentWidth-4)))
 
 		formatted1 := hardTruncate(line1, contentWidth)
 		formatted2 := hardTruncate(line2, contentWidth)
 		padding1 := strings.Repeat(" ", max(0, contentWidth-lipgloss.Width(formatted1)))
 		padding2 := strings.Repeat(" ", max(0, contentWidth-lipgloss.Width(formatted2)))
 
-		if m.activeTab == 1 && idx == m.selectedLogIndex {
-			b.WriteString(styleSelected.Render(formatted1+padding1) + scrollChar + "\n")
-			b.WriteString(styleSelected.Render(formatted2+padding2) + scrollChar + "\n")
+		if idx == m.selectedLogIndex && m.activeFocus == FocusLogs {
+			lines = append(lines, styleSelected.Render(formatted1+padding1)+scrollChar)
+			lines = append(lines, styleSelected.Render(formatted2+padding2)+scrollChar)
 		} else {
-			b.WriteString(formatted1 + padding1 + scrollChar + "\n")
-			b.WriteString(formatted2 + padding2 + scrollChar + "\n")
+			lines = append(lines, formatted1+padding1+scrollChar)
+			lines = append(lines, formatted2+padding2+scrollChar)
 		}
 	}
-	return b.String()
+	return lines
 }
 
-func (m *SIEMModel) renderIncidentStream(width, maxLines int) string {
-	var b strings.Builder
-	titleText := "🔥 CRITICAL INCIDENTS (THREAT >= 50)"
-	if m.selectedNodeFilter != "" {
-		titleText = fmt.Sprintf("🔥 INCIDENTS [%s]", hardTruncate(m.selectedNodeFilter, 10))
-	}
-	b.WriteString(hardTruncate(styleAlert.Render(titleText), width) + "\n")
-	b.WriteString(styleMuted.Render(strings.Repeat("─", max(2, width))) + "\n")
-
+func (m *SIEMModel) renderIncidentLogs(width, availableLines int) []string {
 	currentIncs := m.getCurrentIncidentsList()
 	if len(currentIncs) == 0 {
-		b.WriteString(hardTruncate(styleMuted.Render("No critical incidents logged. Threat perimeter secure."), width))
-		return b.String()
+		return []string{hardTruncate(styleMuted.Render("No critical incidents logged. Threat perimeter secure."), width)}
 	}
 
-	availableLines := maxLines - 2
 	visibleItems := availableLines / 2
 	if visibleItems <= 0 {
 		visibleItems = 1
 	}
 
-	if m.selectedIncIndex < m.incScrollOffset {
-		m.incScrollOffset = m.selectedIncIndex
-	} else if m.selectedIncIndex >= m.incScrollOffset+visibleItems {
-		m.incScrollOffset = m.selectedIncIndex - visibleItems + 1
+	if m.selectedLogIndex < m.logScrollOffset {
+		m.logScrollOffset = m.selectedLogIndex
+	} else if m.selectedLogIndex >= m.logScrollOffset+visibleItems {
+		m.logScrollOffset = m.selectedLogIndex - visibleItems + 1
 	}
 
+	var lines []string
 	for i := 0; i < visibleItems; i++ {
-		idx := m.incScrollOffset + i
+		idx := m.logScrollOffset + i
 		if idx >= len(currentIncs) {
 			break
 		}
 
 		ev := currentIncs[idx]
 		timeStr := time.UnixMilli(ev.TimestampMs).Format("15:04:05")
-		scoreBadge := styleAlert.Render(fmt.Sprintf("[%d]", ev.ThreatScore))
-		if ev.ThreatScore < 70 {
-			scoreBadge = styleWarning.Render(fmt.Sprintf("[%d]", ev.ThreatScore))
-		}
 
+		scoreBadge := lipgloss.NewStyle().Bold(true).Foreground(colorAlertPink).Render(fmt.Sprintf("[%d]", ev.ThreatScore))
 		prefix := "  "
-		if m.activeTab == 2 && idx == m.selectedIncIndex {
+		if idx == m.selectedLogIndex {
 			prefix = "▶ "
 		}
 
 		scrollChar := styleScrollTrack.Render("│")
 		if len(currentIncs) > 1 && visibleItems > 1 {
-			thumbPos := int(float64(m.selectedIncIndex) / float64(len(currentIncs)-1) * float64(visibleItems-1))
+			thumbPos := int(float64(m.selectedLogIndex) / float64(len(currentIncs)-1) * float64(visibleItems-1))
 			if i == thumbPos {
 				scrollChar = styleAlert.Render("█")
 			}
 		}
 
 		contentWidth := max(10, width-2)
-		line1 := fmt.Sprintf("%s%s %s 🎯 %s 🏷 %s (%s)",
+		clientIP := ev.ClientIP
+		if clientIP == "" {
+			clientIP = "local"
+		}
+		rule := ev.RuleID
+		if rule == "" {
+			rule = "CRITICAL_ANOMALY"
+		}
+
+		line1 := fmt.Sprintf("%s%s %s 👤 %s 🏷 %s 🛡 %s",
 			prefix,
 			styleMuted.Render(timeStr),
 			scoreBadge,
-			lipgloss.NewStyle().Bold(true).Foreground(colorAlertPink).Render(ev.ClientIP),
+			lipgloss.NewStyle().Bold(true).Foreground(colorAlertPink).Render(clientIP),
 			styleWarning.Render(ev.MitreTechniqueID),
-			styleCyan.Render(hardTruncate(ev.RuleID, 12)),
+			styleCyan.Render(hardTruncate(rule, 16)),
 		)
-		line2 := fmt.Sprintf("    %s", styleLight.Render(hardTruncate(ev.RawLine, contentWidth-4)))
+		line2 := fmt.Sprintf("    %s", styleLight.Render(hardTruncate(cleanForTerminal(ev.RawLine), contentWidth-4)))
 
 		formatted1 := hardTruncate(line1, contentWidth)
 		formatted2 := hardTruncate(line2, contentWidth)
 		padding1 := strings.Repeat(" ", max(0, contentWidth-lipgloss.Width(formatted1)))
 		padding2 := strings.Repeat(" ", max(0, contentWidth-lipgloss.Width(formatted2)))
 
-		if m.activeTab == 2 && idx == m.selectedIncIndex {
-			b.WriteString(styleSelected.Render(formatted1+padding1) + scrollChar + "\n")
-			b.WriteString(styleSelected.Render(formatted2+padding2) + scrollChar + "\n")
+		if idx == m.selectedLogIndex && m.activeFocus == FocusLogs {
+			lines = append(lines, styleSelected.Render(formatted1+padding1)+scrollChar)
+			lines = append(lines, styleSelected.Render(formatted2+padding2)+scrollChar)
 		} else {
-			b.WriteString(formatted1 + padding1 + scrollChar + "\n")
-			b.WriteString(formatted2 + padding2 + scrollChar + "\n")
+			lines = append(lines, formatted1+padding1+scrollChar)
+			lines = append(lines, formatted2+padding2+scrollChar)
 		}
 	}
-	return b.String()
+	return lines
+}
+
+func renderMitreItem(techID, name string, count int) string {
+	return fmt.Sprintf("%-10s %-22s %s",
+		techID,
+		safeText(name, 22),
+		lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#00FFC2")).Render(fmt.Sprintf("[%3d]", count)),
+	)
 }
 
 func (m *SIEMModel) renderMITREPanel(width, maxLines int) string {
 	var b strings.Builder
-	b.WriteString(hardTruncate(styleMatrixTitle.Render("🛡 ENTERPRISE MITRE INTEL"), width) + "\n")
+	b.WriteString(safeText(styleMatrixTitle.Render("🛡️ MITRE ATT&CK"), width) + "\n")
 	b.WriteString(styleMuted.Render(strings.Repeat("─", max(2, width))) + "\n")
 
-	colHeader := fmt.Sprintf("%-10s %-16s %s", styleMuted.Render("[ID]"), styleMuted.Render("[Technique Name]"), styleMuted.Render("[Hits]"))
-	b.WriteString(hardTruncate(colHeader, width) + "\n")
+	colHeader := fmt.Sprintf("%-10s %-22s %s", styleMuted.Render("[ID]"), styleMuted.Render("[Technique Name]"), styleMuted.Render("[Hits]"))
+	b.WriteString(safeText(colHeader, width) + "\n")
 
 	linesWritten := 3
 	analyzer := m.server.GetAnalyzer()
@@ -1258,12 +1589,11 @@ func (m *SIEMModel) renderMITREPanel(width, maxLines int) string {
 			color = colorWarningGold
 		}
 
-		nameWidth := max(8, width-18)
-		row := fmt.Sprintf("%-10s %-16s %s",
-			lipgloss.NewStyle().Bold(true).Foreground(color).Render(st.ID),
-			styleLight.Render(hardTruncate(st.Name, nameWidth)),
-			styleAlert.Render(fmt.Sprintf("(x%d)", st.Count)))
-		b.WriteString(hardTruncate(row, width) + "\n")
+		techStr := lipgloss.NewStyle().Bold(true).Foreground(color).Render(fmt.Sprintf("%-10s", st.ID))
+		hitsBadge := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#00FFC2")).Render(fmt.Sprintf("[%3d]", st.Count))
+		nameLen := max(10, width-20)
+		row := fmt.Sprintf("%s %-22s %s", techStr, styleLight.Render(safeText(st.Name, nameLen)), hitsBadge)
+		b.WriteString(safeText(row, width) + "\n")
 		linesWritten++
 	}
 
@@ -1312,43 +1642,58 @@ func (m *SIEMModel) renderThreatIntelPanel(width, maxLines int) string {
 	return b.String()
 }
 
-func (m *SIEMModel) renderBottomPanel(width int) string {
-	eps := m.server.GetEPS()
-	threats := len(m.incidents)
+func (m *SIEMModel) renderFooterBar() string {
+	leftHelp := "[Tab] Focus | [1-6] Tabs | [↑/↓] Move | [Enter] Select | [B] Ban | [U] Unban | [Esc] Clear | [Q] Quit"
 
-	bottomText := fmt.Sprintf(" [Tab/F1-F3] Focus  [A] All  [/] Search  [B] Ban  [U] Unban  [Space] Pause  [Enter] Inspect  [Q] Quit  |  EPS: %d  Peak: %d  Threats: %d",
-		eps, m.peakEPS, threats)
+	var activeTabName string
+	switch m.activeLogTab {
+	case TabIncidents:
+		activeTabName = "INCIDENTS"
+	case TabAll:
+		activeTabName = "ALL"
+	case TabNginx:
+		activeTabName = "NGINX"
+	case TabAuth:
+		activeTabName = "AUTH"
+	case TabSuricata:
+		activeTabName = "SURICATA"
+	case TabAuditSyslog:
+		activeTabName = "AUDIT"
+	default:
+		activeTabName = "STREAM"
+	}
 
-	if m.statusPrompt != "" {
-		bottomText += fmt.Sprintf("  |  %s", m.statusPrompt)
+	rightStatus := fmt.Sprintf("EPS: %d | Threats: %d | Tab: %s", m.server.GetEPS(), len(m.incidents), activeTabName)
+
+	gap := m.width - lipgloss.Width(leftHelp) - lipgloss.Width(rightStatus) - 2
+	if gap < 1 {
+		gap = 1
 	}
 
 	return lipgloss.NewStyle().
-		Width(width).
-		Background(lipgloss.Color("#11111b")).
-		Foreground(lipgloss.Color("#a6adc8")).
-		Render(bottomText)
+		Foreground(lipgloss.Color("#64748B")).
+		Render(leftHelp + strings.Repeat(" ", gap) + rightStatus)
 }
 
-func (m *SIEMModel) renderSearchModalOverlay(baseView string) string {
+func (m *SIEMModel) renderBottomPanel(width int) string {
+	return m.renderFooterBar()
+}
+
+func (m *SIEMModel) renderSearchModalOverlay() string {
 	title := "🔍 THREAT HUNTING SEARCH MATRIX"
 	prompt := "Syntax: ip:1.2.3.4  |  mitre:T1190  |  score:>70  |  src:nginx  |  q:keyword"
 
 	content := fmt.Sprintf("%s\n\n%s\n\n> %s█\n\n%s",
 		styleHeader.Render(title),
 		styleMuted.Render(prompt),
-		styleGreen.Render(m.inputSearch),
+		styleGreen.Render(cleanForTerminal(m.inputSearch)),
 		styleMuted.Render("[Enter] Execute Query   [Esc] Cancel / Clear Filter"),
 	)
 
-	modalBox := styleSearchBox.Render(content)
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modalBox,
-		lipgloss.WithWhitespaceChars(" "),
-		lipgloss.WithWhitespaceForeground(colorDarkBg),
-	)
+	return renderModal(content, m.width, m.height)
 }
 
-func (m *SIEMModel) renderModalOverlay(baseView string) string {
+func (m *SIEMModel) renderModalOverlay() string {
 	title := "🚫 EXECUTE GLOBAL FLEET BAN"
 	prompt := "Enter Target IP address to ban across all nodes:"
 	if m.mode == modalUnbanIP {
@@ -1359,22 +1704,18 @@ func (m *SIEMModel) renderModalOverlay(baseView string) string {
 	content := fmt.Sprintf("%s\n\n%s\n\n> %s█\n\n%s",
 		styleAlert.Render(title),
 		styleLight.Render(prompt),
-		styleCyan.Render(m.inputIP),
+		styleCyan.Render(cleanForTerminal(m.inputIP)),
 		styleMuted.Render("[Enter] Confirm Action   [Esc] Cancel"),
 	)
 
-	modalBox := styleModalBox.Render(content)
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modalBox,
-		lipgloss.WithWhitespaceChars(" "),
-		lipgloss.WithWhitespaceForeground(colorDarkBg),
-	)
+	return renderModal(content, m.width, m.height)
 }
 
-func (m *SIEMModel) renderInspectionModal(baseView string) string {
+func (m *SIEMModel) renderInspectionModal() string {
 	ev := m.inspectEvent
 	if ev == nil {
 		m.mode = modalNone
-		return baseView
+		return m.View()
 	}
 
 	analyzer := m.server.GetAnalyzer()
@@ -1391,20 +1732,25 @@ func (m *SIEMModel) renderInspectionModal(baseView string) string {
 	}
 
 	sourceLabel := "HTTP (Nginx)"
-	if ev.Source == "ssh" {
+	switch ev.Source {
+	case "auth", "ssh":
 		sourceLabel = "AUTH (SSH)"
-	} else if ev.Source == "syslog" {
-		sourceLabel = "SYS (Linux)"
+	case "suricata":
+		sourceLabel = "IDS (Suricata EVE)"
+	case "audit":
+		sourceLabel = "KERNEL (Linux Auditd)"
+	case "syslog":
+		sourceLabel = "SYS (Linux Syslog)"
 	}
 
 	timeStr := time.UnixMilli(ev.TimestampMs).UTC().Format("2006-01-02 15:04:05 UTC")
-	decodedPayload := NormalizePayload(ev.RawLine)
+	decodedPayload := cleanForTerminal(NormalizePayload(ev.RawLine))
 
 	aiIntelText := "No anomalies requiring deep LLM analysis detected."
 	if ev.AIAnalysis != "" {
-		aiIntelText = ev.AIAnalysis
+		aiIntelText = cleanForTerminal(ev.AIAnalysis)
 	} else if ev.ThreatScore >= 80 {
-		aiIntelText = fmt.Sprintf("Critical exploit attempt matched signature '%s'. Recommended action: Global Fleet Ban.", ev.RuleID)
+		aiIntelText = fmt.Sprintf("Critical exploit attempt matched signature '%s'. Recommended action: Global Fleet Ban.", cleanForTerminal(ev.RuleID))
 	}
 
 	content := fmt.Sprintf("🔍 %s\n\n"+
@@ -1422,23 +1768,19 @@ func (m *SIEMModel) renderInspectionModal(baseView string) string {
 		"%s",
 		styleHeader.Render("FORENSIC INCIDENT INSPECTION"),
 		styleLight.Render(timeStr),
-		styleGreen.Render(ev.NodeID),
+		styleGreen.Render(cleanForTerminal(ev.NodeID)),
 		styleCyan.Render(sourceLabel),
 		styleAlert.Render(scoreLabel),
 		styleWarning.Render(tactic),
 		styleCyan.Render(ev.MitreTechniqueID),
 		techName,
-		styleAlert.Render(ev.ClientIP),
-		styleWarning.Render("DECODED PAYLOAD"),
+		styleAlert.Render(cleanForTerminal(ev.ClientIP)),
+		styleWarning.Render("DECODED & SANITIZED PAYLOAD"),
 		styleLight.Render(decodedPayload),
 		styleGreen.Render("AI INTEL & INTENT"),
 		styleMuted.Render(aiIntelText),
 		styleMuted.Render("[Esc / Enter] Close Inspection Modal"),
 	)
 
-	card := styleInspectionCard.Render(content)
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, card,
-		lipgloss.WithWhitespaceChars(" "),
-		lipgloss.WithWhitespaceForeground(colorDarkBg),
-	)
+	return renderModal(content, m.width, m.height)
 }

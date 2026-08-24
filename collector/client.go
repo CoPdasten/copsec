@@ -56,7 +56,7 @@ func NewControllerClient(cfg GrpcClientConfig, identity *IdentityManager, buffer
 		cfg:          cfg,
 		identity:     identity,
 		buffer:       buffer,
-		incomingChan: make(chan *copsecproto.LogEvent, 2048),
+		incomingChan: make(chan *copsecproto.LogEvent, 100),
 		startTime:    time.Now(),
 	}
 }
@@ -307,7 +307,7 @@ func (c *ControllerClient) drainIncomingToBuffer(ctx context.Context, duration t
 			return
 		case event := <-c.incomingChan:
 			_ = c.buffer.Enqueue(event)
-			edgeEngine.ProcessAutonomousInspection(event.RawLine, event.Source, event.ClientIp)
+			edgeEngine.InspectRawLine(event.RawLine, event.Source)
 			if c.fallbackEngine != nil {
 				c.fallbackEngine.InspectOffline(event.RawLine, event.Source)
 			}

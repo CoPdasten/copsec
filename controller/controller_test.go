@@ -246,3 +246,104 @@ func TestAutonomousAutoBanPolicy(t *testing.T) {
 		t.Fatalf("Expected 2 auto-bans after 3rd correlated event, got %d bans", len(bans))
 	}
 }
+
+func TestTTLBanManagerLifecycle(t *testing.T) {
+	tmpDir := t.TempDir()
+	store, _ := NewStorageEngine(filepath.Join(tmpDir, "test.db"))
+	defer store.Close()
+
+	analyzer := NewRuleEngine("")
+	server := NewCentralServer(store, analyzer)
+
+	ttlMgr := NewTTLBanManager(store, server)
+	defer ttlMgr.Stop()
+
+	testIP := "198.51.100.77"
+
+	// 1. Initial Ban (Tier 1: 5 min TTL)
+	rec, err := ttlMgr.BanIP(testIP, "Initial Probe", 300, TierRateLimit)
+	if err != nil || rec == nil {
+		t.Fatalf("BanIP failed: %v", err)
+	}
+
+	bans := ttlMgr.GetActiveBans()
+	if len(bans) != 1 || bans[0].IP != testIP || bans[0].PenaltyTier != TierRateLimit {
+		t.Fatalf("Expected 1 active ban in TierRateLimit, got %+v", bans)
+	}
+
+	// 2. Manual Unban
+	if err := ttlMgr.UnbanIP(testIP); err != nil {
+		t.Fatalf("UnbanIP failed: %v", err)
+	}
+
+	bans = ttlMgr.GetActiveBans()
+	if len(bans) != 0 {
+		t.Fatalf("Expected 0 active bans after manual unban, got %d", len(bans))
+	}
+}
+
+func TestDeceptionHoneypotAndRateLimiter(t *testing.T) {
+	tmpDir := t.TempDir()
+	store, _ := NewStorageEngine(filepath.Join(tmpDir, "test.db"))
+	defer store.Close()
+
+	analyzer := NewRuleEngine("")
+	server := NewCentralServer(store, analyzer)
+	ttlMgr := NewTTLBanManager(store, server)
+	defer ttlMgr.Stop()
+
+	// 1. Honey-URL Router Test
+	router := NewHoneyDeceptionRouter(server, ttlMgr, store)
+	if !router.IsHoneyURL("/admin") || !router.IsHoneyURL("/.env") || !router.IsHoneyURL("/wp-login.php") {
+		t.Errorf("Expected standard deception URLs to be recognized")
+	}
+	if router.IsHoneyURL("/api/v1/legitimate-endpoint") {
+		t.Errorf("Expected legitimate endpoint to NOT be flagged as honey URL")
+	}
+
+	// 2. Token-Bucket Rate Limiter Test
+	rl := NewTokenBucketRateLimiter(5.0, 5.0, server, ttlMgr) // 5 tokens max
+	testIP := "203.0.113.88"
+
+	// Consume all 5 tokens
+	for i := 0; i < 5; i++ {
+		allowed, _ := rl.Allow(testIP)
+		if !allowed {
+			t.Errorf("Request %d should have been allowed within burst", i)
+		}
+	}
+
+	// 6th request must be rejected with 429
+	allowed, retryAfter := rl.Allow(testIP)
+	if allowed || retryAfter <= 0 {
+		t.Errorf("6th request should be rate limited, got allowed=%v, retryAfter=%d", allowed, retryAfter)
+	}
+}
+
+func TestSystemConfigStorage(t *testing.T) {
+	tmpDir := t.TempDir()
+	store, _ := NewStorageEngine(filepath.Join(tmpDir, "test.db"))
+	defer store.Close()
+
+	cfg := map[string]string{
+		"grpc_addr":         "127.0.0.1:9443",
+		"telegram_token":    "test_bot_token",
+		"telegram_chat":     "-100987654",
+		"honeypot_ssh_addr": ":2223",
+		"autoban_threshold": "65",
+		"configured":        "true",
+	}
+
+	if err := store.SaveSystemConfig(cfg); err != nil {
+		t.Fatalf("SaveSystemConfig failed: %v", err)
+	}
+
+	loaded, err := store.GetAllSystemConfig()
+	if err != nil {
+		t.Fatalf("GetAllSystemConfig failed: %v", err)
+	}
+
+	if loaded["grpc_addr"] != "127.0.0.1:9443" || loaded["autoban_threshold"] != "65" {
+		t.Errorf("Config mismatch: %+v", loaded)
+	}
+}
