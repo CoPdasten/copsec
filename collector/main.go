@@ -7,9 +7,12 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/copsec/collector/pkg/p2p"
 )
 
 func main() {
@@ -25,9 +28,12 @@ func main() {
 	whitelistPath := flag.String("whitelist", "/etc/copsec/whitelist.json", "Path to whitelist configuration JSON")
 	fallbackTgToken := flag.String("fallback-telegram-token", "", "Optional Telegram Bot Token for direct offline edge emergency alerts")
 	fallbackTgChat := flag.String("fallback-telegram-chat", "", "Optional Telegram Chat ID for direct offline edge emergency alerts")
+	p2pBind := flag.String("p2p-bind", ":7946", "P2P Gossip mesh bind address (UDP)")
+	p2pJoin := flag.String("p2p-join", "", "Comma-separated bootstrap peers to join (e.g. 10.0.0.1:7946)")
+	p2pSecret := flag.String("p2p-secret", "copsec-zero-trust-mesh-secret", "Cluster secret for signed P2P gossip")
 	flag.Parse()
 
-	log.Println("[INFO] CoPSeC Phase 3 Edge Multi-Log Collector initializing (5 Core Sensors)...")
+	log.Println("[INFO] CoPSeC Phase 3 Edge Multi-Log Collector initializing (5 Core Sensors + P2P Mesh)...")
 
 	// 1. Identity & Auto-Enrollment
 	identityMgr, err := LoadOrCreateIdentity(*nodeIdentityPath)
@@ -35,7 +41,40 @@ func main() {
 		log.Fatalf("[FATAL] Identity initialization failed: %v", err)
 	}
 
-	// 2. Offline Buffering & Autonomous Fallback Engine
+	// 2. P2P Gossip Threat Intelligence Mesh
+	var peers []string
+	if *p2pJoin != "" {
+		for _, p := range strings.Split(*p2pJoin, ",") {
+			if strings.TrimSpace(p) != "" {
+				peers = append(peers, strings.TrimSpace(p))
+			}
+		}
+	}
+
+	meshCfg := p2p.MeshConfig{
+		NodeID:         identityMgr.GetNodeID(),
+		BindAddr:       *p2pBind,
+		BootstrapPeers: peers,
+		ClusterSecret:  *p2pSecret,
+	}
+
+	mesh := p2p.NewGossipMesh(meshCfg, func(tb p2p.ThreatBroadcast) {
+		// When receiving gossiped threat from peer, enforce instant local mitigation
+		_ = ExecuteInstantBan(tb.TargetIP)
+	}, func(entry p2p.CRDTBanEntry) {
+		// On CRDT ban sync, ensure local XDP and iptables drop
+		_ = ExecuteInstantBan(entry.TargetIP)
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := mesh.Start(ctx); err != nil {
+		log.Printf("[WARN] P2P Mesh failed to start on %s: %v (continuing in standalone mode)", *p2pBind, err)
+	}
+	defer mesh.Close()
+
+	// 3. Offline Buffering & Autonomous Fallback Engine
 	finalBufferPath := *bufferDbPath
 	if err := os.MkdirAll(filepath.Dir(finalBufferPath), 0750); err != nil {
 		finalBufferPath = "./buffer.db"
@@ -47,8 +86,9 @@ func main() {
 	defer offlineBuffer.Close()
 
 	fallbackEngine := NewFallbackEngine(identityMgr.GetNodeID(), *fallbackTgToken, *fallbackTgChat)
+	fallbackEngine.SetP2PMesh(mesh)
 
-	// 3. gRPC Client for Controller Streaming
+	// 4. gRPC Client for Controller Streaming
 	grpcCfg := GrpcClientConfig{
 		ServerAddress:   *controllerAddr,
 		HeartbeatPeriod: 3 * time.Second,
@@ -81,9 +121,6 @@ func main() {
 
 	collector := NewMultiLogCollector(sources, finalOffsetPath, finalWhitelistPath, controllerClient)
 	fallbackEngine.SetWhitelistFilter(collector.GetFilter(), finalWhitelistPath)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	var wg sync.WaitGroup
 	wg.Add(1)

@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/copsec/collector/pkg/p2p"
 )
 
 // FallbackRule holds lightweight signatures for offline mitigation.
@@ -36,8 +38,14 @@ type FallbackEngine struct {
 	isFallbackState bool
 	lastUpdateID    int64
 
+	p2pMesh         *p2p.GossipMesh
 	whitelistFilter *PreRoutingFilter
 	whitelistPath   string
+}
+
+// SetP2PMesh links the decentralized collective defense swarm.
+func (f *FallbackEngine) SetP2PMesh(mesh *p2p.GossipMesh) {
+	f.p2pMesh = mesh
 }
 
 // NewFallbackEngine initializes the emergency autonomous threat engine.
@@ -365,6 +373,17 @@ func (f *FallbackEngine) executeLocalBan(ipStr string) {
 	success, msg := ExecuteSOARBan(ipStr, 86400)
 	if success {
 		log.Printf("[FALLBACK_SOAR] 🚫 Autonomous local ban executed for %s (%s)", ipStr, msg)
+		if f.p2pMesh != nil {
+			f.p2pMesh.BroadcastThreat(p2p.ThreatBroadcast{
+				TargetIP:     ipStr,
+				ThreatScore:  90,
+				RuleID:       "offline_autonomous_ban",
+				MitreID:      "T1190",
+				TTLSeconds:   86400,
+				Reason:       "Autonomous Edge Node Quarantine",
+				OriginNodeID: f.nodeID,
+			})
+		}
 	} else {
 		log.Printf("[FALLBACK_SOAR] Failed to ban IP %s: %s", ipStr, msg)
 	}

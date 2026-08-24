@@ -13,6 +13,7 @@ import (
 
 	"github.com/copsec/controller/pkg/ai_report"
 	"github.com/copsec/controller/pkg/geoip"
+	"github.com/copsec/controller/pkg/p2p"
 )
 
 //go:embed web/*
@@ -31,6 +32,7 @@ type WebSOCServer struct {
 	rateLimiter     *TokenBucketRateLimiter
 	httpServer      *http.Server
 	honeypotSSH     *HoneypotSSHServer
+	p2pMesh         *p2p.GossipMesh
 }
 
 // SystemConfigDTO represents the runtime configuration schema.
@@ -69,6 +71,11 @@ func NewWebSOCServer(
 	}
 }
 
+// SetP2PMesh links the decentralized collective defense swarm.
+func (ws *WebSOCServer) SetP2PMesh(mesh *p2p.GossipMesh) {
+	ws.p2pMesh = mesh
+}
+
 // Start runs the HTTP listener in the background.
 func (ws *WebSOCServer) Start() error {
 	mux := http.NewServeMux()
@@ -91,6 +98,10 @@ func (ws *WebSOCServer) Start() error {
 	mux.HandleFunc("/api/geoip/lookup", ws.handleGeoIPLookup)
 	mux.HandleFunc("/api/report/incident", ws.handleIncidentReport)
 	mux.HandleFunc("/api/report/export", ws.handleExportReport)
+	mux.HandleFunc("/api/p2p/topology", ws.handleP2PTopology)
+	mux.HandleFunc("/api/p2p/crdt", ws.handleP2PCRDT)
+	mux.HandleFunc("/api/p2p/logs", ws.handleP2PLogs)
+	mux.HandleFunc("/api/p2p/broadcast", ws.handleP2PBroadcast)
 
 	// 3. Embedded Web SOC and Deception Traps
 	mux.HandleFunc("/", ws.handleRootOrTrap)
@@ -661,4 +672,111 @@ func (ws *WebSOCServer) buildIncidentReportFromRequest(r *http.Request) *ai_repo
 		time.Now().UnixMilli(),
 		nil,
 	)
+}
+
+func (ws *WebSOCServer) handleP2PTopology(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if ws.p2pMesh == nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":          "STANDALONE",
+			"local_node_id":   "controller",
+			"bind_addr":       ":7946",
+			"total_peers":     0,
+			"active_peers":    0,
+			"average_rtt_ms":  0,
+			"gossip_msg_rate": 0,
+			"crdt_bans_count": 0,
+			"peers":           []p2p.PeerInfo{},
+		})
+		return
+	}
+	json.NewEncoder(w).Encode(ws.p2pMesh.GetTopology())
+}
+
+func (ws *WebSOCServer) handleP2PCRDT(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if ws.p2pMesh == nil {
+		json.NewEncoder(w).Encode([]p2p.CRDTBanEntry{})
+		return
+	}
+	bans := ws.p2pMesh.GetCRDTJail().GetActiveBans()
+	json.NewEncoder(w).Encode(bans)
+}
+
+func (ws *WebSOCServer) handleP2PLogs(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if ws.p2pMesh == nil {
+		json.NewEncoder(w).Encode([]p2p.SwarmEventLog{})
+		return
+	}
+	logs := ws.p2pMesh.GetEventLogs()
+	json.NewEncoder(w).Encode(logs)
+}
+
+func (ws *WebSOCServer) handleP2PBroadcast(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		TargetIP    string `json:"target_ip"`
+		ThreatScore int    `json:"threat_score"`
+		RuleID      string `json:"rule_id"`
+		MitreID     string `json:"mitre_id"`
+		Reason      string `json:"reason"`
+		TTLSeconds  int64  `json:"ttl_seconds"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if req.TargetIP == "" {
+		http.Error(w, "missing target_ip", http.StatusBadRequest)
+		return
+	}
+	if req.TTLSeconds <= 0 {
+		req.TTLSeconds = 86400
+	}
+	if req.ThreatScore <= 0 {
+		req.ThreatScore = 80
+	}
+	if req.RuleID == "" {
+		req.RuleID = "manual_soc_operator_broadcast"
+	}
+	if req.MitreID == "" {
+		req.MitreID = "T1190"
+	}
+
+	loc := geoip.GetDefaultEngine().Lookup(req.TargetIP)
+
+	tb := p2p.ThreatBroadcast{
+		TargetIP:     req.TargetIP,
+		ThreatScore:  req.ThreatScore,
+		RuleID:       req.RuleID,
+		MitreID:      req.MitreID,
+		CountryCode:  loc.CountryCode,
+		AttackerASN:  loc.ASN,
+		TTLSeconds:   req.TTLSeconds,
+		Reason:       req.Reason,
+		OriginNodeID: "controller-soc",
+	}
+
+	if ws.p2pMesh != nil {
+		ws.p2pMesh.BroadcastThreat(tb)
+	}
+
+	// Also record locally in TTL manager
+	if ws.ttlManager != nil {
+		_, _ = ws.ttlManager.BanIP(req.TargetIP, req.Reason, req.TTLSeconds, "")
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"message": fmt.Sprintf("Threat broadcast for IP %s gossiped across P2P swarm mesh", req.TargetIP),
+		"threat":  tb,
+	})
 }

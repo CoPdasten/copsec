@@ -746,6 +746,7 @@
     <nav class="nav-tabs">
       <button class="nav-tab active" onclick="switchTab('tab-telemetry')">📡 Incident Stream</button>
       <button class="nav-tab" onclick="switchTab('tab-nodes')">🌐 Fleet Sensors</button>
+      <button class="nav-tab" onclick="switchTab('tab-p2p')">🔗 P2P Defense Mesh</button>
       <button class="nav-tab" onclick="switchTab('tab-soar')">🛡️ SOAR Quarantine</button>
       <button class="nav-tab" onclick="switchTab('tab-sigma')">📜 SigmaHQ Rules</button>
       <button class="nav-tab" onclick="switchTab('tab-honeypot')">🍯 Deception Traps</button>
@@ -870,6 +871,101 @@
             </thead>
             <tbody id="nodes-tbody">
               <tr><td colspan="10" style="text-align: center; color: var(--text-muted); padding: 2rem;">No edge nodes enrolled yet. Run deploy-copsec.sh on remote servers.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB: P2P Collective Defense Mesh & Swarm Topology -->
+    <div id="tab-p2p" class="tab-panel">
+      <!-- Mesh Summary Metrics Grid -->
+      <div class="stat-grid" style="margin-bottom: 1.25rem;">
+        <div class="stat-card">
+          <div class="stat-title">Swarm Defense Status</div>
+          <div class="stat-value" id="p2p-status" style="color: var(--emerald); font-size: 1.25rem;">AUTONOMOUS MESH</div>
+          <div class="stat-sub" style="color: var(--emerald);">🌐 Zero-Trust Gossip Active</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-title">Connected Mesh Peers</div>
+          <div class="stat-value" id="p2p-peers-count" style="color: var(--cyan);">0</div>
+          <div class="stat-sub">🤝 Dynamic overlay discovery</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-title">Average Swarm RTT</div>
+          <div class="stat-value" id="p2p-avg-rtt" style="color: var(--amber);">0 ms</div>
+          <div class="stat-sub">⚡ Fast threat propagation</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-title">Replicated CRDT Jails</div>
+          <div class="stat-value" id="p2p-crdt-count" style="color: var(--magenta);">0</div>
+          <div class="stat-sub">🛡️ Conflict-Free LWW Set</div>
+        </div>
+      </div>
+
+      <!-- Mesh Topology Visualizer & Peer Health Matrix -->
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">🌐 Swarm Cluster Topology & Peer Health Matrix</div>
+            <div style="font-size: 0.72rem; color: var(--text-muted);">Decentralized peer routing table with real-time RTT metrics, kernel drops, and failover health</div>
+          </div>
+          <button class="btn btn-primary" onclick="refreshP2PTopology()">🔄 Refresh Swarm</button>
+        </div>
+        <div style="padding: 1.25rem;">
+          <div id="p2p-topology-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem;">
+            <div style="color: var(--text-muted); font-size: 0.8rem;">Discovering peer nodes...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Cross-Swarm Threat Broadcast Bar -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">⚡ Swarm Threat Broadcaster (Preemptive Fleet Mitigation)</div>
+          <span class="badge badge-critical">Global P2P Gossip</span>
+        </div>
+        <div style="padding: 1.25rem;">
+          <form onsubmit="submitP2PBroadcast(event)" style="display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: flex-end;">
+            <div style="flex: 1; min-width: 180px;">
+              <label style="font-size: 0.72rem; color: var(--text-muted); display: block; margin-bottom: 0.3rem;">Target Attacker IP</label>
+              <input type="text" id="p2p-broadcast-ip" class="cyber-input" placeholder="e.g. 198.51.100.99" required autocomplete="off">
+            </div>
+            <div style="width: 130px;">
+              <label style="font-size: 0.72rem; color: var(--text-muted); display: block; margin-bottom: 0.3rem;">Threat Score</label>
+              <input type="number" id="p2p-broadcast-score" class="cyber-input" value="90" min="1" max="100" required>
+            </div>
+            <div style="flex: 2; min-width: 220px;">
+              <label style="font-size: 0.72rem; color: var(--text-muted); display: block; margin-bottom: 0.3rem;">Mitigation Directive / Incident Context</label>
+              <input type="text" id="p2p-broadcast-reason" class="cyber-input" placeholder="Preemptive global quarantine against brute-force probing" required autocomplete="off">
+            </div>
+            <button type="submit" class="btn btn-danger" style="height: 36px;">
+              ⚡ Gossip Preemptive Ban to Swarm
+            </button>
+          </form>
+        </div>
+      </div>
+
+      <!-- Live P2P Threat Gossip & Preemptive Drop Stream -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">📡 Swarm Threat Intelligence Gossip Log</div>
+          <span class="badge badge-medium">Real-Time Mesh Propagation</span>
+        </div>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th style="width: 85px;">Time</th>
+                <th style="width: 140px;">Origin Swarm Node</th>
+                <th style="width: 150px;">Target Attacker IP</th>
+                <th style="width: 100px;">Threat Score</th>
+                <th style="width: 130px;">Action</th>
+                <th>Swarm Propagation / Mitigation Directive</th>
+              </tr>
+            </thead>
+            <tbody id="p2p-logs-tbody">
+              <tr><td colspan="6" style="text-align: center; color: var(--text-muted); padding: 2rem;">No peer gossip events recorded yet.</td></tr>
             </tbody>
           </table>
         </div>
@@ -1208,6 +1304,7 @@
       if (panel) panel.classList.add('active');
 
       if (tabId === 'tab-nodes') refreshFleetNodes();
+      if (tabId === 'tab-p2p') refreshP2PTopology();
       if (tabId === 'tab-soar') refreshBans();
       if (tabId === 'tab-sigma') refreshSigmaRules();
       if (tabId === 'tab-honeypot') refreshHoneypotLogs();
@@ -2092,6 +2189,108 @@
       }
     });
 
+    // P2P Collective Defense Mesh & Swarm Visualizer
+    async function refreshP2PTopology() {
+      try {
+        const [topoRes, logsRes, crdtRes] = await Promise.all([
+          fetch('/api/p2p/topology').then(r => r.json()).catch(() => null),
+          fetch('/api/p2p/logs').then(r => r.json()).catch(() => []),
+          fetch('/api/p2p/crdt').then(r => r.json()).catch(() => [])
+        ]);
+
+        if (topoRes) {
+          document.getElementById('p2p-status').textContent = topoRes.active_peers > 0 ? 'SWARM ONLINE' : 'AUTONOMOUS STANDALONE';
+          document.getElementById('p2p-peers-count').textContent = topoRes.total_peers || 0;
+          document.getElementById('p2p-avg-rtt').textContent = `${(topoRes.average_rtt_ms || 0).toFixed(1)} ms`;
+          document.getElementById('p2p-crdt-count').textContent = topoRes.crdt_bans_count !== undefined ? topoRes.crdt_bans_count : (crdtRes ? crdtRes.length : 0);
+
+          const grid = document.getElementById('p2p-topology-grid');
+          if (!topoRes.peers || topoRes.peers.length === 0) {
+            grid.innerHTML = `
+              <div style="background: #090e1c; border: 1px dashed var(--border); border-radius: 6px; padding: 1.5rem; text-align: center; color: var(--text-muted); grid-column: 1 / -1;">
+                🛡️ Operating in Local Autonomous Hub mode (Listening on ${escapeHtml(topoRes.bind_addr || ':7946')}).<br>
+                <span style="font-size: 0.72rem;">Start remote collectors with <code style="color: var(--cyan);">--p2p-join=${window.location.hostname}:7946</code> to join the Zero-Trust defense swarm.</span>
+              </div>
+            `;
+          } else {
+            grid.innerHTML = topoRes.peers.map(p => {
+              const statusClass = p.status === 'ALIVE' ? 'badge-success' : (p.status === 'SUSPECT' ? 'badge-medium' : 'badge-critical');
+              return `
+                <div style="background: #090e1c; border: 1px solid var(--border); border-radius: 6px; padding: 1rem; position: relative;">
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                    <span style="font-family: var(--font-mono); font-weight: 700; color: var(--cyan); font-size: 0.85rem;">${escapeHtml(p.node_id)}</span>
+                    <span class="badge ${statusClass}">${escapeHtml(p.status)}</span>
+                  </div>
+                  <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.5rem;">
+                    📍 Address: <code style="color: #fff;">${escapeHtml(p.addr)}</code>
+                  </div>
+                  <div style="display: flex; justify-content: space-between; font-size: 0.72rem; font-family: var(--font-mono); border-top: 1px solid #141f36; padding-top: 0.5rem;">
+                    <span>⚡ RTT: <b style="color: var(--emerald);">${p.rtt_ms || 1}ms</b></span>
+                    <span>🛡️ Preemptive Drops: <b style="color: var(--magenta);">${p.preemptive_drops || 0}</b></span>
+                  </div>
+                </div>
+              `;
+            }).join('');
+          }
+        }
+
+        // Render P2P Swarm Gossip Event Logs
+        const logsTbody = document.getElementById('p2p-logs-tbody');
+        if (logsTbody) {
+          if (!logsRes || logsRes.length === 0) {
+            logsTbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: var(--text-muted); padding: 2rem;">No peer gossip events recorded yet.</td></tr>';
+          } else {
+            logsTbody.innerHTML = logsRes.slice().reverse().map(l => `
+              <tr>
+                <td style="font-family: var(--font-mono); color: var(--text-muted);">${new Date(l.timestamp_ms).toLocaleTimeString()}</td>
+                <td><span class="tag-node">${escapeHtml(l.origin_node || 'swarm-peer')}</span></td>
+                <td><span class="ip-chip" style="color: var(--magenta);">${escapeHtml(l.target_ip)}</span></td>
+                <td><span class="badge ${l.threat_score >= 80 ? 'badge-critical' : 'badge-high'}">${l.threat_score} / 100</span></td>
+                <td><span class="badge badge-success">${escapeHtml(l.action)}</span></td>
+                <td style="font-size: 0.75rem;">${escapeHtml(l.message)}</td>
+              </tr>
+            `).join('');
+          }
+        }
+      } catch (err) {
+        console.error('Failed to fetch P2P topology', err);
+      }
+    }
+
+    async function submitP2PBroadcast(e) {
+      e.preventDefault();
+      const ip = document.getElementById('p2p-broadcast-ip').value.trim();
+      const score = parseInt(document.getElementById('p2p-broadcast-score').value) || 90;
+      const reason = document.getElementById('p2p-broadcast-reason').value.trim();
+
+      if (!ip) return;
+
+      try {
+        const res = await fetch('/api/p2p/broadcast', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            target_ip: ip,
+            threat_score: score,
+            reason: reason,
+            ttl_seconds: 86400
+          })
+        });
+
+        if (res.ok) {
+          showToast(`Threat intelligence for ${ip} gossiped across entire P2P defense swarm!`, 'success', 'Swarm Broadcast Complete');
+          document.getElementById('p2p-broadcast-ip').value = '';
+          document.getElementById('p2p-broadcast-reason').value = '';
+          refreshP2PTopology();
+          refreshBans();
+        } else {
+          showToast('Failed to broadcast threat: ' + (await res.text()), 'danger');
+        }
+      } catch (err) {
+        showToast('Error broadcasting threat to swarm: ' + err, 'danger');
+      }
+    }
+
     // Auto-init
     window.addEventListener('DOMContentLoaded', () => {
       initWebSocket();
@@ -2099,6 +2298,7 @@
       refreshBans();
       refreshSigmaRules();
       refreshFleetNodes();
+      refreshP2PTopology();
       
       // Auto-poll stats every 3s as fallback
       setInterval(() => {
@@ -2112,6 +2312,10 @@
         const nodesPanel = document.getElementById('tab-nodes');
         if (nodesPanel && nodesPanel.classList.contains('active')) {
           refreshFleetNodes();
+        }
+        const p2pPanel = document.getElementById('tab-p2p');
+        if (p2pPanel && p2pPanel.classList.contains('active')) {
+          refreshP2PTopology();
         }
       }, 3000);
     });

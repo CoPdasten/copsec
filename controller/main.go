@@ -8,9 +8,12 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/copsec/controller/pkg/p2p"
 )
 
 func main() {
@@ -28,6 +31,9 @@ func main() {
 	tgChat := flag.String("telegram-chat", os.Getenv("COPSEC_TELEGRAM_CHAT_ID"), "Telegram Chat ID")
 	autoBan := flag.Bool("auto-ban", true, "Enable autonomous SOAR auto-ban")
 	autoBanThreshold := flag.Int("auto-ban-threshold", 50, "Threat score threshold for auto-ban")
+	p2pBind := flag.String("p2p-bind", ":7946", "P2P Gossip mesh listen address (e.g. :7946)")
+	p2pJoin := flag.String("p2p-join", "", "Comma-separated bootstrap peers to join (e.g. 10.0.0.1:7946)")
+	p2pSecret := flag.String("p2p-secret", "copsec-zero-trust-mesh-secret", "Cluster secret for signed P2P gossip")
 	flag.Parse()
 
 	// Resolve effective addresses and ports
@@ -46,7 +52,7 @@ func main() {
 		honeypotSSHAddr = *honeypotSSHAddrFlag
 	}
 
-	log.Println("[INFO] ⚡ CoPSeC Central Controller daemon initializing...")
+	log.Println("[INFO] ⚡ CoPSeC Central Controller daemon initializing (with P2P Collective Defense Mesh)...")
 
 	// 1. Embedded Timeseries Storage (WAL-mode SQLite)
 	finalDbPath := *dbPath
@@ -93,15 +99,59 @@ func main() {
 	centralServer.SetTTLManager(ttlManager)
 	defer ttlManager.Stop()
 
-	// Hook TTL ban changes into WebSocket broadcast hub
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// 5. P2P Gossip Threat Intelligence Mesh & CRDT Synchronization
+	var peers []string
+	if *p2pJoin != "" {
+		for _, p := range strings.Split(*p2pJoin, ",") {
+			if strings.TrimSpace(p) != "" {
+				peers = append(peers, strings.TrimSpace(p))
+			}
+		}
+	}
+
+	p2pCfg := p2p.MeshConfig{
+		NodeID:         "controller-primary",
+		BindAddr:       *p2pBind,
+		BootstrapPeers: peers,
+		ClusterSecret:  *p2pSecret,
+	}
+
+	p2pMesh := p2p.NewGossipMesh(p2pCfg, func(tb p2p.ThreatBroadcast) {
+		// When receiving gossiped threat from swarm peer, add to TTL manager
+		_, _ = ttlManager.BanIP(tb.TargetIP, fmt.Sprintf("P2P Mesh Gossip: %s (Peer: %s)", tb.Reason, tb.OriginNodeID), tb.TTLSeconds, "")
+	}, func(entry p2p.CRDTBanEntry) {
+		// On CRDT ban sync
+		_, _ = ttlManager.BanIP(entry.TargetIP, fmt.Sprintf("P2P CRDT Sync (Origin: %s)", entry.OriginNodeID), entry.TTLSeconds, "")
+	})
+
+	if err := p2pMesh.Start(ctx); err != nil {
+		log.Printf("[WARN] Controller P2P Mesh failed on %s: %v (continuing in standalone mode)", *p2pBind, err)
+	}
+	defer p2pMesh.Close()
+
+	// Hook TTL ban changes into WebSocket broadcast hub & P2P Swarm Gossip
 	ttlManager.SetOnBanChangeCallback(func(ban *DetailedBanRecord, action string) {
 		wsHub.Broadcast("ban_change", map[string]interface{}{
 			"action": action,
 			"ban":    ban,
 		})
+		if action == "enforce" && p2pMesh != nil {
+			p2pMesh.BroadcastThreat(p2p.ThreatBroadcast{
+				TargetIP:     ban.IP,
+				ThreatScore:  85,
+				RuleID:       "controller_soar_ban",
+				MitreID:      "T1190",
+				TTLSeconds:   ban.DurationSeconds,
+				Reason:       ban.Reason,
+				OriginNodeID: "controller-soc",
+			})
+		}
 	})
 
-	// 5. Embedded Deception & Rate-Limiting Traps
+	// 6. Embedded Deception & Rate-Limiting Traps
 	deceptionRouter := NewHoneyDeceptionRouter(centralServer, ttlManager, storage)
 	rateLimiter := NewTokenBucketRateLimiter(25.0, 50.0, centralServer, ttlManager)
 
@@ -114,7 +164,7 @@ func main() {
 		}
 	}
 
-	// 6. Telegram SOAR Bot
+	// 7. Telegram SOAR Bot
 	tgCfg := TelegramBotConfig{
 		BotToken: *tgToken,
 		ChatID:   *tgChat,
@@ -122,13 +172,10 @@ func main() {
 	tgBot := NewTelegramSOARBot(tgCfg, centralServer)
 	centralServer.SetTelegramBot(tgBot)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
 	var wg sync.WaitGroup
 	tgBot.Start(ctx, &wg)
 
-	// 7. Embedded Web SOC Server (Single-Binary Web Console)
+	// 8. Embedded Web SOC Server (Single-Binary Web Console)
 	webServer := NewWebSOCServer(
 		webAddr,
 		centralServer,
@@ -140,6 +187,7 @@ func main() {
 		rateLimiter,
 		honeypotSSH,
 	)
+	webServer.SetP2PMesh(p2pMesh)
 	if err := webServer.Start(); err != nil {
 		log.Printf("[WARN] Web SOC server initialization failed: %v", err)
 	}
