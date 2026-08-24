@@ -3,24 +3,30 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CoPSeC // Autonomous Micro-SIEM & SOAR Defense Console</title>
+  <title>CoPSeC // Autonomous Micro-SIEM & SOAR Cyber Defense Center</title>
   <style>
     :root {
-      --bg-dark: #070a13;
-      --bg-card: #0d121f;
-      --bg-card-hover: #131b2e;
-      --border-color: #1b2640;
+      --bg-dark: #060913;
+      --bg-card: #0c1222;
+      --bg-card-header: #090e1b;
+      --bg-card-hover: #121a30;
+      --border-color: #17233d;
       --border-glow: #00f3ff33;
       --cyan: #00f3ff;
+      --cyan-glow: rgba(0, 243, 255, 0.25);
       --magenta: #ff0055;
-      --amber: #ffb800;
+      --magenta-glow: rgba(255, 0, 85, 0.25);
+      --amber: #ffb700;
+      --amber-glow: rgba(255, 183, 0, 0.25);
       --emerald: #00ff66;
-      --blue: #3b82f6;
+      --emerald-glow: rgba(0, 255, 102, 0.25);
+      --blue: #38bdf8;
+      --purple: #c084fc;
       --gray: #64748b;
-      --text-main: #f1f5f9;
+      --text-main: #f8fafc;
       --text-muted: #94a3b8;
       --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, -apple-system, sans-serif;
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -34,10 +40,16 @@
       overflow-x: hidden;
     }
 
-    /* Header & Cyber Status Bar */
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #060913; }
+    ::-webkit-scrollbar-thumb { background: #1b2848; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--cyan); }
+
+    /* Header */
     header {
-      background: rgba(13, 18, 31, 0.95);
-      backdrop-filter: blur(12px);
+      background: rgba(10, 16, 30, 0.95);
+      backdrop-filter: blur(14px);
       border-bottom: 1px solid var(--border-color);
       padding: 0.75rem 1.5rem;
       display: flex;
@@ -50,23 +62,23 @@
     .brand {
       display: flex;
       align-items: center;
-      gap: 0.75rem;
+      gap: 0.85rem;
     }
     .brand-logo {
-      width: 32px;
-      height: 32px;
+      width: 34px;
+      height: 34px;
       background: linear-gradient(135deg, var(--cyan), var(--magenta));
-      border-radius: 6px;
+      border-radius: 8px;
       display: flex;
       align-items: center;
       justify-content: center;
       font-weight: 900;
-      font-size: 1.1rem;
+      font-size: 1.15rem;
       color: #000;
-      box-shadow: 0 0 15px rgba(0, 243, 255, 0.4);
+      box-shadow: 0 0 20px var(--cyan-glow);
     }
     .brand-text h1 {
-      font-size: 1.15rem;
+      font-size: 1.1rem;
       font-weight: 800;
       letter-spacing: 1px;
       text-transform: uppercase;
@@ -75,20 +87,21 @@
       -webkit-text-fill-color: transparent;
     }
     .brand-text p {
-      font-size: 0.7rem;
+      font-size: 0.68rem;
       color: var(--text-muted);
       font-family: var(--font-mono);
+      letter-spacing: 0.5px;
     }
 
     .nav-tabs {
       display: flex;
-      gap: 0.4rem;
+      gap: 0.35rem;
     }
     .nav-tab {
       background: transparent;
       border: 1px solid transparent;
       color: var(--text-muted);
-      padding: 0.45rem 0.8rem;
+      padding: 0.45rem 0.85rem;
       border-radius: 6px;
       cursor: pointer;
       font-size: 0.8rem;
@@ -103,10 +116,10 @@
       background: var(--bg-card);
     }
     .nav-tab.active {
-      background: #00f3ff15;
+      background: rgba(0, 243, 255, 0.1);
       border-color: var(--cyan);
       color: var(--cyan);
-      box-shadow: 0 0 10px rgba(0, 243, 255, 0.2);
+      box-shadow: 0 0 12px var(--cyan-glow);
     }
 
     .header-actions {
@@ -117,10 +130,10 @@
     .ws-indicator {
       display: flex;
       align-items: center;
-      gap: 0.4rem;
+      gap: 0.45rem;
       font-family: var(--font-mono);
-      font-size: 0.75rem;
-      padding: 0.3rem 0.6rem;
+      font-size: 0.72rem;
+      padding: 0.3rem 0.65rem;
       background: #000;
       border: 1px solid var(--border-color);
       border-radius: 20px;
@@ -137,32 +150,32 @@
       background: var(--magenta);
       box-shadow: 0 0 8px var(--magenta);
     }
-
     @keyframes pulse {
       0%, 100% { opacity: 1; }
-      50% { opacity: 0.4; }
+      50% { opacity: 0.3; }
     }
 
-    /* Layout Containers */
+    /* Main Container */
     main {
-      padding: 1.5rem;
+      padding: 1.25rem 1.5rem;
       flex: 1;
-      max-width: 1600px;
+      max-width: 1680px;
       margin: 0 auto;
       width: 100%;
     }
 
+    /* Stat Cards */
     .stat-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
       gap: 1rem;
-      margin-bottom: 1.5rem;
+      margin-bottom: 1.25rem;
     }
     .stat-card {
       background: var(--bg-card);
       border: 1px solid var(--border-color);
       border-radius: 8px;
-      padding: 1rem 1.25rem;
+      padding: 0.9rem 1.2rem;
       position: relative;
       overflow: hidden;
     }
@@ -174,22 +187,23 @@
       background: linear-gradient(90deg, transparent, var(--cyan), transparent);
     }
     .stat-title {
-      font-size: 0.75rem;
+      font-size: 0.72rem;
       text-transform: uppercase;
       letter-spacing: 0.5px;
       color: var(--text-muted);
-      margin-bottom: 0.4rem;
+      margin-bottom: 0.3rem;
+      font-weight: 600;
     }
     .stat-value {
-      font-size: 1.8rem;
+      font-size: 1.75rem;
       font-weight: 800;
       font-family: var(--font-mono);
       color: #fff;
     }
     .stat-sub {
-      font-size: 0.7rem;
+      font-size: 0.68rem;
       color: var(--emerald);
-      margin-top: 0.3rem;
+      margin-top: 0.25rem;
       display: flex;
       align-items: center;
       gap: 0.3rem;
@@ -208,24 +222,24 @@
       to { opacity: 1; transform: translateY(0); }
     }
 
-    /* Cyber Card & Table */
+    /* Cards & Layout */
     .card {
       background: var(--bg-card);
       border: 1px solid var(--border-color);
       border-radius: 8px;
       overflow: hidden;
-      margin-bottom: 1.5rem;
+      margin-bottom: 1.25rem;
     }
     .card-header {
-      padding: 0.9rem 1.25rem;
+      padding: 0.8rem 1.2rem;
       border-bottom: 1px solid var(--border-color);
       display: flex;
       justify-content: space-between;
       align-items: center;
-      background: #090e1a;
+      background: var(--bg-card-header);
     }
     .card-title {
-      font-size: 0.95rem;
+      font-size: 0.9rem;
       font-weight: 700;
       color: #fff;
       display: flex;
@@ -233,83 +247,160 @@
       gap: 0.5rem;
     }
 
+    .split-grid {
+      display: grid;
+      grid-template-columns: 2.5fr 1fr;
+      gap: 1.25rem;
+    }
+    @media (max-width: 1200px) {
+      .split-grid { grid-template-columns: 1fr; }
+    }
+
+    /* Tables & Fixed Column Architecture */
     .table-container {
       overflow-x: auto;
-      max-height: 520px;
+      max-height: 560px;
     }
     table {
       width: 100%;
       border-collapse: collapse;
-      font-size: 0.8rem;
+      font-size: 0.78rem;
       text-align: left;
+      table-layout: fixed;
     }
     th {
-      background: #090e1a;
+      background: var(--bg-card-header);
       color: var(--text-muted);
       font-weight: 600;
-      padding: 0.75rem 1rem;
+      padding: 0.65rem 0.85rem;
       border-bottom: 1px solid var(--border-color);
       font-family: var(--font-mono);
-      font-size: 0.7rem;
+      font-size: 0.68rem;
       text-transform: uppercase;
+      letter-spacing: 0.5px;
       position: sticky;
       top: 0;
       z-index: 10;
     }
     td {
-      padding: 0.75rem 1rem;
-      border-bottom: 1px solid #141c2e;
+      padding: 0.65rem 0.85rem;
+      border-bottom: 1px solid #111a2f;
       color: var(--text-main);
+      vertical-align: middle;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     tr:hover td {
       background: var(--bg-card-hover);
     }
 
-    /* Badges & Tags */
+    /* Chips, Badges & Normalized Telemetry Cells */
+    .ip-chip {
+      font-family: var(--font-mono);
+      font-weight: 700;
+      color: var(--cyan);
+      letter-spacing: -0.2px;
+    }
     .badge {
       display: inline-flex;
       align-items: center;
-      padding: 0.2rem 0.5rem;
+      padding: 0.15rem 0.45rem;
       border-radius: 4px;
       font-size: 0.65rem;
       font-weight: 700;
       font-family: var(--font-mono);
       text-transform: uppercase;
+      letter-spacing: 0.3px;
     }
-    .badge-critical { background: rgba(255, 0, 85, 0.2); color: var(--magenta); border: 1px solid var(--magenta); }
-    .badge-high { background: rgba(255, 184, 0, 0.2); color: var(--amber); border: 1px solid var(--amber); }
-    .badge-medium { background: rgba(0, 243, 255, 0.15); color: var(--cyan); border: 1px solid var(--cyan); }
+    .badge-critical { background: rgba(255, 0, 85, 0.15); color: var(--magenta); border: 1px solid var(--magenta); }
+    .badge-high { background: rgba(255, 183, 0, 0.15); color: var(--amber); border: 1px solid var(--amber); }
+    .badge-medium { background: rgba(0, 243, 255, 0.12); color: var(--cyan); border: 1px solid var(--cyan); }
     .badge-low { background: rgba(100, 116, 139, 0.2); color: var(--text-muted); border: 1px solid var(--border-color); }
-    .badge-success { background: rgba(0, 255, 102, 0.2); color: var(--emerald); border: 1px solid var(--emerald); }
+    .badge-success { background: rgba(0, 255, 102, 0.15); color: var(--emerald); border: 1px solid var(--emerald); }
 
     .tag-mitre {
-      background: #111d33;
-      color: #38bdf8;
-      border: 1px solid #0284c7;
-      padding: 0.15rem 0.4rem;
+      background: #0f1c30;
+      color: var(--blue);
+      border: 1px solid #0369a1;
+      padding: 0.12rem 0.38rem;
       border-radius: 4px;
       font-family: var(--font-mono);
-      font-size: 0.7rem;
+      font-size: 0.68rem;
+      font-weight: 700;
     }
     .tag-node {
-      background: #0f2338;
+      background: #0b1e36;
       color: #7dd3fc;
-      border: 1px solid #0369a1;
-      padding: 0.15rem 0.45rem;
+      border: 1px solid #0284c7;
+      padding: 0.12rem 0.4rem;
       border-radius: 4px;
       font-family: var(--font-mono);
-      font-size: 0.7rem;
+      font-size: 0.68rem;
       font-weight: 700;
     }
 
-    /* Buttons & Inputs */
+    /* Signal Chips */
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      padding: 0.1rem 0.35rem;
+      border-radius: 3px;
+      font-size: 0.65rem;
+      font-family: var(--font-mono);
+      font-weight: 700;
+      margin-right: 0.3rem;
+    }
+    .chip-method { background: #0284c733; color: #38bdf8; border: 1px solid #0284c7; }
+    .chip-status-2xx { background: #00ff6622; color: #00ff66; border: 1px solid #00ff66; }
+    .chip-status-4xx { background: #ffb70022; color: #ffb700; border: 1px solid #ffb700; }
+    .chip-status-5xx { background: #ff005522; color: #ff0055; border: 1px solid #ff0055; }
+    .chip-alert { background: #ff005522; color: #ff0055; border: 1px solid #ff0055; }
+    .chip-proto { background: #c084fc22; color: #c084fc; border: 1px solid #c084fc; }
+
+    /* Strict Normalized Payload Container */
+    .payload-cell {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+    }
+    .payload-summary {
+      max-width: 380px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-family: var(--font-mono);
+      font-size: 0.73rem;
+      color: #cbd5e1;
+    }
+    .btn-inspect {
+      background: #131f38;
+      border: 1px solid #1e3a6a;
+      color: var(--cyan);
+      font-size: 0.65rem;
+      font-family: var(--font-mono);
+      padding: 0.18rem 0.45rem;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.2s;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .btn-inspect:hover {
+      background: var(--cyan);
+      color: #000;
+      box-shadow: 0 0 8px var(--cyan-glow);
+    }
+
+    /* Buttons & Controls */
     .btn {
-      background: #1e293b;
+      background: #17233d;
       color: #fff;
       border: 1px solid var(--border-color);
-      padding: 0.45rem 0.9rem;
+      padding: 0.4rem 0.8rem;
       border-radius: 6px;
-      font-size: 0.8rem;
+      font-size: 0.78rem;
       font-weight: 600;
       cursor: pointer;
       display: inline-flex;
@@ -317,7 +408,7 @@
       gap: 0.4rem;
       transition: all 0.2s ease;
     }
-    .btn:hover { background: #334155; }
+    .btn:hover { background: #233458; }
     .btn-primary {
       background: var(--cyan);
       color: #000;
@@ -325,10 +416,10 @@
     }
     .btn-primary:hover {
       background: #38f8ff;
-      box-shadow: 0 0 12px rgba(0, 243, 255, 0.4);
+      box-shadow: 0 0 12px var(--cyan-glow);
     }
     .btn-danger {
-      background: rgba(255, 0, 85, 0.2);
+      background: rgba(255, 0, 85, 0.15);
       color: var(--magenta);
       border-color: var(--magenta);
     }
@@ -337,35 +428,184 @@
       color: #fff;
     }
 
-    .input-group {
-      display: flex;
-      gap: 0.5rem;
-    }
     .cyber-input {
-      background: #070b13;
+      background: #060913;
       border: 1px solid var(--border-color);
       color: #fff;
-      padding: 0.45rem 0.8rem;
+      padding: 0.45rem 0.75rem;
       border-radius: 6px;
       font-size: 0.8rem;
       font-family: var(--font-mono);
       outline: none;
+      transition: border 0.2s;
     }
     .cyber-input:focus {
       border-color: var(--cyan);
-      box-shadow: 0 0 8px rgba(0, 243, 255, 0.2);
+      box-shadow: 0 0 8px var(--cyan-glow);
     }
 
-    /* Modal / Onboarding Wizard */
+    /* Sensitive Fields (Anti-Autofill CSS Masking) */
+    .sensitive-wrapper {
+      position: relative;
+      display: flex;
+      align-items: center;
+    }
+    .sensitive-wrapper input {
+      width: 100%;
+      padding-right: 2.5rem;
+    }
+    .sensitive-masked {
+      -webkit-text-security: disc !important;
+      text-security: disc !important;
+    }
+    .btn-reveal {
+      position: absolute;
+      right: 0.5rem;
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 0.85rem;
+      padding: 0.2rem;
+    }
+    .btn-reveal:hover { color: var(--cyan); }
+
+    /* MITRE Heatmap Card */
+    .mitre-pill {
+      background: #090e1c;
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      padding: 0.6rem 0.8rem;
+      margin-bottom: 0.5rem;
+    }
+    .mitre-pill-top {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.75rem;
+      margin-bottom: 0.35rem;
+    }
+    .mitre-pill-tech {
+      font-family: var(--font-mono);
+      color: var(--cyan);
+      font-weight: 700;
+    }
+    .mitre-pill-count {
+      font-family: var(--font-mono);
+      color: var(--text-muted);
+      font-size: 0.7rem;
+    }
+    .mitre-bar-bg {
+      height: 4px;
+      background: #141f36;
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    .mitre-bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, var(--cyan), var(--magenta));
+      border-radius: 2px;
+      transition: width 0.4s ease;
+    }
+
+    /* Off-Canvas Raw Payload Drawer */
+    .drawer-overlay {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(4, 7, 14, 0.75);
+      backdrop-filter: blur(6px);
+      z-index: 150;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.25s ease;
+    }
+    .drawer-overlay.open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .drawer {
+      position: fixed;
+      top: 0; right: 0; bottom: 0;
+      width: 90%;
+      max-width: 680px;
+      background: #0a0f1d;
+      border-left: 1px solid var(--border-color);
+      box-shadow: -10px 0 40px rgba(0,0,0,0.8);
+      z-index: 160;
+      transform: translateX(100%);
+      transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+      display: flex;
+      flex-direction: column;
+    }
+    .drawer-overlay.open .drawer {
+      transform: translateX(0);
+    }
+    .drawer-header {
+      padding: 1.25rem 1.5rem;
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: var(--bg-card-header);
+    }
+    .drawer-body {
+      padding: 1.25rem 1.5rem;
+      flex: 1;
+      overflow-y: auto;
+    }
+    .drawer-meta-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.75rem;
+      margin-bottom: 1rem;
+    }
+    .meta-box {
+      background: #060913;
+      border: 1px solid var(--border-color);
+      padding: 0.6rem 0.8rem;
+      border-radius: 6px;
+    }
+    .meta-box label {
+      font-size: 0.65rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      font-family: var(--font-mono);
+      display: block;
+      margin-bottom: 0.2rem;
+    }
+    .meta-box span {
+      font-size: 0.8rem;
+      font-family: var(--font-mono);
+      font-weight: 700;
+      color: #fff;
+    }
+    .json-inspector-box {
+      background: #04070e;
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      padding: 1rem;
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      color: #cbd5e1;
+      overflow-x: auto;
+      max-height: 380px;
+      line-height: 1.5;
+    }
+    .json-key { color: var(--cyan); }
+    .json-string { color: var(--amber); }
+    .json-number { color: var(--purple); }
+    .json-bool { color: var(--emerald); }
+    .json-null { color: var(--gray); }
+
+    /* Modals */
     .modal-overlay {
       position: fixed;
       top: 0; left: 0; right: 0; bottom: 0;
-      background: rgba(4, 7, 13, 0.85);
+      background: rgba(4, 7, 14, 0.85);
       backdrop-filter: blur(8px);
       display: flex;
       align-items: center;
       justify-content: center;
-      z-index: 100;
+      z-index: 120;
       opacity: 0;
       pointer-events: none;
       transition: opacity 0.2s ease;
@@ -377,157 +617,171 @@
     .modal-box {
       background: var(--bg-card);
       border: 1px solid var(--cyan);
-      box-shadow: 0 0 30px rgba(0, 243, 255, 0.15);
+      box-shadow: 0 0 30px var(--cyan-glow);
       border-radius: 10px;
       width: 90%;
-      max-width: 650px;
-      padding: 1.75rem;
-      position: relative;
+      max-width: 620px;
+      padding: 1.5rem;
     }
     .modal-box h2 {
-      font-size: 1.25rem;
-      margin-bottom: 0.5rem;
+      font-size: 1.15rem;
+      margin-bottom: 0.4rem;
       color: #fff;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
     }
     .form-group {
       margin-bottom: 1rem;
     }
     .form-group label {
       display: block;
-      font-size: 0.75rem;
+      font-size: 0.72rem;
       color: var(--text-muted);
       margin-bottom: 0.3rem;
       text-transform: uppercase;
       font-family: var(--font-mono);
+      font-weight: 600;
     }
     .form-group input, .form-group select {
       width: 100%;
     }
 
-    /* Split Grid */
-    .split-grid {
-      display: grid;
-      grid-template-columns: 2fr 1fr;
-      gap: 1.5rem;
-    }
-    @media (max-width: 1024px) {
-      .split-grid { grid-template-columns: 1fr; }
-    }
-
-    /* MITRE Heatmap Pills */
-    .mitre-pill {
+    /* Glassmorphic Stackable Toast Notification Engine */
+    #toast-container {
+      position: fixed;
+      top: 1.25rem;
+      right: 1.25rem;
+      z-index: 9999;
       display: flex;
-      justify-content: space-between;
-      padding: 0.5rem 0.75rem;
-      background: #090e1a;
-      border: 1px solid var(--border-color);
+      flex-direction: column;
+      gap: 0.5rem;
+      pointer-events: none;
+    }
+    .toast {
+      pointer-events: auto;
+      min-width: 300px;
+      max-width: 420px;
+      background: rgba(12, 18, 34, 0.92);
+      backdrop-filter: blur(14px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
       border-radius: 6px;
-      margin-bottom: 0.4rem;
-      font-size: 0.75rem;
+      padding: 0.75rem 1rem;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+      display: flex;
+      align-items: flex-start;
+      gap: 0.65rem;
+      animation: toastSlideIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+      position: relative;
+      overflow: hidden;
     }
-    .mitre-pill-tech {
-      font-family: var(--font-mono);
-      color: var(--cyan);
-      font-weight: 700;
+    .toast-success { border-left: 4px solid var(--cyan); }
+    .toast-warning { border-left: 4px solid var(--amber); }
+    .toast-danger { border-left: 4px solid var(--magenta); }
+    .toast-info { border-left: 4px solid var(--blue); }
+
+    .toast-icon { font-size: 1.1rem; flex-shrink: 0; }
+    .toast-content { flex: 1; }
+    .toast-title { font-size: 0.8rem; font-weight: 700; color: #fff; margin-bottom: 0.15rem; }
+    .toast-msg { font-size: 0.73rem; color: var(--text-muted); line-height: 1.35; }
+    .toast-close {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 0.9rem;
+      padding: 0;
+      line-height: 1;
     }
-    .mitre-pill-count {
-      background: #1e293b;
-      padding: 0.1rem 0.4rem;
-      border-radius: 4px;
-      color: #fff;
-      font-weight: 700;
+    .toast-close:hover { color: #fff; }
+
+    @keyframes toastSlideIn {
+      from { transform: translateX(100%); opacity: 0; }
+      to { transform: translateX(0); opacity: 1; }
     }
 
-    .raw-log-preview {
-      font-family: var(--font-mono);
-      font-size: 0.72rem;
-      color: #cbd5e1;
-      word-break: break-all;
-      max-width: 480px;
+    /* Micro-spinner */
+    .micro-spinner {
+      display: inline-block;
+      width: 12px;
+      height: 12px;
+      border: 2px solid rgba(255,255,255,0.2);
+      border-radius: 50%;
+      border-top-color: #fff;
+      animation: spin 0.6s linear infinite;
+      vertical-align: middle;
+      margin-right: 0.3rem;
     }
-
-    /* Layer Indicators */
-    .layer-badge {
-      font-size: 0.65rem;
-      padding: 0.15rem 0.35rem;
-      border-radius: 3px;
-      font-family: var(--font-mono);
-      font-weight: 700;
-      margin-right: 2px;
+    @keyframes spin {
+      to { transform: rotate(360deg); }
     }
-    .layer-l3 { background: #3b82f633; color: #60a5fa; border: 1px solid #3b82f6; }
-    .layer-l4 { background: #a855f733; color: #c084fc; border: 1px solid #a855f7; }
-    .layer-l7 { background: #06b6d433; color: #22d3ee; border: 1px solid #06b6d4; }
   </style>
 </head>
 <body>
+
+  <!-- Toast Notification Container -->
+  <div id="toast-container"></div>
 
   <!-- Header -->
   <header>
     <div class="brand">
       <div class="brand-logo">⚡</div>
       <div class="brand-text">
-        <h1>CoPSeC Central SOC</h1>
+        <h1>CoPSeC Cyber SOC</h1>
         <p>AUTONOMOUS MICRO-SIEM // SOAR SENSOR MATRIX</p>
       </div>
     </div>
 
     <nav class="nav-tabs">
-      <button class="nav-tab active" onclick="switchTab('tab-telemetry')">📡 Live Telemetry</button>
-      <button class="nav-tab" onclick="switchTab('tab-nodes')">🌐 Fleet Nodes</button>
+      <button class="nav-tab active" onclick="switchTab('tab-telemetry')">📡 Incident Stream</button>
+      <button class="nav-tab" onclick="switchTab('tab-nodes')">🌐 Fleet Sensors</button>
       <button class="nav-tab" onclick="switchTab('tab-soar')">🛡️ SOAR Quarantine</button>
-      <button class="nav-tab" onclick="switchTab('tab-sigma')">📜 Sigma HQ Rules</button>
-      <button class="nav-tab" onclick="switchTab('tab-honeypot')">🍯 Honeypot Traps</button>
+      <button class="nav-tab" onclick="switchTab('tab-sigma')">📜 SigmaHQ Rules</button>
+      <button class="nav-tab" onclick="switchTab('tab-honeypot')">🍯 Deception Traps</button>
       <button class="nav-tab" onclick="switchTab('tab-config')">⚙️ Configuration</button>
     </nav>
 
     <div class="header-actions">
       <div class="ws-indicator">
         <div class="dot" id="ws-dot"></div>
-        <span id="ws-status">LIVE SYNC</span>
+        <span id="ws-status">STREAM ACTIVE</span>
       </div>
       <button class="btn btn-primary" onclick="openBanModal()">⚡ Quick Ban</button>
     </div>
   </header>
 
-  <!-- Main Container -->
+  <!-- Main Dashboard -->
   <main>
-    <!-- Live Stats Bar -->
+    <!-- Metric Telemetry Cards -->
     <div class="stat-grid">
       <div class="stat-card">
         <div class="stat-title">Real-Time Ingestion EPS</div>
         <div class="stat-value" id="stat-eps" style="color: var(--cyan);">0</div>
-        <div class="stat-sub">⚡ Sub-millisecond stream</div>
+        <div class="stat-sub">⚡ Zero-latency gRPC pipeline</div>
       </div>
       <div class="stat-card">
-        <div class="stat-title">Total Lifetime Events</div>
+        <div class="stat-title">Total Lifetime Ingested</div>
         <div class="stat-value" id="stat-total">0</div>
         <div class="stat-sub" style="color: var(--blue);">💾 WAL-mode SQLite storage</div>
       </div>
       <div class="stat-card">
-        <div class="stat-title">Active Fleet Nodes</div>
+        <div class="stat-title">Active Fleet Sensors</div>
         <div class="stat-value" id="stat-nodes" style="color: var(--emerald);">0</div>
-        <div class="stat-sub" style="color: var(--emerald);">✔ Distributed Edge VDS Nodes</div>
+        <div class="stat-sub" style="color: var(--emerald);">✔ Distributed Edge Linux Nodes</div>
       </div>
       <div class="stat-card">
-        <div class="stat-title">Quarantined Threats (SOAR)</div>
+        <div class="stat-title">Quarantined Targets (SOAR)</div>
         <div class="stat-value" id="stat-bans" style="color: var(--magenta);">0</div>
-        <div class="stat-sub" style="color: var(--amber);">⏳ Dynamic TTL Enforced</div>
+        <div class="stat-sub" style="color: var(--amber);">⏳ Dynamic L3/L4/L7 TTL Enforced</div>
       </div>
     </div>
 
-    <!-- TAB 1: Live Telemetry & MITRE Radar -->
+    <!-- TAB 1: Live Incident Stream & MITRE Radar -->
     <div id="tab-telemetry" class="tab-panel active">
       <div class="split-grid">
-        <!-- Live Event Feed -->
+        <!-- Live Stream Card -->
         <div class="card">
           <div class="card-header">
-            <div class="card-title">📡 Real-Time Security Incident Stream</div>
-            <div class="input-group">
-              <input type="text" id="telemetry-filter" class="cyber-input" placeholder="Filter: ip:1.2.3.4 node:vps-1 mitre:T1190" style="width: 320px;" onkeyup="if(event.key==='Enter') applyEventFilter()">
+            <div class="card-title">📡 Live Security Incident Stream</div>
+            <div style="display: flex; gap: 0.5rem;">
+              <input type="text" id="telemetry-filter" class="cyber-input" placeholder="Filter: ip:1.2.3.4 node:edge-1 mitre:T1190" style="width: 280px;" onkeyup="if(event.key==='Enter') applyEventFilter()">
               <button class="btn" onclick="applyEventFilter()">Search</button>
             </div>
           </div>
@@ -535,67 +789,66 @@
             <table>
               <thead>
                 <tr>
-                  <th>Timestamp</th>
-                  <th>Originating Node</th>
-                  <th>Source</th>
-                  <th>Client IP</th>
-                  <th>MITRE / Rule</th>
-                  <th>Threat Score</th>
-                  <th>Payload / AI Threat Intel</th>
+                  <th style="width: 80px;">Time</th>
+                  <th style="width: 110px;">Sensor</th>
+                  <th style="width: 125px;">Client IP</th>
+                  <th style="width: 135px;">MITRE / Rule</th>
+                  <th style="width: 95px;">Threat Score</th>
+                  <th>Telemetry Signal / Payload</th>
                 </tr>
               </thead>
               <tbody id="telemetry-tbody">
-                <tr><td colspan="7" style="text-align: center; color: var(--text-muted);">Listening for telemetry stream via WebSocket...</td></tr>
+                <tr><td colspan="6" style="text-align: center; color: var(--text-muted); padding: 2rem;">Connecting to real-time event pipeline...</td></tr>
               </tbody>
             </table>
           </div>
         </div>
 
-        <!-- MITRE ATT&CK Breakdown -->
+        <!-- MITRE ATT&CK Radar -->
         <div class="card">
           <div class="card-header">
             <div class="card-title">🎯 MITRE ATT&CK Radar</div>
-            <span class="badge badge-medium">Active Top Hits</span>
+            <span class="badge badge-medium">Real-Time Distribution</span>
           </div>
           <div style="padding: 1rem;" id="mitre-stats-container">
-            <div style="color: var(--text-muted); font-size: 0.8rem;">Aggregating technique distributions...</div>
+            <div style="color: var(--text-muted); font-size: 0.78rem;">Aggregating technique distributions...</div>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- TAB 2: Fleet Nodes Overview -->
+    <!-- TAB 2: Fleet Sensors Overview -->
     <div id="tab-nodes" class="tab-panel">
       <div class="card">
         <div class="card-header">
-          <div class="card-title">🌐 Connected Edge Collector Fleet (Distributed VDS / Bare-Metal Nodes)</div>
+          <div class="card-title">🌐 Connected Edge Sensors (Distributed VDS / Bare-Metal Linux Fleet)</div>
           <button class="btn" onclick="refreshFleetNodes()">🔄 Refresh Fleet</button>
         </div>
         <div class="table-container">
           <table>
             <thead>
               <tr>
-                <th>Node ID</th>
-                <th>Hostname</th>
-                <th>Fleet Group</th>
-                <th>Remote Address</th>
-                <th>CPU Usage</th>
-                <th>Memory Usage</th>
-                <th>Active Bans</th>
-                <th>Uptime</th>
-                <th>Last Heartbeat</th>
-                <th>Status</th>
+                <th style="width: 140px;">Node ID</th>
+                <th style="width: 120px;">Hostname</th>
+                <th style="width: 110px;">Cluster Group</th>
+                <th style="width: 140px;">Remote Addr</th>
+                <th style="width: 85px;">CPU Load</th>
+                <th style="width: 85px;">RAM Load</th>
+                <th style="width: 85px;">Active Bans</th>
+                <th style="width: 90px;">Uptime</th>
+                <th style="width: 100px;">Last Heartbeat</th>
+                <th style="width: 85px;">Status</th>
               </tr>
             </thead>
             <tbody id="nodes-tbody">
-              <tr><td colspan="10" style="text-align: center; color: var(--text-muted);">No connected edge nodes detected yet. Run deploy-copsec.sh on remote nodes to enroll.</td></tr>
+              <tr><td colspan="10" style="text-align: center; color: var(--text-muted); padding: 2rem;">No edge nodes enrolled yet. Run deploy-copsec.sh on remote servers.</td></tr>
             </tbody>
           </table>
         </div>
       </div>
     </div>
 
-    <!-- TAB 3: SOAR Quarantine & Mitigation (L3/L4/L7 Hybrid + TTL) -->
+    <!-- TAB 3: SOAR Quarantine Management -->
     <div id="tab-soar" class="tab-panel">
       <div class="card">
         <div class="card-header">
@@ -609,109 +862,115 @@
           <table>
             <thead>
               <tr>
-                <th>Target IP</th>
-                <th>Mitigation Layers</th>
-                <th>Penalty Tier</th>
-                <th>Quarantine Reason</th>
-                <th>Enforced At</th>
-                <th>Remaining TTL</th>
-                <th>Action</th>
+                <th style="width: 170px;">Target IP (v4/v6)</th>
+                <th style="width: 150px;">Mitigation Layers</th>
+                <th style="width: 130px;">Penalty Tier</th>
+                <th>Incident Reason</th>
+                <th style="width: 90px;">Enforced</th>
+                <th style="width: 130px;">Remaining TTL</th>
+                <th style="width: 110px;">Action</th>
               </tr>
             </thead>
             <tbody id="bans-tbody">
-              <tr><td colspan="7" style="text-align: center; color: var(--text-muted);">No active bans currently in quarantine.</td></tr>
+              <tr><td colspan="7" style="text-align: center; color: var(--text-muted); padding: 2rem;">No active targets in quarantine.</td></tr>
             </tbody>
           </table>
         </div>
       </div>
     </div>
 
-    <!-- TAB 4: Sigma Detection-as-Code Studio -->
+    <!-- TAB 4: SigmaHQ Detection-as-Code Studio -->
     <div id="tab-sigma" class="tab-panel">
       <div class="card">
         <div class="card-header">
-          <div class="card-title">📜 Native In-Memory SigmaHQ Rules (Detection-as-Code)</div>
+          <div class="card-title">📜 Native In-Memory SigmaHQ Detection Rules</div>
           <button class="btn btn-primary" onclick="openSigmaModal()">+ Compile New Rule</button>
         </div>
         <div class="table-container">
           <table>
             <thead>
               <tr>
-                <th>Rule ID</th>
+                <th style="width: 180px;">Rule ID</th>
                 <th>Rule Title</th>
-                <th>Severity Level</th>
-                <th>Threat Score</th>
-                <th>Mapped MITRE Technique</th>
-                <th>Condition Expression</th>
+                <th style="width: 100px;">Level</th>
+                <th style="width: 90px;">Score</th>
+                <th style="width: 140px;">MITRE Technique</th>
+                <th style="width: 180px;">Condition</th>
               </tr>
             </thead>
             <tbody id="sigma-tbody">
-              <tr><td colspan="6" style="text-align: center; color: var(--text-muted);">Loading compiled Sigma rules...</td></tr>
+              <tr><td colspan="6" style="text-align: center; color: var(--text-muted); padding: 2rem;">Loading compiled Sigma rules...</td></tr>
             </tbody>
           </table>
         </div>
       </div>
     </div>
 
-    <!-- TAB 5: Honeypot & Deception Traps -->
+    <!-- TAB 5: Deception Traps & Honeypots -->
     <div id="tab-honeypot" class="tab-panel">
       <div class="card">
         <div class="card-header">
-          <div class="card-title">🍯 High-Interaction Deception Interceptions (Fake SSH & Honey-URLs)</div>
+          <div class="card-title">🍯 High-Interaction Deception Traps (Fake SSH & Honey-URLs)</div>
           <button class="btn" onclick="refreshHoneypotLogs()">🔄 Refresh Traps</button>
         </div>
         <div class="table-container">
           <table>
             <thead>
               <tr>
-                <th>Time</th>
-                <th>Trap Vector</th>
-                <th>Attacker IP:Port</th>
-                <th>Captured Credentials / Path</th>
-                <th>Client Fingerprint / UA</th>
-                <th>Mitigation</th>
+                <th style="width: 90px;">Time</th>
+                <th style="width: 90px;">Trap Vector</th>
+                <th style="width: 160px;">Attacker IP:Port</th>
+                <th>Captured Credentials / Honey Route</th>
+                <th>Fingerprint / User-Agent</th>
+                <th style="width: 110px;">SOAR Defense</th>
               </tr>
             </thead>
             <tbody id="honeypot-tbody">
-              <tr><td colspan="6" style="text-align: center; color: var(--text-muted);">Listening on Honeypot listeners...</td></tr>
+              <tr><td colspan="6" style="text-align: center; color: var(--text-muted); padding: 2rem;">Listening on Honeypot listeners...</td></tr>
             </tbody>
           </table>
         </div>
       </div>
     </div>
 
-    <!-- TAB 6: System Configuration & Onboarding -->
+    <!-- TAB 6: System Configuration (Autofill-Hardened) -->
     <div id="tab-config" class="tab-panel">
-      <div class="card" style="max-width: 800px; margin: 0 auto;">
+      <div class="card" style="max-width: 760px; margin: 0 auto;">
         <div class="card-header">
-          <div class="card-title">⚙️ CoPSeC Runtime Parameters & Threat Intel Onboarding</div>
+          <div class="card-title">⚙️ Controller Runtime Parameters & Threat Intelligence</div>
           <span class="badge badge-success">Zero-Restart Dynamic Sync</span>
         </div>
         <div style="padding: 1.5rem;">
-          <form id="config-form" onsubmit="saveConfiguration(event)">
+          <form id="config-form" autocomplete="off" data-lpignore="true" data-form-type="other" onsubmit="saveConfiguration(event)">
             <div class="form-group">
               <label>gRPC Ingestion Listen Address</label>
-              <input type="text" id="cfg-grpc-addr" class="cyber-input" value="0.0.0.0:8443" required>
+              <input type="text" id="cfg-grpc-addr" class="cyber-input" value="0.0.0.0:8443" autocomplete="off" required>
             </div>
             <div class="form-group">
               <label>Telegram SOAR Bot Token</label>
-              <input type="password" id="cfg-tg-token" class="cyber-input" placeholder="123456789:ABCdefGHIjklMNOpqrSTUvwxYZ">
+              <div class="sensitive-wrapper">
+                <input type="text" id="cfg-tg-token" class="cyber-input sensitive-masked" placeholder="123456789:ABCdefGHIjklMNOpqrSTUvwxYZ" autocomplete="off">
+                <button type="button" class="btn-reveal" onclick="toggleMask('cfg-tg-token', this)">👁️</button>
+              </div>
             </div>
             <div class="form-group">
-              <label>Telegram Incident Alert Chat ID</label>
-              <input type="text" id="cfg-tg-chat" class="cyber-input" placeholder="-1001234567890">
+              <label>Telegram Alert Chat ID</label>
+              <input type="text" id="cfg-tg-chat" class="cyber-input" placeholder="-1001234567890" autocomplete="off">
             </div>
             <div class="form-group">
               <label>Fake SSH Honeypot Listen Port</label>
-              <input type="text" id="cfg-honeypot-ssh" class="cyber-input" value=":2222">
+              <input type="text" id="cfg-honeypot-ssh" class="cyber-input" value=":2222" autocomplete="off">
             </div>
             <div class="form-group">
               <label>Autonomous Auto-Ban Threat Score Threshold (1 - 100)</label>
-              <input type="number" id="cfg-autoban-threshold" class="cyber-input" value="50" min="1" max="100">
+              <input type="number" id="cfg-autoban-threshold" class="cyber-input" value="50" min="1" max="100" autocomplete="off">
             </div>
             <div class="form-group">
               <label>Threat Intelligence API Key (AbuseIPDB / Shodan)</label>
-              <input type="password" id="cfg-intel-key" class="cyber-input" placeholder="Optional API Key">
+              <div class="sensitive-wrapper">
+                <input type="text" id="cfg-intel-key" class="cyber-input sensitive-masked" placeholder="Threat Intel API Key" autocomplete="off">
+                <button type="button" class="btn-reveal" onclick="toggleMask('cfg-intel-key', this)">👁️</button>
+              </div>
             </div>
             <button type="submit" class="btn btn-primary" style="width: 100%; justify-content: center; margin-top: 1rem;">
               💾 Save & Dynamically Apply Settings
@@ -722,17 +981,50 @@
     </div>
   </main>
 
+  <!-- Slide-Out Raw Payload Drawer -->
+  <div class="drawer-overlay" id="drawer-overlay" onclick="closePayloadDrawer()">
+    <div class="drawer" onclick="event.stopPropagation()">
+      <div class="drawer-header">
+        <div>
+          <h3 style="font-size: 1rem; font-weight: 700; color: #fff;">🔍 Incident Payload Inspector</h3>
+          <p style="font-size: 0.7rem; color: var(--text-muted); font-family: var(--font-mono);" id="drawer-event-id">-</p>
+        </div>
+        <button class="toast-close" onclick="closePayloadDrawer()">✖</button>
+      </div>
+      <div class="drawer-body">
+        <div class="drawer-meta-grid">
+          <div class="meta-box"><label>Timestamp</label><span id="drawer-time">-</span></div>
+          <div class="meta-box"><label>Origin Sensor</label><span id="drawer-node">-</span></div>
+          <div class="meta-box"><label>Client IP</label><span id="drawer-ip" style="color: var(--cyan);">-</span></div>
+          <div class="meta-box"><label>Threat Score</label><span id="drawer-score">-</span></div>
+        </div>
+
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+          <label style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; font-family: var(--font-mono); font-weight: 700;">Formatted Telemetry / EVE Log</label>
+          <button class="btn btn-inspect" onclick="copyDrawerJSON()">📋 Copy Raw Payload</button>
+        </div>
+
+        <div class="json-inspector-box" id="drawer-json-content"></div>
+
+        <div id="drawer-ai-container" style="margin-top: 1rem; display: none;">
+          <label style="font-size: 0.72rem; color: var(--amber); text-transform: uppercase; font-family: var(--font-mono); font-weight: 700;">🤖 AI Threat Intelligence Assessment</label>
+          <div style="background: #111a2f; border: 1px solid #1e3a6a; border-radius: 6px; padding: 0.75rem; font-size: 0.75rem; color: #cbd5e1; margin-top: 0.35rem; line-height: 1.4;" id="drawer-ai-text"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Modal 1: Quick Ban Modal -->
   <div class="modal-overlay" id="ban-modal">
     <div class="modal-box">
       <h2>⚡ Enforce SOAR Quarantine</h2>
-      <p style="color: var(--text-muted); font-size: 0.8rem; margin-bottom: 1.25rem;">
+      <p style="color: var(--text-muted); font-size: 0.75rem; margin-bottom: 1.25rem;">
         Executes instant hybrid mitigation (L3 RAW/INPUT Drop + L4 Socket/Conntrack Kill + L7 Nginx Block).
       </p>
       <form onsubmit="submitBanForm(event)">
         <div class="form-group">
-          <label>Target IP Address</label>
-          <input type="text" id="ban-ip-input" class="cyber-input" placeholder="198.51.100.45" required>
+          <label>Target IP Address (IPv4 or IPv6)</label>
+          <input type="text" id="ban-ip-input" class="cyber-input" placeholder="198.51.100.45 or 2001:db8::1" required autocomplete="off">
         </div>
         <div class="form-group">
           <label>Penalty Tier & Time-To-Live (TTL)</label>
@@ -744,8 +1036,8 @@
           </select>
         </div>
         <div class="form-group">
-          <label>Reason / Incident Tag</label>
-          <input type="text" id="ban-reason-input" class="cyber-input" value="Manual SOC Operator Quarantine" required>
+          <label>Incident Reason / Tag</label>
+          <input type="text" id="ban-reason-input" class="cyber-input" value="Manual SOC Operator Quarantine" required autocomplete="off">
         </div>
         <div style="display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1.5rem;">
           <button type="button" class="btn" onclick="closeBanModal()">Cancel</button>
@@ -755,16 +1047,16 @@
     </div>
   </div>
 
-  <!-- Modal 2: Sigma HQ Rule Compiler Modal -->
+  <!-- Modal 2: SigmaHQ Compiler Modal -->
   <div class="modal-overlay" id="sigma-modal">
-    <div class="modal-box" style="max-width: 750px;">
-      <h2>📜 Compile Native Sigma HQ Rule</h2>
-      <p style="color: var(--text-muted); font-size: 0.8rem; margin-bottom: 1rem;">
+    <div class="modal-box" style="max-width: 720px;">
+      <h2>📜 Compile Native SigmaHQ Rule</h2>
+      <p style="color: var(--text-muted); font-size: 0.75rem; margin-bottom: 1rem;">
         Paste standard SigmaHQ YAML. The in-memory engine compiles it into sub-millisecond evaluation logic.
       </p>
       <form onsubmit="submitSigmaRule(event)">
         <div class="form-group">
-          <textarea id="sigma-yaml-input" class="cyber-input" style="width: 100%; height: 250px; font-family: var(--font-mono); font-size: 0.75rem;" placeholder="title: Custom Detection&#10;id: custom-rule&#10;level: critical&#10;logsource:&#10;  category: webserver&#10;detection:&#10;  selection:&#10;    _raw|contains: 'malicious_string'&#10;  condition: selection"></textarea>
+          <textarea id="sigma-yaml-input" class="cyber-input" style="width: 100%; height: 240px; font-family: var(--font-mono); font-size: 0.75rem;" placeholder="title: Custom Detection&#10;id: custom-rule&#10;level: critical&#10;logsource:&#10;  category: webserver&#10;detection:&#10;  selection:&#10;    _raw|contains: 'malicious_string'&#10;  condition: selection"></textarea>
         </div>
         <div style="display: flex; gap: 0.5rem; justify-content: flex-end;">
           <button type="button" class="btn" onclick="closeSigmaModal()">Cancel</button>
@@ -774,42 +1066,98 @@
     </div>
   </div>
 
-  <!-- Modal 3: First-Boot Onboarding Setup Wizard -->
+  <!-- Modal 3: First-Boot Onboarding Wizard (Autofill-Hardened) -->
   <div class="modal-overlay" id="wizard-modal">
     <div class="modal-box">
-      <h2>🚀 Welcome to CoPSeC Defense Platform</h2>
-      <p style="color: var(--text-muted); font-size: 0.8rem; margin-bottom: 1.25rem;">
-        Zero-Config First Boot Initializer. Configure core runtime parameters to start real-time telemetry streaming.
+      <h2>🚀 Welcome to CoPSeC Defense Center</h2>
+      <p style="color: var(--text-muted); font-size: 0.75rem; margin-bottom: 1.25rem;">
+        Zero-Config First Boot Initializer. Configure core runtime parameters to begin streaming.
       </p>
-      <form onsubmit="completeOnboardingWizard(event)">
+      <form autocomplete="off" data-lpignore="true" data-form-type="other" onsubmit="completeOnboardingWizard(event)">
         <div class="form-group">
           <label>gRPC Ingestion Address</label>
-          <input type="text" id="wiz-grpc" class="cyber-input" value="0.0.0.0:8443" required>
+          <input type="text" id="wiz-grpc" class="cyber-input" value="0.0.0.0:8443" autocomplete="off" required>
         </div>
         <div class="form-group">
           <label>Telegram SOAR Bot Token (Optional)</label>
-          <input type="password" id="wiz-tg-token" class="cyber-input" placeholder="Telegram Bot Token">
+          <input type="text" id="wiz-tg-token" class="cyber-input sensitive-masked" placeholder="Telegram Bot Token" autocomplete="off">
         </div>
         <div class="form-group">
           <label>Telegram Alert Chat ID (Optional)</label>
-          <input type="text" id="wiz-tg-chat" class="cyber-input" placeholder="Telegram Chat ID">
+          <input type="text" id="wiz-tg-chat" class="cyber-input" placeholder="Telegram Chat ID" autocomplete="off">
         </div>
         <div class="form-group">
           <label>Honey-SSH Deception Port</label>
-          <input type="text" id="wiz-honeypot" class="cyber-input" value=":2222">
+          <input type="text" id="wiz-honeypot" class="cyber-input" value=":2222" autocomplete="off">
         </div>
         <button type="submit" class="btn btn-primary" style="width: 100%; justify-content: center; margin-top: 1rem;">
-          🚀 Initialize & Transition to Live SOC Console
+          🚀 Initialize & Transition to Live Console
         </button>
       </form>
     </div>
   </div>
 
   <script>
-    // State
+    // State Store
     let ws = null;
     let eventsLog = [];
+    let currentDrawerEvent = null;
+    let totalMitreHits = 0;
 
+    // Toast Notification System
+    function showToast(message, type = 'info', title = '', duration = 3500) {
+      const container = document.getElementById('toast-container');
+      const toast = document.createElement('div');
+      toast.className = `toast toast-${type}`;
+
+      const icons = {
+        success: '✔',
+        warning: '⚠',
+        danger: '🚫',
+        info: 'ℹ'
+      };
+
+      const defaultTitles = {
+        success: 'Operation Success',
+        warning: 'Warning Notice',
+        danger: 'SOAR Alert',
+        info: 'System Event'
+      };
+
+      toast.innerHTML = `
+        <div class="toast-icon">${icons[type] || 'ℹ'}</div>
+        <div class="toast-content">
+          <div class="toast-title">${escapeHtml(title || defaultTitles[type])}</div>
+          <div class="toast-msg">${escapeHtml(message)}</div>
+        </div>
+        <button class="toast-close" onclick="this.parentElement.remove()">✖</button>
+      `;
+
+      container.appendChild(toast);
+
+      setTimeout(() => {
+        if (toast.parentElement) {
+          toast.style.transition = 'opacity 0.3s ease, transform 0.3s ease';
+          toast.style.opacity = '0';
+          toast.style.transform = 'translateX(100%)';
+          setTimeout(() => toast.remove(), 300);
+        }
+      }, duration);
+    }
+
+    // Toggle Input Masking for Sensitive Fields
+    function toggleMask(inputId, btn) {
+      const input = document.getElementById(inputId);
+      if (input.classList.contains('sensitive-masked')) {
+        input.classList.remove('sensitive-masked');
+        btn.textContent = '🔒';
+      } else {
+        input.classList.add('sensitive-masked');
+        btn.textContent = '👁️';
+      }
+    }
+
+    // Navigation Switcher
     function switchTab(tabId) {
       document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
       document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
@@ -836,12 +1184,13 @@
 
       ws.onopen = () => {
         document.getElementById('ws-dot').classList.remove('disconnected');
-        document.getElementById('ws-status').textContent = 'LIVE SYNC';
+        document.getElementById('ws-status').textContent = 'STREAM ACTIVE';
+        showToast('WebSocket Telemetry Stream connected', 'success', 'Connection Online', 2000);
       };
 
       ws.onclose = () => {
         document.getElementById('ws-dot').classList.add('disconnected');
-        document.getElementById('ws-status').textContent = 'OFFLINE (RECONNECTING)';
+        document.getElementById('ws-status').textContent = 'RECONNECTING...';
         setTimeout(initWebSocket, 2000);
       };
 
@@ -862,8 +1211,12 @@
         updateStats(msg.payload);
       } else if (msg.type === 'ban_change') {
         refreshBans();
+        if (msg.payload && msg.payload.ban) {
+          showToast(`Quarantine updated for ${msg.payload.ban.ip} (${msg.payload.action})`, 'warning', 'SOAR Event');
+        }
       } else if (msg.type === 'honeypot_hit') {
         prependHoneypotRow(msg.payload);
+        showToast(`Honeypot intrusion captured from ${msg.payload.client_ip}`, 'danger', 'Deception Triggered');
       }
     }
 
@@ -878,65 +1231,253 @@
       }
     }
 
+    // Smart Telemetry Normalization
+    function parseTelemetrySignal(rawLine, source) {
+      if (!rawLine) return { html: '<span style="color: var(--text-muted);">Empty telemetry line</span>', isJSON: false };
+
+      const trimmed = rawLine.trim();
+
+      // 1. Check if JSON (Suricata eve.json / structured logs)
+      if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+        try {
+          const obj = JSON.parse(trimmed);
+          if (obj.event_type === 'alert' && obj.alert) {
+            const sig = obj.alert.signature || 'Alert Triggered';
+            const proto = (obj.proto || 'IP').toUpperCase();
+            const srcPort = obj.src_port ? `:${obj.src_port}` : '';
+            const destPort = obj.dest_port ? `:${obj.dest_port}` : '';
+            return {
+              html: `<span class="chip chip-alert">ALERT</span> <span class="chip chip-proto">${proto}</span> <b>${escapeHtml(sig)}</b> <span style="color: var(--text-muted); font-size: 0.7rem;">(${obj.src_ip || ''}${srcPort} -> ${destPort})</span>`,
+              isJSON: true,
+              parsedObj: obj
+            };
+          }
+          if (obj.event_type === 'http' && obj.http) {
+            const method = obj.http.http_method || 'GET';
+            const url = obj.http.url || '/';
+            const status = obj.http.status || 200;
+            const statusClass = status >= 500 ? '5xx' : (status >= 400 ? '4xx' : '2xx');
+            return {
+              html: `<span class="chip chip-method">${escapeHtml(method)}</span> <span class="chip chip-status-${statusClass}">${status}</span> <span style="color: #cbd5e1;">${escapeHtml(url)}</span>`,
+              isJSON: true,
+              parsedObj: obj
+            };
+          }
+          if (obj.event_type === 'dns' && obj.dns) {
+            return {
+              html: `<span class="chip chip-proto">DNS</span> query: <b>${escapeHtml(obj.dns.rrname || '')}</b> (${obj.dns.rrtype || 'A'})`,
+              isJSON: true,
+              parsedObj: obj
+            };
+          }
+          return {
+            html: `<span class="chip chip-proto">JSON</span> <span style="color: #cbd5e1;">${escapeHtml(JSON.stringify(obj).substring(0, 70))}...</span>`,
+            isJSON: true,
+            parsedObj: obj
+          };
+        } catch (e) {}
+      }
+
+      // 2. Web Access Log (Nginx / Apache / Caddy)
+      const webMatch = trimmed.match(/"(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\s+([^\s]+)\s+HTTP\/[0-9.]+"\s+([0-9]{3})/i);
+      if (webMatch) {
+        const method = webMatch[1].toUpperCase();
+        const uri = webMatch[2];
+        const status = parseInt(webMatch[3]);
+        const statusClass = status >= 500 ? '5xx' : (status >= 400 ? '4xx' : '2xx');
+        return {
+          html: `<span class="chip chip-method">${method}</span> <span class="chip chip-status-${statusClass}">${status}</span> <span style="color: #cbd5e1;">${escapeHtml(uri)}</span>`,
+          isJSON: false
+        };
+      }
+
+      // 3. Auth / SSH / Syslog
+      const authFail = trimmed.match(/Failed password for (?:invalid user )?([a-zA-Z0-9_.-]+) from (\S+)/i);
+      if (authFail) {
+        return {
+          html: `<span class="chip chip-alert">AUTH_FAIL</span> user: <b style="color: var(--amber);">${escapeHtml(authFail[1])}</b> from ${escapeHtml(authFail[2])}`,
+          isJSON: false
+        };
+      }
+      const authOk = trimmed.match(/Accepted (?:password|publickey) for ([a-zA-Z0-9_.-]+) from (\S+)/i);
+      if (authOk) {
+        return {
+          html: `<span class="chip chip-status-2xx">AUTH_OK</span> user: <b style="color: var(--emerald);">${escapeHtml(authOk[1])}</b> from ${escapeHtml(authOk[2])}`,
+          isJSON: false
+        };
+      }
+
+      // Fallback
+      return {
+        html: `<span style="color: #cbd5e1;">${escapeHtml(trimmed)}</span>`,
+        isJSON: false
+      };
+    }
+
     function prependEventRow(ev) {
       eventsLog.unshift(ev);
-      if (eventsLog.length > 100) eventsLog.pop();
+      if (eventsLog.length > 150) eventsLog.pop();
 
       const tbody = document.getElementById('telemetry-tbody');
-      if (tbody.children.length === 1 && tbody.children[0].innerText.includes('Listening')) {
+      if (tbody.children.length === 1 && tbody.children[0].innerText.includes('Connecting')) {
         tbody.innerHTML = '';
       }
 
+      const index = eventsLog.indexOf(ev);
       const tr = document.createElement('tr');
       const scoreBadge = getScoreBadge(ev.threat_score);
       const timeStr = new Date(ev.timestamp_ms || Date.now()).toLocaleTimeString();
       const nodeLabel = ev.node_id || 'controller';
-      
+      const signal = parseTelemetrySignal(ev.raw_line, ev.source);
+
       tr.innerHTML = `
-        <td style="font-family: var(--font-mono); color: var(--text-muted); font-size: 0.75rem;">${timeStr}</td>
+        <td style="font-family: var(--font-mono); color: var(--text-muted);">${timeStr}</td>
         <td><span class="tag-node">${escapeHtml(nodeLabel)}</span></td>
-        <td><span class="badge badge-low">${escapeHtml(ev.source || 'edge')}</span></td>
-        <td style="font-family: var(--font-mono); font-weight: 700; color: var(--cyan);">${escapeHtml(ev.client_ip || '-')}</td>
-        <td><span class="tag-mitre">${escapeHtml(ev.mitre_technique_id || 'T1190')}</span> <span style="font-size: 0.75rem;">${escapeHtml(ev.rule_id || '')}</span></td>
+        <td><span class="ip-chip">${escapeHtml(ev.client_ip || '-')}</span></td>
+        <td><span class="tag-mitre">${escapeHtml(ev.mitre_technique_id || 'T1190')}</span></td>
         <td>${scoreBadge}</td>
         <td>
-          <div class="raw-log-preview">${escapeHtml(ev.raw_line || '')}</div>
-          ${ev.ai_analysis ? `<div style="font-size: 0.68rem; color: var(--amber); margin-top: 3px;">🤖 ${escapeHtml(ev.ai_analysis)}</div>` : ''}
+          <div class="payload-cell">
+            <div class="payload-summary">${signal.html}</div>
+            <button class="btn-inspect" onclick="openPayloadDrawerByIndex(${index})">🔍 Inspect</button>
+          </div>
         </td>
       `;
       tbody.insertBefore(tr, tbody.firstChild);
-      if (tbody.children.length > 50) tbody.removeChild(tbody.lastChild);
+      if (tbody.children.length > 60) tbody.removeChild(tbody.lastChild);
     }
 
     function getScoreBadge(score) {
-      if (score >= 80) return `<span class="badge badge-critical">${score} CRITICAL</span>`;
+      if (score >= 80) return `<span class="badge badge-critical">${score} CRIT</span>`;
       if (score >= 50) return `<span class="badge badge-high">${score} HIGH</span>`;
-      if (score >= 30) return `<span class="badge badge-medium">${score} MEDIUM</span>`;
+      if (score >= 30) return `<span class="badge badge-medium">${score} MED</span>`;
       return `<span class="badge badge-low">${score} LOW</span>`;
     }
 
+    // MITRE Radar Heatmap
     function renderMITREStats(stats) {
       const container = document.getElementById('mitre-stats-container');
       if (!stats || stats.length === 0) {
-        container.innerHTML = '<div style="color: var(--text-muted); font-size: 0.8rem;">No technique data yet.</div>';
+        container.innerHTML = '<div style="color: var(--text-muted); font-size: 0.78rem;">No technique telemetry hits yet.</div>';
         return;
       }
-      container.innerHTML = stats.slice(0, 10).map(s => `
-        <div class="mitre-pill">
-          <span class="mitre-pill-tech">${escapeHtml(s.technique_id)}</span>
-          <span class="mitre-pill-count">${s.count} hits</span>
-        </div>
-      `).join('');
+
+      let maxHits = 1;
+      stats.forEach(s => { if (s.count > maxHits) maxHits = s.count; });
+
+      container.innerHTML = stats.slice(0, 8).map(s => {
+        const pct = Math.min(100, Math.round((s.count / maxHits) * 100));
+        return `
+          <div class="mitre-pill">
+            <div class="mitre-pill-top">
+              <span class="mitre-pill-tech">${escapeHtml(s.technique_id)}</span>
+              <span class="mitre-pill-count">${s.count} hits</span>
+            </div>
+            <div class="mitre-bar-bg">
+              <div class="mitre-bar-fill" style="width: ${pct}%;"></div>
+            </div>
+          </div>
+        `;
+      }).join('');
     }
 
-    // Fleet Nodes Fetcher
+    // Payload Drawer Inspector
+    function openPayloadDrawerByIndex(idx) {
+      const ev = eventsLog[idx];
+      if (!ev) return;
+      openPayloadDrawer(ev);
+    }
+
+    function openPayloadDrawer(ev) {
+      currentDrawerEvent = ev;
+      document.getElementById('drawer-event-id').textContent = `INCIDENT ID: #${ev.id || 'LIVE-' + (ev.timestamp_ms || Date.now())}`;
+      document.getElementById('drawer-time').textContent = new Date(ev.timestamp_ms || Date.now()).toLocaleString();
+      document.getElementById('drawer-node').textContent = ev.node_id || 'controller';
+      document.getElementById('drawer-ip').textContent = ev.client_ip || '-';
+      document.getElementById('drawer-score').innerHTML = getScoreBadge(ev.threat_score);
+
+      const jsonContainer = document.getElementById('drawer-json-content');
+
+      let parsed = null;
+      if (ev.raw_line && ev.raw_line.trim().startsWith('{')) {
+        try { parsed = JSON.parse(ev.raw_line); } catch(e) {}
+      }
+
+      if (parsed) {
+        jsonContainer.innerHTML = syntaxHighlightJSON(parsed);
+      } else {
+        // Construct structured telemetry object
+        const telemetryObj = {
+          id: ev.id,
+          node_id: ev.node_id,
+          source: ev.source,
+          client_ip: ev.client_ip,
+          status_code: ev.status_code,
+          timestamp_ms: ev.timestamp_ms,
+          rule_id: ev.rule_id,
+          mitre_technique_id: ev.mitre_technique_id,
+          threat_score: ev.threat_score,
+          raw_line: ev.raw_line
+        };
+        jsonContainer.innerHTML = syntaxHighlightJSON(telemetryObj);
+      }
+
+      const aiContainer = document.getElementById('drawer-ai-container');
+      const aiText = document.getElementById('drawer-ai-text');
+      if (ev.ai_analysis) {
+        aiText.textContent = ev.ai_analysis;
+        aiContainer.style.display = 'block';
+      } else {
+        aiContainer.style.display = 'none';
+      }
+
+      document.getElementById('drawer-overlay').classList.add('open');
+    }
+
+    function closePayloadDrawer() {
+      document.getElementById('drawer-overlay').classList.remove('open');
+    }
+
+    function syntaxHighlightJSON(json) {
+      if (typeof json != 'string') {
+        json = JSON.stringify(json, undefined, 2);
+      }
+      json = json.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      return json.replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g, function (match) {
+        let cls = 'json-number';
+        if (/^"/.test(match)) {
+          if (/:$/.test(match)) {
+            cls = 'json-key';
+          } else {
+            cls = 'json-string';
+          }
+        } else if (/true|false/.test(match)) {
+          cls = 'json-bool';
+        } else if (/null/.test(match)) {
+          cls = 'json-null';
+        }
+        return '<span class="' + cls + '">' + match + '</span>';
+      });
+    }
+
+    function copyDrawerJSON() {
+      if (!currentDrawerEvent) return;
+      const textToCopy = currentDrawerEvent.raw_line || JSON.stringify(currentDrawerEvent, null, 2);
+      navigator.clipboard.writeText(textToCopy).then(() => {
+        showToast('Raw telemetry payload copied to clipboard', 'success', 'Copied');
+      }).catch(err => {
+        showToast('Clipboard copy error: ' + err, 'danger');
+      });
+    }
+
+    // Fleet Sensors
     async function refreshFleetNodes() {
       try {
         const res = await fetch('/api/nodes');
         const nodes = await res.json();
         const tbody = document.getElementById('nodes-tbody');
         if (!nodes || nodes.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="10" style="text-align: center; color: var(--text-muted);">No connected edge nodes detected yet. Run deploy-copsec.sh on remote servers to connect.</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="10" style="text-align: center; color: var(--text-muted); padding: 2rem;">No edge nodes enrolled yet. Run deploy-copsec.sh on remote servers.</td></tr>';
           return;
         }
         tbody.innerHTML = nodes.map(n => {
@@ -949,78 +1490,97 @@
               <td style="font-family: var(--font-mono); font-weight: 700; color: var(--cyan);">${escapeHtml(n.node_id)}</td>
               <td style="font-weight: 600;">${escapeHtml(n.hostname || '-')}</td>
               <td><span class="badge badge-medium">${escapeHtml(n.group_name || 'DEFAULT_EDGE')}</span></td>
-              <td style="font-family: var(--font-mono);">${escapeHtml(n.remote_addr || '-')}</td>
+              <td><span class="ip-chip">${escapeHtml(n.remote_addr || '-')}</span></td>
               <td style="font-family: var(--font-mono);">${(n.cpu_usage || 0).toFixed(1)}%</td>
               <td style="font-family: var(--font-mono);">${(n.memory_usage || 0).toFixed(1)}%</td>
-              <td style="font-family: var(--font-mono); color: var(--amber);">${n.active_bans_count || 0}</td>
-              <td style="font-family: var(--font-mono); color: var(--text-muted);">${uptimeHours} hrs</td>
-              <td style="font-family: var(--font-mono); font-size: 0.75rem; color: var(--text-muted);">${lastSeenSec}s ago</td>
+              <td style="font-family: var(--font-mono); color: var(--amber); font-weight: 700;">${n.active_bans_count || 0}</td>
+              <td style="font-family: var(--font-mono); color: var(--text-muted);">${uptimeHours}h</td>
+              <td style="font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-muted);">${lastSeenSec}s ago</td>
               <td>${statusBadge}</td>
             </tr>
           `;
         }).join('');
       } catch (err) {
-        console.error("Failed to fetch nodes", err);
+        showToast('Failed to fetch fleet nodes: ' + err, 'danger');
       }
     }
 
-    // SOAR Quarantine Fetcher
+    // SOAR Quarantine Table & Async Release
     async function refreshBans() {
       try {
         const res = await fetch('/api/bans');
         const data = await res.json();
         const tbody = document.getElementById('bans-tbody');
         if (!data || data.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--text-muted);">No active bans currently in quarantine.</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--text-muted); padding: 2rem;">No active targets in quarantine.</td></tr>';
           return;
         }
         tbody.innerHTML = data.map(b => {
           const remText = b.remaining_sec > 0 ? `${b.remaining_sec}s remaining` : (b.remaining_sec === -1 ? 'PERMANENT' : 'EXPIRED');
           return `
-            <tr>
-              <td style="font-family: var(--font-mono); font-weight: 700; color: var(--magenta);">${escapeHtml(b.ip)}</td>
+            <tr id="ban-row-${escapeHtml(b.ip.replace(/[:.]/g, '_'))}">
+              <td><span class="ip-chip" style="color: var(--magenta);">${escapeHtml(b.ip)}</span></td>
               <td>
-                <span class="layer-badge layer-l3">L3 RAW</span>
-                <span class="layer-badge layer-l4">L4 SOCK</span>
-                <span class="layer-badge layer-l7">L7 NGINX</span>
+                <span class="chip chip-proto">L3 RAW</span>
+                <span class="chip chip-proto">L4 SOCK</span>
+                <span class="chip chip-proto">L7 WAF</span>
               </td>
               <td><span class="badge badge-high">${escapeHtml(b.penalty_tier || 'TEMP_ISOLATION')}</span></td>
               <td style="font-size: 0.75rem;">${escapeHtml(b.reason || 'Auto-Ban')}</td>
-              <td style="font-family: var(--font-mono); color: var(--text-muted); font-size: 0.75rem;">${new Date(b.ban_time_ms).toLocaleTimeString()}</td>
+              <td style="font-family: var(--font-mono); color: var(--text-muted); font-size: 0.72rem;">${new Date(b.ban_time_ms).toLocaleTimeString()}</td>
               <td style="font-family: var(--font-mono); font-weight: 700; color: var(--amber);">${remText}</td>
               <td>
-                <button class="btn btn-danger" style="padding: 0.25rem 0.6rem; font-size: 0.7rem;" onclick="unbanIP('${escapeHtml(b.ip)}')">Release Unban</button>
+                <button class="btn btn-danger" id="btn-unban-${escapeHtml(b.ip.replace(/[:.]/g, '_'))}" style="padding: 0.22rem 0.55rem; font-size: 0.68rem;" onclick="unbanIPAsync('${escapeHtml(b.ip)}')">Release Unban</button>
               </td>
             </tr>
           `;
         }).join('');
       } catch (err) {
-        console.error("Failed to fetch bans", err);
+        showToast('Failed to fetch quarantine list: ' + err, 'danger');
       }
     }
 
-    async function unbanIP(ip) {
-      if (!confirm(`Are you sure you want to release quarantine for ${ip}?`)) return;
+    async function unbanIPAsync(ip) {
+      const sanitizedId = ip.replace(/[:.]/g, '_');
+      const btn = document.getElementById(`btn-unban-${sanitizedId}`);
+      if (btn) {
+        btn.innerHTML = '<span class="micro-spinner"></span> Releasing...';
+        btn.disabled = true;
+      }
+
       try {
         const res = await fetch('/api/soar/unban', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ ip })
         });
-        if (res.ok) refreshBans();
+        if (res.ok) {
+          showToast(`Quarantine released across all L3/L4/L7 layers for ${ip}`, 'success', 'Target Unbanned');
+          refreshBans();
+        } else {
+          showToast('Failed to release ban: ' + (await res.text()), 'danger');
+          if (btn) {
+            btn.innerHTML = 'Release Unban';
+            btn.disabled = false;
+          }
+        }
       } catch (err) {
-        alert("Failed to unban: " + err);
+        showToast('Error releasing quarantine: ' + err, 'danger');
+        if (btn) {
+          btn.innerHTML = 'Release Unban';
+          btn.disabled = false;
+        }
       }
     }
 
-    // Sigma HQ Rules Fetcher
+    // Sigma Rules
     async function refreshSigmaRules() {
       try {
         const res = await fetch('/api/sigma/rules');
         const data = await res.json();
         const tbody = document.getElementById('sigma-tbody');
         if (!data || data.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: var(--text-muted);">No Sigma rules found.</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: var(--text-muted); padding: 2rem;">No Sigma rules found.</td></tr>';
           return;
         }
         tbody.innerHTML = data.map(r => `
@@ -1028,42 +1588,40 @@
             <td style="font-family: var(--font-mono); color: var(--cyan); font-weight: 700;">${escapeHtml(r.id)}</td>
             <td style="font-weight: 600;">${escapeHtml(r.title)}</td>
             <td><span class="badge badge-${r.level === 'critical' ? 'critical' : (r.level === 'high' ? 'high' : 'medium')}">${escapeHtml(r.level)}</span></td>
-            <td style="font-family: var(--font-mono);">${r.threat_score}</td>
-            <td><span class="tag-mitre">${escapeHtml(r.mitre_technique_id)}</span> <span style="font-size: 0.75rem; color: var(--text-muted);">${escapeHtml(r.mitre_technique_name || '')}</span></td>
-            <td style="font-family: var(--font-mono); font-size: 0.75rem; color: var(--amber);">${escapeHtml(r.condition || '1 of them')}</td>
+            <td style="font-family: var(--font-mono); font-weight: 700;">${r.threat_score}</td>
+            <td><span class="tag-mitre">${escapeHtml(r.mitre_technique_id)}</span></td>
+            <td style="font-family: var(--font-mono); font-size: 0.72rem; color: var(--amber);">${escapeHtml(r.condition || '1 of them')}</td>
           </tr>
         `).join('');
       } catch (err) {
-        console.error("Failed to fetch sigma rules", err);
+        showToast('Failed to fetch Sigma rules: ' + err, 'danger');
       }
     }
 
-    // Honeypot Logs Fetcher
+    // Honeypot Logs
     async function refreshHoneypotLogs() {
       try {
         const res = await fetch('/api/honeypot/logs');
         const data = await res.json();
         const tbody = document.getElementById('honeypot-tbody');
         if (!data || data.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: var(--text-muted);">No honeypot captures recorded yet.</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: var(--text-muted); padding: 2rem;">No honeypot captures recorded yet.</td></tr>';
           return;
         }
         tbody.innerHTML = data.map(h => `
           <tr>
-            <td style="font-family: var(--font-mono); color: var(--text-muted); font-size: 0.75rem;">${new Date(h.timestamp_ms).toLocaleTimeString()}</td>
+            <td style="font-family: var(--font-mono); color: var(--text-muted);">${new Date(h.timestamp_ms).toLocaleTimeString()}</td>
             <td><span class="badge ${h.trap_type === 'SSH' ? 'badge-critical' : 'badge-high'}">${escapeHtml(h.trap_type)}</span></td>
-            <td style="font-family: var(--font-mono); font-weight: 700; color: var(--magenta);">${escapeHtml(h.client_ip)}:${h.port || 0}</td>
+            <td><span class="ip-chip" style="color: var(--magenta);">${escapeHtml(h.client_ip)}:${h.port || 0}</span></td>
             <td style="font-family: var(--font-mono); font-size: 0.75rem;">
               ${h.username ? `User: <b style="color: var(--cyan);">${escapeHtml(h.username)}</b> Pass: <b style="color: var(--amber);">${escapeHtml(h.password || '')}</b>` : escapeHtml(h.requested_url || '-')}
             </td>
-            <td style="font-size: 0.75rem; color: var(--text-muted); max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-              ${escapeHtml(h.client_version || h.user_agent || '-')}
-            </td>
-            <td><span class="badge badge-success">⚡ AUTO-BANNED</span></td>
+            <td style="font-size: 0.72rem; color: var(--text-muted);">${escapeHtml(h.client_version || h.user_agent || '-')}</td>
+            <td><span class="badge badge-success">⚡ ISOLATED</span></td>
           </tr>
         `).join('');
       } catch (err) {
-        console.error("Failed to fetch honeypot logs", err);
+        showToast('Failed to fetch deception logs: ' + err, 'danger');
       }
     }
 
@@ -1074,19 +1632,19 @@
       }
       const tr = document.createElement('tr');
       tr.innerHTML = `
-        <td style="font-family: var(--font-mono); color: var(--text-muted); font-size: 0.75rem;">${new Date(h.timestamp_ms || Date.now()).toLocaleTimeString()}</td>
+        <td style="font-family: var(--font-mono); color: var(--text-muted);">${new Date(h.timestamp_ms || Date.now()).toLocaleTimeString()}</td>
         <td><span class="badge ${h.trap_type === 'SSH' ? 'badge-critical' : 'badge-high'}">${escapeHtml(h.trap_type)}</span></td>
-        <td style="font-family: var(--font-mono); font-weight: 700; color: var(--magenta);">${escapeHtml(h.client_ip)}:${h.port || 0}</td>
+        <td><span class="ip-chip" style="color: var(--magenta);">${escapeHtml(h.client_ip)}:${h.port || 0}</span></td>
         <td style="font-family: var(--font-mono); font-size: 0.75rem;">
           ${h.username ? `User: <b style="color: var(--cyan);">${escapeHtml(h.username)}</b> Pass: <b style="color: var(--amber);">${escapeHtml(h.password || '')}</b>` : escapeHtml(h.requested_url || '-')}
         </td>
-        <td style="font-size: 0.75rem; color: var(--text-muted);">${escapeHtml(h.client_version || h.user_agent || '-')}</td>
-        <td><span class="badge badge-success">⚡ AUTO-BANNED</span></td>
+        <td style="font-size: 0.72rem; color: var(--text-muted);">${escapeHtml(h.client_version || h.user_agent || '-')}</td>
+        <td><span class="badge badge-success">⚡ ISOLATED</span></td>
       `;
       tbody.insertBefore(tr, tbody.firstChild);
     }
 
-    // Modal Handlers
+    // Modal Operations
     function openBanModal() {
       document.getElementById('ban-modal').classList.add('open');
       document.getElementById('ban-ip-input').focus();
@@ -1109,12 +1667,13 @@
         });
         if (res.ok) {
           closeBanModal();
+          showToast(`Quarantine enforced across L3/L4/L7 for ${ip}`, 'success', 'Target Isolated');
           refreshBans();
         } else {
-          alert("Ban failed");
+          showToast('Quarantine execution failed: ' + (await res.text()), 'danger');
         }
       } catch (err) {
-        alert("Error executing ban: " + err);
+        showToast('Error executing ban: ' + err, 'danger');
       }
     }
 
@@ -1139,17 +1698,16 @@
         if (res.ok) {
           closeSigmaModal();
           refreshSigmaRules();
-          alert("Sigma rule compiled and loaded into in-memory engine successfully!");
+          showToast('Sigma rule compiled and loaded in-memory', 'success', 'Rule Deployed');
         } else {
-          const errText = await res.text();
-          alert("Compilation failed: " + errText);
+          showToast('Rule compilation failed: ' + (await res.text()), 'danger');
         }
       } catch (err) {
-        alert("Error submitting Sigma rule: " + err);
+        showToast('Error submitting Sigma rule: ' + err, 'danger');
       }
     }
 
-    // Onboarding Wizard & Configuration
+    // First Boot Setup Wizard & Configuration
     async function checkFirstBootOnboarding() {
       try {
         const res = await fetch('/api/config');
@@ -1183,10 +1741,10 @@
         });
         if (res.ok) {
           document.getElementById('wizard-modal').classList.remove('open');
-          alert("🚀 Onboarding complete! Real-time SOC defense matrix is active.");
+          showToast('First boot onboarding complete. Defense matrix active.', 'success', 'System Initialized');
         }
       } catch (err) {
-        alert("Setup failed: " + err);
+        showToast('Setup failed: ' + err, 'danger');
       }
     }
 
@@ -1203,7 +1761,7 @@
           if (cfg.threat_intel_key) document.getElementById('cfg-intel-key').value = cfg.threat_intel_key;
         }
       } catch (err) {
-        console.error("Load config failed", err);
+        showToast('Failed to load configuration: ' + err, 'danger');
       }
     }
 
@@ -1226,10 +1784,10 @@
           body: JSON.stringify(payload)
         });
         if (res.ok) {
-          alert("✔ Runtime configuration updated and dynamically applied with zero restarts!");
+          showToast('Configuration saved & dynamically applied without process restart', 'success', 'Config Applied');
         }
       } catch (err) {
-        alert("Failed to save configuration: " + err);
+        showToast('Failed to save configuration: ' + err, 'danger');
       }
     }
 
@@ -1241,7 +1799,7 @@
           const tbody = document.getElementById('telemetry-tbody');
           tbody.innerHTML = '';
           if (!events || events.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--text-muted);">No matching telemetry incidents found.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: var(--text-muted); padding: 2rem;">No matching telemetry incidents found.</td></tr>';
             return;
           }
           events.forEach(prependEventRow);
@@ -1258,6 +1816,15 @@
         .replace(/'/g, '&#039;');
     }
 
+    // Keyboard navigation (Esc closes drawer/modals)
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        closePayloadDrawer();
+        closeBanModal();
+        closeSigmaModal();
+      }
+    });
+
     // Auto-init
     window.addEventListener('DOMContentLoaded', () => {
       initWebSocket();
@@ -1266,7 +1833,7 @@
       refreshSigmaRules();
       refreshFleetNodes();
       
-      // Auto-poll stats and fleet nodes every 3s as fallback
+      // Auto-poll stats every 3s as fallback
       setInterval(() => {
         fetch('/api/stats')
           .then(res => res.json())
