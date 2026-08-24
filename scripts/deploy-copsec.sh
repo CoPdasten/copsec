@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-#  CoPSeC - Enterprise Autonomous SIEM/SOAR System Deployment & Orchestration
+#  CoPSeC - Enterprise Edge Agent & Collector Automated Provisioning Pipeline
 # ==============================================================================
 #  Supported OS: Ubuntu, Debian, CentOS, AlmaLinux, Rocky Linux, RHEL, Fedora, Arch, Alpine
 #  Supported Arch: x86_64, aarch64 / arm64, armv7l
@@ -25,45 +25,45 @@ cat << 'ASCII_BANNER'
  ██║     ██║   ██║██╔═══╝ ╚════██║██╔══╝  ██║     
  ╚██████╗╚██████╔╝██║     ███████║███████╗╚██████╗
   ╚═════╝ ╚═════╝ ╚═╝     ╚══════╝╚══════╝ ╚═════╝
- Enterprise SIEM / Autonomous SOAR Deployment Pipeline
+ Enterprise Edge Sensor & Telemetry Collector Setup
 ASCII_BANNER
 echo -e "${CLR_RESET}"
 
 # 1. Privilege Validation
 if [ "$EUID" -ne 0 ]; then
-  echo -e "${CLR_RED}[ERROR] Provisioning pipeline must be executed as root (sudo).${CLR_RESET}"
+  echo -e "${CLR_RED}[ERROR] Provisioning script must be executed as root (sudo).${CLR_RESET}"
   exit 1
 fi
 
-DEPLOY_ROLE="all" # all, controller, collector
-CONTROLLER_GRPC="0.0.0.0:8443"
-CONTROLLER_WEB="0.0.0.0:8080"
-HONEYPOT_SSH=":2222"
-PULL_ET_RULES=true
+DEPLOY_ROLE="collector" # Default to collector agent only on remote nodes
+CONTROLLER_ADDR="${CONTROLLER_ADDR:-}"
+NODE_GROUP="${NODE_GROUP:-DEFAULT_EDGE}"
+CUSTOM_NODE_ID=""
+CUSTOM_API_KEY=""
 FORCE_REINSTALL=false
 
 # 2. Parse CLI Arguments
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --controller|-c|--grpc-addr)
+      CONTROLLER_ADDR="$2"
+      shift 2
+      ;;
+    --group|-g)
+      NODE_GROUP="$2"
+      shift 2
+      ;;
+    --node-id|-n)
+      CUSTOM_NODE_ID="$2"
+      shift 2
+      ;;
+    --api-key|-k)
+      CUSTOM_API_KEY="$2"
+      shift 2
+      ;;
     --role|-r)
       DEPLOY_ROLE="$2"
       shift 2
-      ;;
-    --grpc-addr)
-      CONTROLLER_GRPC="$2"
-      shift 2
-      ;;
-    --web-addr)
-      CONTROLLER_WEB="$2"
-      shift 2
-      ;;
-    --honeypot-ssh)
-      HONEYPOT_SSH="$2"
-      shift 2
-      ;;
-    --skip-et-rules)
-      PULL_ET_RULES=false
-      shift
       ;;
     --force|-f)
       FORCE_REINSTALL=true
@@ -73,13 +73,13 @@ while [[ $# -gt 0 ]]; do
       echo "Usage: sudo bash deploy-copsec.sh [OPTIONS]"
       echo ""
       echo "Options:"
-      echo "  --role, -r <ROLE>        Deployment role: 'all', 'controller', 'collector' (Default: all)"
-      echo "  --grpc-addr <ADDR>       Controller gRPC listen address (Default: 0.0.0.0:8443)"
-      echo "  --web-addr <ADDR>        Web SOC console listen address (Default: 0.0.0.0:8080)"
-      echo "  --honeypot-ssh <ADDR>    Fake SSH honeypot listen address (Default: :2222)"
-      echo "  --skip-et-rules          Skip downloading Emerging Threats rule sets"
-      echo "  --force, -f              Force overwrite existing configuration"
-      echo "  --help, -h               Show this help menu"
+      echo "  --controller, -c <ADDR>      Central Controller gRPC address (e.g. 198.51.100.10:8443)"
+      echo "  --group, -g <GROUP>          Fleet Cluster Tag (e.g. PROD_WEB, DB_CLUSTER, K8S_WORKER)"
+      echo "  --node-id, -n <ID>           Explicit Node ID (Default: auto-generated from hostname)"
+      echo "  --api-key, -k <KEY>          Authentication API key (Default: auto-generated live key)"
+      echo "  --role, -r <ROLE>            Role: 'collector' (Default), 'controller', or 'all'"
+      echo "  --force, -f                  Force overwrite existing configuration"
+      echo "  --help, -h                   Show this help menu"
       exit 0
       ;;
     *)
@@ -88,6 +88,21 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+# Prompt for Controller Address if not supplied and running on remote node
+if [ -z "$CONTROLLER_ADDR" ] && [ "$DEPLOY_ROLE" = "collector" ]; then
+  if [ -t 0 ]; then
+    echo -e "${CLR_YELLOW}[?] Central Controller gRPC address is required for remote telemetry streaming.${CLR_RESET}"
+    read -rp "Enter Central Controller Address [e.g. 198.51.100.10:8443]: " USER_INPUT_ADDR
+    CONTROLLER_ADDR="${USER_INPUT_ADDR:-127.0.0.1:8443}"
+  else
+    CONTROLLER_ADDR="127.0.0.1:8443"
+  fi
+fi
+
+echo -e "${CLR_GREEN}[+] Target Controller  : ${CLR_CYAN}${CONTROLLER_ADDR}${CLR_RESET}"
+echo -e "${CLR_GREEN}[+] Deployment Role    : ${CLR_CYAN}${DEPLOY_ROLE}${CLR_RESET}"
+echo -e "${CLR_GREEN}[+] Fleet Group Tag    : ${CLR_CYAN}${NODE_GROUP}${CLR_RESET}"
 
 # 3. Detect System Architecture and Distribution
 ARCH="$(uname -m)"
@@ -142,7 +157,7 @@ case "$PKG_MANAGER" in
     ;;
 esac
 
-# 5. Kernel & Sysctl Hardening (High-Throughput Conntrack & Netfilter Tuning)
+# 5. Kernel & Sysctl Hardening
 echo -e "${CLR_MAGENTA}[*] Configuring kernel sysctl boundaries (/etc/sysctl.d/99-copsec.conf)...${CLR_RESET}"
 cat << 'SYSCTL_EOF' > /etc/sysctl.d/99-copsec.conf
 # CoPSeC High-Performance SIEM/SOAR Kernel Parameter Tuning
@@ -160,176 +175,137 @@ if command -v sysctl >/dev/null 2>&1; then
   sysctl -p /etc/sysctl.d/99-copsec.conf >/dev/null 2>&1 || sysctl --system >/dev/null 2>&1 || true
 fi
 
-# 6. Initialize Directory Structure with Strict Permissions (0750 / 0640)
+# 6. Initialize Secure Directory Hierarchy
 echo -e "${CLR_MAGENTA}[*] Initializing secure directory hierarchy...${CLR_RESET}"
-mkdir -p /etc/copsec/sigma \
-         /etc/copsec/rules \
-         /etc/copsec/suricata/rules \
-         /var/lib/copsec/data \
-         /var/log/copsec \
-         /usr/local/bin \
-         /etc/nginx/conf.d
-
-chmod 0750 /etc/copsec /var/lib/copsec /var/log/copsec /etc/copsec/sigma /etc/copsec/suricata
+mkdir -p /etc/copsec /var/lib/copsec/data /var/log/copsec /usr/local/bin /etc/nginx/conf.d
+chmod 0750 /etc/copsec /var/lib/copsec /var/log/copsec
 
 # Ensure Nginx Blocklist file exists
 if [ ! -f "/etc/nginx/conf.d/copsec_blocklist.conf" ]; then
   cat << 'NGINX_BLK' > /etc/nginx/conf.d/copsec_blocklist.conf
 # CoPSeC Autonomous SOAR Layer-7 Dynamic WAF Blocklist
-# Auto-maintained by CoPSeC Controller
+# Auto-maintained by CoPSeC Agent
 NGINX_BLK
   chmod 0644 /etc/nginx/conf.d/copsec_blocklist.conf
 fi
 
-# 7. Pull Emerging Threats (ET Open) Rule Sets for Suricata
-if [ "$PULL_ET_RULES" = true ]; then
-  echo -e "${CLR_MAGENTA}[*] Synchronizing Proofpoint Emerging Threats (ET Open) rule sets...${CLR_RESET}"
-  ET_URL="https://rules.emergingthreats.net/open/suricata-7.0.0/emerging.rules.tar.gz"
-  TMP_TAR="/tmp/emerging.rules.tar.gz"
-  
-  if curl -sSL --connect-timeout 8 --max-time 30 "$ET_URL" -o "$TMP_TAR" 2>/dev/null; then
-    tar -xzf "$TMP_TAR" -C /etc/copsec/suricata/rules --strip-components=1 2>/dev/null || true
-    rm -f "$TMP_TAR"
-    echo -e "${CLR_GREEN}[+] Emerging Threats rule sets successfully deployed to /etc/copsec/suricata/rules${CLR_RESET}"
-  else
-    echo -e "${CLR_YELLOW}[WARN] Remote ET rules download skipped (network timeout or offline). Creating baseline ruleset.${CLR_RESET}"
-    cat << 'ET_FALLBACK' > /etc/copsec/suricata/rules/copsec_emerging.rules
-alert http any any -> any any (msg:"COPSEC ET WEB SQL Injection Attempt"; flow:established,to_server; content:"union"; nocase; content:"select"; nocase; sid:2000001; rev:1;)
-alert http any any -> any any (msg:"COPSEC ET WEB Shell Execution Attempt"; flow:established,to_server; content:"/bin/sh"; nocase; sid:2000002; rev:1;)
-alert tcp any any -> any 22 (msg:"COPSEC ET SCAN SSH Brute Force Inbound"; flags:S; threshold:type both, track by_src, count 5, seconds 60; sid:2000003; rev:1;)
-ET_FALLBACK
-  fi
+# 7. Detect Active Log Sources
+echo -e "${CLR_MAGENTA}[*] Detecting active server log sources...${CLR_RESET}"
+DETECTED_NGINX=""
+DETECTED_AUTH=""
+DETECTED_SYSLOG=""
+
+# Nginx / Web
+if [ -f "/var/log/nginx/access.log" ]; then
+  DETECTED_NGINX="/var/log/nginx/access.log"
+elif [ -f "/var/log/httpd/access_log" ]; then
+  DETECTED_NGINX="/var/log/httpd/access_log"
+elif [ -f "/var/log/apache2/access.log" ]; then
+  DETECTED_NGINX="/var/log/apache2/access.log"
+else
+  touch /var/log/copsec/dummy_web.log
+  DETECTED_NGINX="/var/log/copsec/dummy_web.log"
 fi
 
-# 8. Deploy Out-of-the-Box SigmaHQ Detection-as-Code Rules
-echo -e "${CLR_MAGENTA}[*] Deploying native SigmaHQ rules to /etc/copsec/sigma/...${CLR_RESET}"
-cat << 'SIGMA_SQLI' > /etc/copsec/sigma/web_sqli.yml
-title: Web Application SQL Injection Attack
-id: sigma-web-sqli-generic
-status: stable
-description: Detects SQL injection UNION, SELECT, OR 1=1 payloads in web access logs
-tags:
-  - attack.initial_access
-  - attack.t1190
-level: critical
-logsource:
-  category: webserver
-detection:
-  selection_sqli:
-    _raw|re: "(?i)(union\\s+select|select\\s+.*from|waitfor\\s+delay|sleep\\(\\d+\\)|'--|%27%20or%20|or\\s+1=1)"
-  condition: selection_sqli
-SIGMA_SQLI
+# Auth / SSH
+if [ -f "/var/log/auth.log" ]; then
+  DETECTED_AUTH="/var/log/auth.log"
+elif [ -f "/var/log/secure" ]; then
+  DETECTED_AUTH="/var/log/secure"
+else
+  touch /var/log/copsec/dummy_auth.log
+  DETECTED_AUTH="/var/log/copsec/dummy_auth.log"
+fi
 
-cat << 'SIGMA_RCE' > /etc/copsec/sigma/web_rce.yml
-title: Command Injection and Unix Shell Execution
-id: sigma-web-rce-execution
-status: stable
-description: Detects unix shell execution, pipe commands, and reverse shell triggers
-tags:
-  - attack.execution
-  - attack.t1059.004
-level: critical
-logsource:
-  category: webserver
-detection:
-  selection_cmd:
-    _raw|re: "(?i)(/bin/(sh|bash)|curl\\s+https?://.*\\|\\s*(sh|bash)|;\\s*(cat|id|whoami)\\s+|\\|\\s*(cat|id)\\s*|`whoami`|\\$\\(whoami\\))"
-  condition: selection_cmd
-SIGMA_RCE
+# Syslog
+if [ -f "/var/log/syslog" ]; then
+  DETECTED_SYSLOG="/var/log/syslog"
+elif [ -f "/var/log/messages" ]; then
+  DETECTED_SYSLOG="/var/log/messages"
+else
+  touch /var/log/copsec/dummy_sys.log
+  DETECTED_SYSLOG="/var/log/copsec/dummy_sys.log"
+fi
 
-cat << 'SIGMA_SSH' > /etc/copsec/sigma/ssh_bruteforce.yml
-title: SSH Authentication Brute-Force Activity
-id: sigma-ssh-auth-bruteforce
-status: stable
-description: Detects repeated authentication failures on SSH service
-tags:
-  - attack.credential_access
-  - attack.t1110.001
-level: high
-logsource:
-  service: sshd
-detection:
-  selection_auth:
-    _raw|re: "(?i)(Failed password for (invalid user )?[a-zA-Z0-9_.-]+ from \\d+\\.\\d+\\.\\d+\\.\\d+|Invalid user [a-zA-Z0-9_.-]+ from \\d+\\.\\d+\\.\\d+\\.\\d+)"
-  condition: selection_auth
-SIGMA_SSH
+# 8. Enroll / Load Node Identity
+NODE_ID_FILE="/etc/copsec/node.json"
+HOSTNAME="$(hostname -s 2>/dev/null || echo "edge")"
 
-chmod 0640 /etc/copsec/sigma/*.yml
+if [ ! -f "$NODE_ID_FILE" ] || [ "$FORCE_REINSTALL" = true ]; then
+  RANDOM_HEX="$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n' | head -c 6)"
+  FINAL_NODE_ID="${CUSTOM_NODE_ID:-node-${HOSTNAME}-${RANDOM_HEX}}"
+  KEY_RANDOM="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' | head -c 24)"
+  FINAL_API_KEY="${CUSTOM_API_KEY:-cps_live_${KEY_RANDOM}}"
 
-# 9. Build and Install Binaries
+  cat << JSON_EOF > "$NODE_ID_FILE"
+{
+  "node_id": "${FINAL_NODE_ID}",
+  "api_key": "${FINAL_API_KEY}",
+  "hostname": "${HOSTNAME}",
+  "group": "${NODE_GROUP}",
+  "created_at": $(date +%s%3N)
+}
+JSON_EOF
+  chmod 0600 "$NODE_ID_FILE"
+  echo -e "${CLR_GREEN}[+] Enrolled Node Identity : ${CLR_CYAN}${FINAL_NODE_ID}${CLR_RESET}"
+else
+  FINAL_NODE_ID="$(grep -o '"node_id": *"[^"]*"' "$NODE_ID_FILE" | cut -d'"' -f4 || echo "node-${HOSTNAME}")"
+  echo -e "${CLR_GREEN}[+] Using Existing Node ID : ${CLR_CYAN}${FINAL_NODE_ID}${CLR_RESET}"
+fi
+
+# 9. Whitelist File
+WHITELIST_FILE="/etc/copsec/whitelist.json"
+if [ ! -f "$WHITELIST_FILE" ]; then
+  cat << 'WL_EOF' > "$WHITELIST_FILE"
+{
+  "trusted_cidrs": [
+    "127.0.0.1/32",
+    "::1/128",
+    "100.64.0.0/10",
+    "10.0.0.0/8",
+    "172.16.0.0/12",
+    "192.168.0.0/16"
+  ],
+  "allowed_http_codes": [
+    400, 401, 403, 404, 405, 429, 500, 502, 503
+  ]
+}
+WL_EOF
+  chmod 0640 "$WHITELIST_FILE"
+fi
+
+# 10. Install / Build Collector Binary
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 
-if command -v go >/dev/null 2>&1; then
-  if [ "$DEPLOY_ROLE" = "all" ] || [ "$DEPLOY_ROLE" = "controller" ]; then
-    echo -e "${CLR_MAGENTA}[*] Compiling copsec-controller (Embedded Web SOC + Sigma Engine)...${CLR_RESET}"
+if command -v go >/dev/null 2>&1 && [ -d "${ROOT_DIR}/collector" ]; then
+  echo -e "${CLR_MAGENTA}[*] Compiling copsec-collector binary...${CLR_RESET}"
+  (cd "${ROOT_DIR}/collector" && go build -ldflags="-s -w" -o /usr/local/bin/copsec-collector .)
+  chmod 0755 /usr/local/bin/copsec-collector
+  echo -e "${CLR_GREEN}[+] Compiled and Installed : ${CLR_CYAN}/usr/local/bin/copsec-collector${CLR_RESET}"
+elif [ -f "${ROOT_DIR}/collector/copsec-collector" ]; then
+  cp -f "${ROOT_DIR}/collector/copsec-collector" /usr/local/bin/copsec-collector
+  chmod 0755 /usr/local/bin/copsec-collector
+elif [ -f "./copsec-collector" ]; then
+  cp -f "./copsec-collector" /usr/local/bin/copsec-collector
+  chmod 0755 /usr/local/bin/copsec-collector
+fi
+
+# Optional Controller Compilation if role includes controller
+if [ "$DEPLOY_ROLE" = "controller" ] || [ "$DEPLOY_ROLE" = "all" ]; then
+  if command -v go >/dev/null 2>&1 && [ -d "${ROOT_DIR}/controller" ]; then
+    echo -e "${CLR_MAGENTA}[*] Compiling copsec-controller...${CLR_RESET}"
     (cd "${ROOT_DIR}/controller" && go build -ldflags="-s -w" -o /usr/local/bin/copsec-controller .)
     chmod 0755 /usr/local/bin/copsec-controller
-    echo -e "${CLR_GREEN}[+] Installed Controller : ${CLR_CYAN}/usr/local/bin/copsec-controller${CLR_RESET}"
-  fi
-
-  if [ "$DEPLOY_ROLE" = "all" ] || [ "$DEPLOY_ROLE" = "collector" ]; then
-    echo -e "${CLR_MAGENTA}[*] Compiling copsec-collector (High-Performance Edge Sensor)...${CLR_RESET}"
-    (cd "${ROOT_DIR}/collector" && go build -ldflags="-s -w" -o /usr/local/bin/copsec-collector .)
-    chmod 0755 /usr/local/bin/copsec-collector
-    echo -e "${CLR_GREEN}[+] Installed Collector  : ${CLR_CYAN}/usr/local/bin/copsec-collector${CLR_RESET}"
-  fi
-else
-  echo -e "${CLR_YELLOW}[WARN] Go compiler not found. Attempting to copy prebuilt binaries...${CLR_RESET}"
-  if [ -f "${ROOT_DIR}/controller/copsec-controller" ]; then
-    cp -f "${ROOT_DIR}/controller/copsec-controller" /usr/local/bin/copsec-controller
-    chmod 0755 /usr/local/bin/copsec-controller
-  fi
-  if [ -f "${ROOT_DIR}/collector/copsec-collector" ]; then
-    cp -f "${ROOT_DIR}/collector/copsec-collector" /usr/local/bin/copsec-collector
-    chmod 0755 /usr/local/bin/copsec-collector
   fi
 fi
 
-# 10. Register Persistent Systemd Daemons
+# 11. Register Systemd Daemon for Edge Collector
 if command -v systemctl >/dev/null 2>&1; then
-  # Controller Service
-  if [ "$DEPLOY_ROLE" = "all" ] || [ "$DEPLOY_ROLE" = "controller" ]; then
-    echo -e "${CLR_MAGENTA}[*] Configuring Controller Systemd Daemon (/etc/systemd/system/copsec-controller.service)...${CLR_RESET}"
-    cat << SVC_CTL > /etc/systemd/system/copsec-controller.service
-[Unit]
-Description=CoPSeC Central SIEM / SOAR Controller & Embedded Web SOC
-Documentation=https://github.com/CoPdasten/copsec
-After=network.target network-online.target systemd-sysctl.service
-Wants=network-online.target
+  SERVICE_FILE="/etc/systemd/system/copsec-collector.service"
+  echo -e "${CLR_MAGENTA}[*] Configuring Collector Systemd Unit (/etc/systemd/system/copsec-collector.service)...${CLR_RESET}"
 
-[Service]
-Type=simple
-User=root
-Group=root
-WorkingDirectory=/var/lib/copsec
-ExecStart=/usr/local/bin/copsec-controller \\
-  -grpc-addr ${CONTROLLER_GRPC} \\
-  -web-addr ${CONTROLLER_WEB} \\
-  -honeypot-ssh "${HONEYPOT_SSH}" \\
-  -db /var/lib/copsec/data/copsec.db \\
-  -sigma-dir /etc/copsec/sigma \\
-  -headless=true
-Restart=always
-RestartSec=3s
-LimitNOFILE=1048576
-CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_NET_BIND_SERVICE CAP_SYS_ADMIN
-AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW CAP_NET_BIND_SERVICE CAP_SYS_ADMIN
-StandardOutput=journal
-StandardError=journal
-
-[Install]
-WantedBy=multi-user.target
-SVC_CTL
-    systemctl daemon-reload
-    systemctl enable copsec-controller.service >/dev/null 2>&1 || true
-    systemctl restart copsec-controller.service || true
-  fi
-
-  # Collector Service
-  if [ "$DEPLOY_ROLE" = "all" ] || [ "$DEPLOY_ROLE" = "collector" ]; then
-    echo -e "${CLR_MAGENTA}[*] Configuring Collector Systemd Daemon (/etc/systemd/system/copsec-collector.service)...${CLR_RESET}"
-    cat << SVC_COL > /etc/systemd/system/copsec-collector.service
+  cat << SVC_COL > "$SERVICE_FILE"
 [Unit]
 Description=CoPSeC Edge Telemetry Collector & SOAR Sensor
 Documentation=https://github.com/CoPdasten/copsec
@@ -342,11 +318,14 @@ User=root
 Group=root
 WorkingDirectory=/var/lib/copsec
 ExecStart=/usr/local/bin/copsec-collector \\
-  -controller 127.0.0.1:8443 \\
+  -controller ${CONTROLLER_ADDR} \\
   -node-identity /etc/copsec/node.json \\
   -buffer-db /var/lib/copsec/data/buffer.db \\
   -offset-file /var/lib/copsec/offsets.json \\
-  -whitelist /etc/copsec/whitelist.json
+  -whitelist /etc/copsec/whitelist.json \\
+  -nginx-log ${DETECTED_NGINX} \\
+  -auth-log ${DETECTED_AUTH} \\
+  -syslog ${DETECTED_SYSLOG}
 Restart=always
 RestartSec=3s
 LimitNOFILE=1048576
@@ -358,18 +337,18 @@ StandardError=journal
 [Install]
 WantedBy=multi-user.target
 SVC_COL
-    systemctl daemon-reload
-    systemctl enable copsec-collector.service >/dev/null 2>&1 || true
-    systemctl restart copsec-collector.service || true
-  fi
+
+  systemctl daemon-reload
+  systemctl enable copsec-collector.service >/dev/null 2>&1 || true
+  systemctl restart copsec-collector.service || true
 
   echo -e "${CLR_GREEN}==============================================================================${CLR_RESET}"
-  echo -e "${CLR_GREEN} ✔ CoPSeC Enterprise Platform Successfully Provisioned and Orchestrated!${CLR_RESET}"
+  echo -e "${CLR_GREEN} ✔ CoPSeC Edge Collector Agent Successfully Deployed & Active!${CLR_RESET}"
   echo -e "${CLR_GREEN}==============================================================================${CLR_RESET}"
-  echo -e " • Web SOC Console : ${CLR_CYAN}http://${CONTROLLER_WEB}${CLR_RESET}"
-  echo -e " • gRPC Collector  : ${CLR_CYAN}${CONTROLLER_GRPC}${CLR_RESET}"
-  echo -e " • SSH Honeypot    : ${CLR_CYAN}${HONEYPOT_SSH}${CLR_RESET}"
-  echo -e " • Sigma HQ Rules  : ${CLR_CYAN}/etc/copsec/sigma/${CLR_RESET}"
-  echo -e " • Service Status  : ${CLR_GREEN}Active Systemd Daemons Running${CLR_RESET}"
+  echo -e " • Node ID     : ${CLR_CYAN}${FINAL_NODE_ID}${CLR_RESET}"
+  echo -e " • Fleet Group : ${CLR_CYAN}${NODE_GROUP}${CLR_RESET}"
+  echo -e " • Controller  : ${CLR_CYAN}${CONTROLLER_ADDR}${CLR_RESET}"
+  echo -e " • Service     : ${CLR_GREEN}copsec-collector.service (active)${CLR_RESET}"
+  echo -e " • Logs        : ${CLR_GRAY}journalctl -u copsec-collector -f${CLR_RESET}"
   echo -e "${CLR_GREEN}==============================================================================${CLR_RESET}"
 fi

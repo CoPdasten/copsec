@@ -3,20 +3,27 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"sync"
 	"syscall"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"golang.org/x/term"
 )
 
 func main() {
-	grpcAddr := flag.String("grpc-addr", "0.0.0.0:8443", "gRPC listen address")
-	webAddr := flag.String("web-addr", "0.0.0.0:8080", "Embedded Web SOC listen address")
-	honeypotSSHAddr := flag.String("honeypot-ssh", ":2222", "Fake SSH Honeypot listen address")
+	grpcAddrFlag := flag.String("grpc-addr", "", "gRPC listen address (e.g. 0.0.0.0:8443)")
+	grpcPortFlag := flag.Int("grpc-port", 8443, "gRPC listen port")
+	webAddrFlag := flag.String("web-addr", "", "Embedded Web SOC listen address (e.g. 0.0.0.0:8080)")
+	webPortFlag := flag.Int("web-port", 8080, "Embedded Web SOC listen port")
+	honeypotSSHAddrFlag := flag.String("honeypot-ssh", "", "Fake SSH Honeypot listen address (e.g. :2222)")
+	sshTrapPortFlag := flag.Int("ssh-trap-port", 2222, "Fake SSH Honeypot trap port")
+
 	rulesPath := flag.String("rules", "../config/rules.json", "Rules JSON path")
 	sigmaDir := flag.String("sigma-dir", "/etc/copsec/sigma", "SigmaHQ detection rules directory")
 	dbPath := flag.String("db", "./data/copsec.db", "SQLite DB path")
@@ -24,8 +31,28 @@ func main() {
 	tgChat := flag.String("telegram-chat", os.Getenv("COPSEC_TELEGRAM_CHAT_ID"), "Telegram Chat ID")
 	autoBan := flag.Bool("auto-ban", true, "Enable autonomous SOAR auto-ban")
 	autoBanThreshold := flag.Int("auto-ban-threshold", 50, "Threat score threshold for auto-ban")
-	headless := flag.Bool("headless", false, "Run in headless daemon mode without TUI dashboard")
+	daemon := flag.Bool("daemon", false, "Run in headless daemon mode without TUI dashboard")
+	headless := flag.Bool("headless", false, "Alias for --daemon")
 	flag.Parse()
+
+	// Resolve effective addresses and ports
+	grpcAddr := fmt.Sprintf("0.0.0.0:%d", *grpcPortFlag)
+	if *grpcAddrFlag != "" {
+		grpcAddr = *grpcAddrFlag
+	}
+
+	webAddr := fmt.Sprintf("0.0.0.0:%d", *webPortFlag)
+	if *webAddrFlag != "" {
+		webAddr = *webAddrFlag
+	}
+
+	honeypotSSHAddr := fmt.Sprintf(":%d", *sshTrapPortFlag)
+	if *honeypotSSHAddrFlag != "" {
+		honeypotSSHAddr = *honeypotSSHAddrFlag
+	}
+
+	isInteractiveTTY := term.IsTerminal(int(os.Stdin.Fd()))
+	isDaemonMode := *daemon || *headless || !isInteractiveTTY
 
 	log.Println("[INFO] ⚡ CoPSeC Distributed Micro-SIEM / Autonomous SOAR Matrix initializing...")
 
@@ -84,12 +111,12 @@ func main() {
 
 	// 5. Embedded Deception & Rate-Limiting Traps
 	deceptionRouter := NewHoneyDeceptionRouter(centralServer, ttlManager, storage)
-	rateLimiter := NewTokenBucketRateLimiter(25.0, 50.0, centralServer, ttlManager) // 25 req/s, burst 50
+	rateLimiter := NewTokenBucketRateLimiter(25.0, 50.0, centralServer, ttlManager)
 
-	honeypotSSH := NewHoneypotSSHServer(*honeypotSSHAddr, centralServer, ttlManager, storage)
+	honeypotSSH := NewHoneypotSSHServer(honeypotSSHAddr, centralServer, ttlManager, storage)
 	if honeypotSSH != nil {
 		if err := honeypotSSH.Start(); err != nil {
-			log.Printf("[WARN] Fake SSH honeypot startup on %s failed: %v", *honeypotSSHAddr, err)
+			log.Printf("[WARN] Fake SSH honeypot startup on %s failed: %v", honeypotSSHAddr, err)
 		} else {
 			defer honeypotSSH.Stop()
 		}
@@ -111,7 +138,7 @@ func main() {
 
 	// 7. Embedded Web SOC Server
 	webServer := NewWebSOCServer(
-		*webAddr,
+		webAddr,
 		centralServer,
 		storage,
 		ttlManager,
@@ -127,7 +154,7 @@ func main() {
 
 	// 8. Start gRPC Ingestion Server in background
 	go func() {
-		grpcServer, err := StartGRPCServer(*grpcAddr, centralServer)
+		grpcServer, err := StartGRPCServer(grpcAddr, centralServer)
 		if err != nil {
 			log.Fatalf("[FATAL] gRPC server binding failed: %v", err)
 		}
@@ -137,19 +164,26 @@ func main() {
 
 	// Handle OS shutdown signals
 	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 
-	if *headless {
-		log.Printf("[INFO] ⚡ CoPSeC Controller running in Headless Mode on gRPC %s, Web SOC http://%s. Auto-Ban: %v (Threshold: %d). Press Ctrl+C to stop.",
-			*grpcAddr, *webAddr, *autoBan, *autoBanThreshold)
+	if isDaemonMode {
+		log.Printf("[INFO] ⚡ CoPSeC Controller running in Headless / Daemon Mode:")
+		log.Printf("       • Web SOC Console : http://%s", webAddr)
+		log.Printf("       • gRPC Ingestion  : %s", grpcAddr)
+		log.Printf("       • SSH Honeypot    : %s", honeypotSSHAddr)
+		log.Printf("       • Autonomous SOAR : Auto-Ban=%v (Threshold: %d)", *autoBan, *autoBanThreshold)
+		log.Printf("[INFO] Press Ctrl+C or send SIGTERM to stop.")
+
 		<-sigChan
-		log.Println("[INFO] Shutting down Controller gracefully...")
+		log.Println("[INFO] Shutting down CoPSeC Controller gracefully...")
 		cancel()
 		wg.Wait()
+		// Allow background flushes
+		time.Sleep(200 * time.Millisecond)
 		return
 	}
 
-	// 9. Matrix Cyberpunk TUI Dashboard (Bubbletea)
+	// 9. Matrix Cyberpunk TUI Dashboard (Bubbletea) - Only in interactive TTY
 	logFile, err := os.OpenFile("/tmp/copsec_controller.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0640)
 	if err == nil {
 		log.SetOutput(logFile)

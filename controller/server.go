@@ -18,21 +18,23 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 )
 
 // NodeSession tracks live agent status and command communication channels.
 type NodeSession struct {
-	NodeID          string
-	APIKey          string
-	Group           string
-	RemoteAddr      string
-	LastSeen        time.Time
-	CPUUsage        float64
-	MemoryUsage     float64
-	ActiveBansCount int32
-	UptimeSeconds   int64
-	CommandChan     chan *copsecproto.SOARCommand
+	NodeID          string    `json:"node_id"`
+	APIKey          string    `json:"api_key"`
+	Hostname        string    `json:"hostname"`
+	Group           string    `json:"group"`
+	RemoteAddr      string    `json:"remote_addr"`
+	LastSeen        time.Time `json:"last_seen"`
+	CPUUsage        float64   `json:"cpu_usage"`
+	MemoryUsage     float64   `json:"memory_usage"`
+	ActiveBansCount int32     `json:"active_bans_count"`
+	UptimeSeconds   int64     `json:"uptime_seconds"`
+	CommandChan     chan *copsecproto.SOARCommand `json:"-"`
 }
 
 // CentralServer implements the gRPC CopsecStreamService with threat analysis, auto-auth & autonomous SOAR.
@@ -184,31 +186,67 @@ func (s *CentralServer) authenticate(ctx context.Context) (string, error) {
 		return "", status.Errorf(codes.Unauthenticated, "invalid credentials format")
 	}
 
-	groups := md.Get("x-node-group")
 	group := "DEFAULT_EDGE"
-	if len(groups) > 0 && groups[0] != "" {
+	if groups := md.Get("x-node-group"); len(groups) > 0 && groups[0] != "" {
 		group = groups[0]
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	hostname := ""
+	if hostnames := md.Get("x-hostname"); len(hostnames) > 0 && hostnames[0] != "" {
+		hostname = hostnames[0]
+	}
+	if hostname == "" {
+		hostname = strings.TrimPrefix(nodeID, "node-")
+	}
 
+	remoteAddr := ""
+	if p, ok := peer.FromContext(ctx); ok {
+		remoteAddr = p.Addr.String()
+	}
+
+	s.mu.Lock()
 	session, exists := s.nodes[nodeID]
 	if !exists {
 		session = &NodeSession{
 			NodeID:      nodeID,
 			APIKey:      apiKey,
+			Hostname:    hostname,
 			Group:       group,
+			RemoteAddr:  remoteAddr,
 			LastSeen:    time.Now(),
 			CommandChan: make(chan *copsecproto.SOARCommand, 128),
 		}
 		s.nodes[nodeID] = session
-		log.Printf("[AUTH] Registered new edge node: %s (Group: %s)", nodeID, group)
+		log.Printf("[AUTH] Registered new edge node: %s (Host: %s, Group: %s, Addr: %s)", nodeID, hostname, group, remoteAddr)
 	} else {
 		session.LastSeen = time.Now()
 		if group != "DEFAULT_EDGE" {
 			session.Group = group
 		}
+		if hostname != "" {
+			session.Hostname = hostname
+		}
+		if remoteAddr != "" {
+			session.RemoteAddr = remoteAddr
+		}
+	}
+	s.mu.Unlock()
+
+	// Persist to storage node registry
+	if s.storage != nil {
+		_ = s.storage.RegisterOrUpdateNode(&NodeRegistryRecord{
+			NodeID:          nodeID,
+			APIKey:          apiKey,
+			Hostname:        hostname,
+			GroupName:       group,
+			RemoteAddr:      remoteAddr,
+			LastSeenMs:      time.Now().UnixMilli(),
+			CPUUsage:        session.CPUUsage,
+			MemoryUsage:     session.MemoryUsage,
+			ActiveBansCount: int(session.ActiveBansCount),
+			UptimeSeconds:   session.UptimeSeconds,
+			Status:          "ACTIVE",
+		})
 	}
 
 	return nodeID, nil
@@ -460,7 +498,8 @@ func (s *CentralServer) SendHeartbeat(ctx context.Context, hb *copsecproto.Heart
 	}
 
 	s.mu.Lock()
-	if session, ok := s.nodes[nodeID]; ok {
+	session, ok := s.nodes[nodeID]
+	if ok {
 		session.LastSeen = time.Now()
 		session.UptimeSeconds = hb.UptimeSeconds
 		session.CPUUsage = hb.CpuUsage
@@ -468,6 +507,21 @@ func (s *CentralServer) SendHeartbeat(ctx context.Context, hb *copsecproto.Heart
 		session.ActiveBansCount = hb.ActiveBansCount
 	}
 	s.mu.Unlock()
+
+	if ok && s.storage != nil {
+		_ = s.storage.RegisterOrUpdateNode(&NodeRegistryRecord{
+			NodeID:          nodeID,
+			Hostname:        session.Hostname,
+			GroupName:       session.Group,
+			RemoteAddr:      session.RemoteAddr,
+			LastSeenMs:      time.Now().UnixMilli(),
+			CPUUsage:        hb.CpuUsage,
+			MemoryUsage:     hb.MemoryUsage,
+			ActiveBansCount: int(hb.ActiveBansCount),
+			UptimeSeconds:   hb.UptimeSeconds,
+			Status:          "ACTIVE",
+		})
+	}
 
 	return &copsecproto.HeartbeatResponse{
 		Acknowledged: true,

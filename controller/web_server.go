@@ -484,11 +484,35 @@ func (ws *WebSOCServer) handleHoneypotLogs(w http.ResponseWriter, r *http.Reques
 func (ws *WebSOCServer) handleNodes(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
-	if ws.server == nil {
-		json.NewEncoder(w).Encode([]NodeSession{})
+	// Merge live sessions with registered nodes from SQLite
+	if ws.storage != nil {
+		nodes, err := ws.storage.GetRegisteredNodes()
+		if err == nil && len(nodes) > 0 {
+			json.NewEncoder(w).Encode(nodes)
+			return
+		}
+	}
+
+	if ws.server != nil {
+		sessions := ws.server.GetNodesSnapshot()
+		var list []NodeRegistryRecord
+		for _, s := range sessions {
+			list = append(list, NodeRegistryRecord{
+				NodeID:          s.NodeID,
+				Hostname:        s.Hostname,
+				GroupName:       s.Group,
+				RemoteAddr:      s.RemoteAddr,
+				LastSeenMs:      s.LastSeen.UnixMilli(),
+				CPUUsage:        s.CPUUsage,
+				MemoryUsage:     s.MemoryUsage,
+				ActiveBansCount: int(s.ActiveBansCount),
+				UptimeSeconds:   s.UptimeSeconds,
+				Status:          "ACTIVE",
+			})
+		}
+		json.NewEncoder(w).Encode(list)
 		return
 	}
 
-	nodes := ws.server.GetNodesSnapshot()
-	json.NewEncoder(w).Encode(nodes)
+	json.NewEncoder(w).Encode([]NodeRegistryRecord{})
 }

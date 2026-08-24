@@ -54,6 +54,21 @@ type MITREStat struct {
 	Count       int    `json:"count"`
 }
 
+// NodeRegistryRecord represents a connected distributed edge node / VDS instance.
+type NodeRegistryRecord struct {
+	NodeID          string  `json:"node_id"`
+	APIKey          string  `json:"api_key,omitempty"`
+	Hostname        string  `json:"hostname"`
+	GroupName       string  `json:"group_name"`
+	RemoteAddr      string  `json:"remote_addr"`
+	LastSeenMs      int64   `json:"last_seen_ms"`
+	CPUUsage        float64 `json:"cpu_usage"`
+	MemoryUsage     float64 `json:"memory_usage"`
+	ActiveBansCount int     `json:"active_bans_count"`
+	UptimeSeconds   int64   `json:"uptime_seconds"`
+	Status          string  `json:"status"`
+}
+
 // StorageEngine manages the embedded WAL-mode SQLite database.
 type StorageEngine struct {
 	mu sync.RWMutex
@@ -138,7 +153,13 @@ func (s *StorageEngine) initSchema() error {
 		node_id TEXT PRIMARY KEY,
 		api_key TEXT NOT NULL,
 		hostname TEXT DEFAULT '',
+		group_name TEXT DEFAULT 'DEFAULT_EDGE',
+		remote_addr TEXT DEFAULT '',
 		last_seen_ms INTEGER NOT NULL,
+		cpu_usage REAL DEFAULT 0,
+		memory_usage REAL DEFAULT 0,
+		active_bans_count INTEGER DEFAULT 0,
+		uptime_seconds INTEGER DEFAULT 0,
 		status TEXT DEFAULT 'ACTIVE'
 	);
 
@@ -171,7 +192,7 @@ func (s *StorageEngine) initSchema() error {
 		return err
 	}
 
-	// Safe migration check for active_bans columns if table existed previously
+	// Safe column migration check for active_bans & node_registry if tables existed previously
 	cols := []string{
 		"ALTER TABLE active_bans ADD COLUMN expire_time_ms INTEGER DEFAULT 0",
 		"ALTER TABLE active_bans ADD COLUMN penalty_tier TEXT DEFAULT 'TEMP_ISOLATION'",
@@ -179,9 +200,15 @@ func (s *StorageEngine) initSchema() error {
 		"ALTER TABLE active_bans ADD COLUMN l4_active INTEGER DEFAULT 1",
 		"ALTER TABLE active_bans ADD COLUMN l7_active INTEGER DEFAULT 1",
 		"ALTER TABLE active_bans ADD COLUMN offense_count INTEGER DEFAULT 1",
+		"ALTER TABLE node_registry ADD COLUMN group_name TEXT DEFAULT 'DEFAULT_EDGE'",
+		"ALTER TABLE node_registry ADD COLUMN remote_addr TEXT DEFAULT ''",
+		"ALTER TABLE node_registry ADD COLUMN cpu_usage REAL DEFAULT 0",
+		"ALTER TABLE node_registry ADD COLUMN memory_usage REAL DEFAULT 0",
+		"ALTER TABLE node_registry ADD COLUMN active_bans_count INTEGER DEFAULT 0",
+		"ALTER TABLE node_registry ADD COLUMN uptime_seconds INTEGER DEFAULT 0",
 	}
 	for _, colSQL := range cols {
-		_, _ = s.db.Exec(colSQL) // ignore error if column already exists
+		_, _ = s.db.Exec(colSQL)
 	}
 
 	return nil
@@ -211,6 +238,50 @@ func (s *StorageEngine) UpdateEventAI(eventID int64, aiAnalysis string) error {
 	query := `UPDATE events SET ai_analysis = ? WHERE id = ?`
 	_, err := s.db.Exec(query, aiAnalysis, eventID)
 	return err
+}
+
+// RegisterOrUpdateNode registers or updates an edge node session in SQLite.
+func (s *StorageEngine) RegisterOrUpdateNode(node *NodeRegistryRecord) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	query := `INSERT INTO node_registry (node_id, api_key, hostname, group_name, remote_addr, last_seen_ms, cpu_usage, memory_usage, active_bans_count, uptime_seconds, status)
+	          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	          ON CONFLICT(node_id) DO UPDATE SET
+	            hostname = excluded.hostname,
+	            group_name = excluded.group_name,
+	            remote_addr = excluded.remote_addr,
+	            last_seen_ms = excluded.last_seen_ms,
+	            cpu_usage = excluded.cpu_usage,
+	            memory_usage = excluded.memory_usage,
+	            active_bans_count = excluded.active_bans_count,
+	            uptime_seconds = excluded.uptime_seconds,
+	            status = excluded.status`
+	_, err := s.db.Exec(query, node.NodeID, node.APIKey, node.Hostname, node.GroupName, node.RemoteAddr, node.LastSeenMs, node.CPUUsage, node.MemoryUsage, node.ActiveBansCount, node.UptimeSeconds, node.Status)
+	return err
+}
+
+// GetRegisteredNodes retrieves all known edge nodes from SQLite.
+func (s *StorageEngine) GetRegisteredNodes() ([]NodeRegistryRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	query := `SELECT node_id, hostname, group_name, remote_addr, last_seen_ms, cpu_usage, memory_usage, active_bans_count, uptime_seconds, status
+	          FROM node_registry ORDER BY last_seen_ms DESC`
+	rows, err := s.db.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var list []NodeRegistryRecord
+	for rows.Next() {
+		var n NodeRegistryRecord
+		if err := rows.Scan(&n.NodeID, &n.Hostname, &n.GroupName, &n.RemoteAddr, &n.LastSeenMs, &n.CPUUsage, &n.MemoryUsage, &n.ActiveBansCount, &n.UptimeSeconds, &n.Status); err == nil {
+			list = append(list, n)
+		}
+	}
+	return list, nil
 }
 
 // RecordBan saves a banned IP in the jail (backward compatible).
@@ -424,11 +495,11 @@ func (s *StorageEngine) SearchEvents(filterStr string, limit int) ([]*StoredEven
 			args = append(args, scoreVal)
 		} else if strings.HasPrefix(token, "q:") {
 			qVal := strings.TrimPrefix(token, "q:")
-			conditions = append(conditions, "(raw_line LIKE ? OR client_ip LIKE ? OR rule_id LIKE ?)")
-			args = append(args, "%"+qVal+"%", "%"+qVal+"%", "%"+qVal+"%")
+			conditions = append(conditions, "(raw_line LIKE ? OR client_ip LIKE ? OR rule_id LIKE ? OR node_id LIKE ?)")
+			args = append(args, "%"+qVal+"%", "%"+qVal+"%", "%"+qVal+"%", "%"+qVal+"%")
 		} else {
-			conditions = append(conditions, "(raw_line LIKE ? OR client_ip LIKE ? OR rule_id LIKE ?)")
-			args = append(args, "%"+token+"%", "%"+token+"%", "%"+token+"%")
+			conditions = append(conditions, "(raw_line LIKE ? OR client_ip LIKE ? OR rule_id LIKE ? OR node_id LIKE ?)")
+			args = append(args, "%"+token+"%", "%"+token+"%", "%"+token+"%", "%"+token+"%")
 		}
 	}
 
