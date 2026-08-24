@@ -1,0 +1,25 @@
+title: Advanced Web Exploits and Modern Injection Vectors
+id: sigma-web-advanced
+status: stable
+description: Detects Server-Side Template Injection (SSTI), PHP Wrappers / LFI, Out-of-Band Exfiltration, and NoSQL Injection
+tags:
+  - attack.initial_access
+  - attack.t1190
+  - attack.persistence
+  - attack.t1505.003
+level: critical
+logsource:
+  category: webserver
+  product: nginx
+detection:
+  selection_ssti:
+    _raw|re: "(?i)(\\{\\{7\\*7\\}|\\$\\{\\{7\\*7\\}|#\\{7\\*7\\}|\\{\\{config\\.items\\(\\)\\}|\\{\\{lipsum|\\{\\{cycler)"
+  selection_wrappers:
+    _raw|re: "(?i)(php://(filter|input)|data://text/plain;base64|expect://|zip://|phar://)"
+  selection_oast:
+    _raw|re: "(?i)(\\.oastify\\.com|\\.interact\\.sh|\\.burpcollaborator\\.net|\\.ngrok-free\\.app)"
+  selection_nosql:
+    _raw|re: "(?i)(\"\\$gt\":\\s*\"\"|\"\\$ne\":\\s*\"\"|\\[\\$regex\\]=|\\[\\$gt\\]=)"
+  condition: 1 of selection_*
+falsepositives:
+  - Security research testing or authorized fuzzing

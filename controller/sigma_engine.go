@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/copsec/controller/pkg/sigma"
 	"gopkg.in/yaml.v3"
 )
 
@@ -107,10 +108,11 @@ type FieldEvaluator struct {
 
 func (fe *FieldEvaluator) Evaluate(fields map[string]string, rawLine string) bool {
 	var targetVal string
-	if fe.FieldName == "" || fe.FieldName == "_raw" || fe.FieldName == "raw" || fe.FieldName == "message" {
+	fieldName := strings.ToLower(fe.FieldName)
+	if fieldName == "" || fieldName == "_raw" || fieldName == "raw" || fieldName == "message" || fieldName == "rawlog" {
 		targetVal = rawLine
 	} else {
-		val, ok := fields[strings.ToLower(fe.FieldName)]
+		val, ok := sigma.ResolveField(fields, fe.FieldName)
 		if !ok {
 			// Fallback to checking inside raw line if field not separated
 			targetVal = rawLine
@@ -734,7 +736,7 @@ logsource:
   category: webserver
 detection:
   selection_cmd:
-    _raw|re: "(?i)(/bin/(sh|bash)|curl\\s+https?://.*\\|\\s*(sh|bash)|;\\s*(cat|id|whoami)\\s+|\\|\\s*(cat|id)\\s*|` + "`whoami`" + `|\\$\\(whoami\\))"
+    _raw|re: "(?i)((;|\\||&&)\\s*/bin/(sh|bash)|curl\\s+https?://.*\\|\\s*(sh|bash)|;\\s*(cat|id|whoami)\\s+|\\|\\s*(cat|id)\\s*|` + "`whoami`" + `|\\$\\(whoami\\))"
   condition: selection_cmd
 `,
 		`
@@ -821,6 +823,13 @@ detection:
 
 	for _, ruleYAML := range builtinRules {
 		rule, err := se.ParseSigmaYAML(strings.TrimSpace(ruleYAML))
+		if err == nil {
+			se.AddRule(rule)
+		}
+	}
+
+	for _, curatedYAML := range sigma.GetCuratedRulePack() {
+		rule, err := se.ParseSigmaYAML(strings.TrimSpace(curatedYAML))
 		if err == nil {
 			se.AddRule(rule)
 		}

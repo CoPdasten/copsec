@@ -1,0 +1,24 @@
+title: Linux Defense Evasion and Anti-Forensics Activity
+id: sigma-linux-evasion
+status: stable
+description: Detects command history clearing, log file truncation, security daemon tampering, and file timestamp spoofing
+tags:
+  - attack.defense_evasion
+  - attack.t1070
+  - attack.t1562
+level: critical
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  selection_history:
+    _raw|re: "(?i)(history\\s+-c|unset\\s+HISTFILE|export\\s+HISTSIZE=0|shred\\s+.*bash_history|rm\\s+-f\\s+.*bash_history)"
+  selection_logs:
+    _raw|re: "(?i)(rm\\s+-rf\\s+/var/log/|truncate\\s+-s\\s+0\\s+/var/log/|>\\s*/var/log/(auth\\.log|syslog|nginx/|audit/))"
+  selection_impair:
+    _raw|re: "(?i)(systemctl\\s+(stop|disable|mask)\\s+(suricata|ufw|copsec.*)|iptables\\s+-F|ufw\\s+disable|setenforce\\s+0)"
+  selection_timestomp:
+    _raw|re: "(?i)(touch\\s+(-r|-t)\\s+.*(/etc/|/usr/bin/|/bin/))"
+  condition: 1 of selection_*
+falsepositives:
+  - System upgrade scripts or authorized maintenance

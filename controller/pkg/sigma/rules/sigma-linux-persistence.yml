@@ -1,0 +1,26 @@
+title: Linux Persistence and Privilege Escalation Activity
+id: sigma-linux-persistence
+status: stable
+description: Detects unauthorized sudoers modifications, cronjob injections, SUID abuse, and SSH key additions
+tags:
+  - attack.persistence
+  - attack.privilege_escalation
+  - attack.t1053
+  - attack.t1548.003
+  - attack.t1543.002
+level: high
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  selection_sudoers:
+    _raw|re: "(?i)(NOPASSWD:\\s*ALL|visudo\\s+-c|/etc/sudoers\\.d/)"
+  selection_cron:
+    _raw|re: "(?i)(crontab\\s+-e|/etc/cron\\.(d|daily|hourly|weekly)/|/var/spool/cron/crontabs/)"
+  selection_suid:
+    _raw|re: "(?i)(chmod\\s+(\\+s|u\\+s|4[0-7]{3})\\s+(/bin/|/usr/bin/|/tmp/|/var/tmp/))"
+  selection_ssh_key:
+    _raw|re: "(?i)(ssh-rsa\\s+[A-Za-z0-9+/=]{50,}|ssh-ed25519\\s+[A-Za-z0-9+/=]{40,}).*(>>|>)\\s*.*(\\.ssh/authorized_keys)"
+  condition: 1 of selection_*
+falsepositives:
+  - Legitimate administrator account provisioning

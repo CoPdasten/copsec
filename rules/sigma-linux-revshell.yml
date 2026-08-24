@@ -1,0 +1,25 @@
+title: Linux Interactive Reverse Shell and C2 Activity
+id: sigma-linux-revshell
+status: stable
+description: Detects interactive bash, netcat, socat, python, perl, ruby, and encoded one-liner reverse shells
+tags:
+  - attack.execution
+  - attack.t1059.004
+  - attack.command_and_control
+  - attack.t1071
+level: critical
+logsource:
+  product: linux
+  category: process_creation
+detection:
+  selection_bash:
+    _raw|re: "(?i)(bash\\s+-i\\s+>&\\s*/dev/tcp/|/dev/tcp/\\d+\\.\\d+\\.\\d+\\.\\d+/|0<&196;exec\\s+196<>/dev/tcp/)"
+  selection_netcat:
+    _raw|re: "(?i)(nc(\\.(traditional|openbsd))?\\s+(-e|--exec)\\s*/bin/(sh|bash)|ncat\\s+--exec\\s*/bin/(sh|bash)|socat\\s+exec:)"
+  selection_scripting:
+    _raw|re: "(?i)(python(2|3)?\\s+-c\\s+.*pty\\.spawn|perl\\s+-e\\s+.*socket\\(|ruby\\s+-rsocket\\s+-e|php\\s+-r\\s+.*fsockopen|lua\\s+-e\\s+.*os\\.execute)"
+  selection_encoded:
+    _raw|re: "(?i)(base64\\s+-d\\s*\\|\\s*(sh|bash)|echo\\s+[a-zA-Z0-9+/=]{16,}\\s*\\|\\s*(base64\\s+-d|perl|python))"
+  condition: 1 of selection_*
+falsepositives:
+  - Legitimate automated cluster orchestration scripts with explicit whitelisting
