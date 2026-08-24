@@ -12,7 +12,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/copsec/collector/pkg/dns"
+	"github.com/copsec/collector/pkg/ebpf"
+	"github.com/copsec/collector/pkg/healing"
 	"github.com/copsec/collector/pkg/p2p"
+	"github.com/copsec/collector/pkg/tarpit"
+	"github.com/copsec/collector/pkg/yara"
 )
 
 func main() {
@@ -121,6 +126,20 @@ func main() {
 
 	collector := NewMultiLogCollector(sources, finalOffsetPath, finalWhitelistPath, controllerClient)
 	fallbackEngine.SetWhitelistFilter(collector.GetFilter(), finalWhitelistPath)
+
+	// 5. Start Enterprise Defensive Subsystems (FIM, Tarpit, YARA, Integrity Guard, DNS Sinkhole)
+	fimEngine := healing.GetDefaultFIMEngine()
+	go fimEngine.StartWatchLoop(ctx, 5*time.Second)
+
+	tarpitEngine := tarpit.GetDefaultTarpit()
+	go func() {
+		_ = tarpitEngine.Start(ctx)
+	}()
+	defer tarpitEngine.Close()
+
+	_ = ebpf.GetDefaultIntegrityGuard()
+	_ = dns.GetDefaultSinkhole()
+	_ = yara.GetDefaultScanner()
 
 	var wg sync.WaitGroup
 	wg.Add(1)

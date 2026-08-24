@@ -12,8 +12,13 @@ import (
 	"time"
 
 	"github.com/copsec/controller/pkg/ai_report"
+	"github.com/copsec/controller/pkg/dns"
+	"github.com/copsec/controller/pkg/ebpf"
 	"github.com/copsec/controller/pkg/geoip"
+	"github.com/copsec/controller/pkg/healing"
 	"github.com/copsec/controller/pkg/p2p"
+	"github.com/copsec/controller/pkg/tarpit"
+	"github.com/copsec/controller/pkg/yara"
 )
 
 //go:embed web/*
@@ -33,6 +38,12 @@ type WebSOCServer struct {
 	httpServer      *http.Server
 	honeypotSSH     *HoneypotSSHServer
 	p2pMesh         *p2p.GossipMesh
+
+	integrityGuard  *ebpf.IntegrityGuard
+	yaraScanner     *yara.MemoryScanner
+	tarpitEngine    *tarpit.TarpitEngine
+	dnsSinkhole     *dns.DNSSinkholeEngine
+	fimHealing      *healing.FIMHealingEngine
 }
 
 // SystemConfigDTO represents the runtime configuration schema.
@@ -68,6 +79,11 @@ func NewWebSOCServer(
 		deceptionRouter: deceptionRouter,
 		rateLimiter:     rateLimiter,
 		honeypotSSH:     honeypotSSH,
+		integrityGuard:  ebpf.GetDefaultIntegrityGuard(),
+		yaraScanner:     yara.GetDefaultScanner(),
+		tarpitEngine:    tarpit.GetDefaultTarpit(),
+		dnsSinkhole:     dns.GetDefaultSinkhole(),
+		fimHealing:      healing.GetDefaultFIMEngine(),
 	}
 }
 
@@ -102,6 +118,12 @@ func (ws *WebSOCServer) Start() error {
 	mux.HandleFunc("/api/p2p/crdt", ws.handleP2PCRDT)
 	mux.HandleFunc("/api/p2p/logs", ws.handleP2PLogs)
 	mux.HandleFunc("/api/p2p/broadcast", ws.handleP2PBroadcast)
+	mux.HandleFunc("/api/security/stats", ws.handleSecurityStats)
+	mux.HandleFunc("/api/security/tarpit", ws.handleSecurityTarpit)
+	mux.HandleFunc("/api/security/fim", ws.handleSecurityFIM)
+	mux.HandleFunc("/api/security/dns", ws.handleSecurityDNS)
+	mux.HandleFunc("/api/security/yara", ws.handleSecurityYARA)
+	mux.HandleFunc("/api/security/integrity", ws.handleSecurityIntegrity)
 
 	// 3. Embedded Web SOC and Deception Traps
 	mux.HandleFunc("/", ws.handleRootOrTrap)
@@ -779,4 +801,46 @@ func (ws *WebSOCServer) handleP2PBroadcast(w http.ResponseWriter, r *http.Reques
 		"message": fmt.Sprintf("Threat broadcast for IP %s gossiped across P2P swarm mesh", req.TargetIP),
 		"threat":  tb,
 	})
+}
+
+func (ws *WebSOCServer) handleSecurityStats(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	stats := map[string]interface{}{
+		"integrity": ws.integrityGuard.GetStats(),
+		"yara":      ws.yaraScanner.GetStats(),
+		"tarpit":    ws.tarpitEngine.GetStats(),
+		"dns":       ws.dnsSinkhole.GetStats(),
+		"fim":       ws.fimHealing.GetStats(),
+	}
+	json.NewEncoder(w).Encode(stats)
+}
+
+func (ws *WebSOCServer) handleSecurityTarpit(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(ws.tarpitEngine.GetActiveSessions())
+}
+
+func (ws *WebSOCServer) handleSecurityFIM(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"targets":       ws.fimHealing.GetTargets(),
+		"recent_events": ws.fimHealing.GetRecentEvents(),
+		"stats":         ws.fimHealing.GetStats(),
+	})
+}
+
+func (ws *WebSOCServer) handleSecurityDNS(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(ws.dnsSinkhole.GetRecentEvents())
+}
+
+func (ws *WebSOCServer) handleSecurityYARA(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(ws.yaraScanner.GetRecentHits())
+}
+
+func (ws *WebSOCServer) handleSecurityIntegrity(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(ws.integrityGuard.GetRecentEvents())
 }

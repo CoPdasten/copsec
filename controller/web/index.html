@@ -747,6 +747,7 @@
       <button class="nav-tab active" onclick="switchTab('tab-telemetry')">📡 Incident Stream</button>
       <button class="nav-tab" onclick="switchTab('tab-nodes')">🌐 Fleet Sensors</button>
       <button class="nav-tab" onclick="switchTab('tab-p2p')">🔗 P2P Defense Mesh</button>
+      <button class="nav-tab" onclick="switchTab('tab-advanced-defenses')">🛡️ Advanced Defenses</button>
       <button class="nav-tab" onclick="switchTab('tab-soar')">🛡️ SOAR Quarantine</button>
       <button class="nav-tab" onclick="switchTab('tab-sigma')">📜 SigmaHQ Rules</button>
       <button class="nav-tab" onclick="switchTab('tab-honeypot')">🍯 Deception Traps</button>
@@ -1057,6 +1058,146 @@
       </div>
     </div>
 
+    <!-- TAB: Advanced Defense Subsystems -->
+    <div id="tab-advanced-defenses" class="tab-panel">
+      <!-- 5 Defense Subsystems Metric Row -->
+      <div class="stat-grid" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); margin-bottom: 1.25rem;">
+        <div class="stat-card">
+          <div class="stat-title">eBPF Rootkit & Injection Guard</div>
+          <div class="stat-value" id="stat-defense-integrity" style="color: var(--magenta);">0</div>
+          <div class="stat-sub" style="color: var(--magenta);">⚡ ptrace / hollowing blocked</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-title">In-Memory YARA Scanner</div>
+          <div class="stat-value" id="stat-defense-yara" style="color: var(--cyan);">0</div>
+          <div class="stat-sub" style="color: var(--cyan);">🔍 Anonymous RAM pattern hits</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-title">TCP Zero-Window Tarpit</div>
+          <div class="stat-value" id="stat-defense-tarpit" style="color: var(--amber);">0</div>
+          <div class="stat-sub" style="color: var(--amber);">🪤 Held attacker sockets</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-title">Egress DNS C2 Sinkhole</div>
+          <div class="stat-value" id="stat-defense-dns" style="color: var(--emerald);">0</div>
+          <div class="stat-sub" style="color: var(--emerald);">🚫 DGA & tunneling blocked</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-title">Self-Healing FIM Vault</div>
+          <div class="stat-value" id="stat-defense-fim" style="color: var(--blue);">0</div>
+          <div class="stat-sub" style="color: var(--blue);">🛠️ Config drifts auto-restored</div>
+        </div>
+      </div>
+
+      <div class="split-grid" style="margin-bottom: 1.25rem;">
+        <!-- Card 1: TCP Zero-Window & Deception Tarpit Pool -->
+        <div class="card" style="margin-bottom: 0;">
+          <div class="card-header">
+            <div>
+              <div class="card-title">🪤 TCP Zero-Window & SSH Tarpit Engine</div>
+              <div style="font-size: 0.72rem; color: var(--text-muted);">Depletes attacker scanner socket pools by locking TCP windows into 1-byte/15s streams</div>
+            </div>
+            <button class="btn btn-primary" onclick="refreshAdvancedDefenses()">🔄 Refresh</button>
+          </div>
+          <div class="table-container" style="max-height: 240px;">
+            <table>
+              <thead>
+                <tr>
+                  <th>Attacker Address</th>
+                  <th>Service</th>
+                  <th>Hold Duration</th>
+                  <th>Bytes Throttled</th>
+                  <th>Socket State</th>
+                </tr>
+              </thead>
+              <tbody id="tarpit-tbody">
+                <tr><td colspan="5" style="text-align: center; color: var(--text-muted); padding: 1.5rem;">No attacking sockets trapped in tarpit.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Card 2: Autonomous Egress DNS C2 Sinkhole -->
+        <div class="card" style="margin-bottom: 0;">
+          <div class="card-header">
+            <div>
+              <div class="card-title">🚫 Autonomous Egress DNS C2 Sinkhole</div>
+              <div style="font-size: 0.72rem; color: var(--text-muted);">Intercepts outbound DGA domains, DNS tunneling exfiltration & C2 resolvers</div>
+            </div>
+          </div>
+          <div class="table-container" style="max-height: 240px;">
+            <table>
+              <thead>
+                <tr>
+                  <th>Queried C2 Domain</th>
+                  <th>Anomaly Type</th>
+                  <th>Entropy</th>
+                  <th>Sinkholed IP</th>
+                  <th>Threat Score</th>
+                </tr>
+              </thead>
+              <tbody id="dns-tbody">
+                <tr><td colspan="5" style="text-align: center; color: var(--text-muted); padding: 1.5rem;">No outbound C2 DNS requests intercepted.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="split-grid">
+        <!-- Card 3: Self-Healing File Integrity (FIM) Vault -->
+        <div class="card" style="margin-bottom: 0;">
+          <div class="card-header">
+            <div>
+              <div class="card-title">🛠️ Self-Healing File Integrity (FIM) Vault</div>
+              <div style="font-size: 0.72rem; color: var(--text-muted);">Cryptographic baseline verification with automated overwrite remediation on tamper</div>
+            </div>
+          </div>
+          <div class="table-container" style="max-height: 240px;">
+            <table>
+              <thead>
+                <tr>
+                  <th>Protected Path</th>
+                  <th>Baseline SHA256</th>
+                  <th>Integrity State</th>
+                  <th>Last Inspected</th>
+                </tr>
+              </thead>
+              <tbody id="fim-tbody">
+                <tr><td colspan="4" style="text-align: center; color: var(--text-muted); padding: 1.5rem;">Loading baseline FIM targets...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Card 4: In-Memory YARA & Process Injection Interceptions -->
+        <div class="card" style="margin-bottom: 0;">
+          <div class="card-header">
+            <div>
+              <div class="card-title">🚨 In-Memory YARA & Rootkit Guard Feed</div>
+              <div style="font-size: 0.72rem; color: var(--text-muted);">Real-time RAM inspection and ptrace/process_vm_writev kernel interceptions</div>
+            </div>
+          </div>
+          <div class="table-container" style="max-height: 240px;">
+            <table>
+              <thead>
+                <tr>
+                  <th>Target PID</th>
+                  <th>Signature / Event</th>
+                  <th>Category</th>
+                  <th>Threat Score</th>
+                  <th>Mitigation Action</th>
+                </tr>
+              </thead>
+              <tbody id="defense-yara-tbody">
+                <tr><td colspan="5" style="text-align: center; color: var(--text-muted); padding: 1.5rem;">No in-memory shellcode or injection attempts detected.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- TAB 6: System Configuration (Autofill-Hardened) -->
     <div id="tab-config" class="tab-panel">
       <div class="card" style="max-width: 760px; margin: 0 auto;">
@@ -1305,6 +1446,7 @@
 
       if (tabId === 'tab-nodes') refreshFleetNodes();
       if (tabId === 'tab-p2p') refreshP2PTopology();
+      if (tabId === 'tab-advanced-defenses') refreshAdvancedDefenses();
       if (tabId === 'tab-soar') refreshBans();
       if (tabId === 'tab-sigma') refreshSigmaRules();
       if (tabId === 'tab-honeypot') refreshHoneypotLogs();
@@ -2291,6 +2433,116 @@
       }
     }
 
+    // Advanced Enterprise Defensive Subsystems (Tarpit, DNS Sinkhole, FIM, YARA, Integrity)
+    async function refreshAdvancedDefenses() {
+      try {
+        const [statsRes, tarpitRes, dnsRes, fimRes, yaraRes, integrityRes] = await Promise.all([
+          fetch('/api/security/stats').then(r => r.json()).catch(() => null),
+          fetch('/api/security/tarpit').then(r => r.json()).catch(() => []),
+          fetch('/api/security/dns').then(r => r.json()).catch(() => []),
+          fetch('/api/security/fim').then(r => r.json()).catch(() => ({ targets: [], recent_events: [] })),
+          fetch('/api/security/yara').then(r => r.json()).catch(() => []),
+          fetch('/api/security/integrity').then(r => r.json()).catch(() => [])
+        ]);
+
+        if (statsRes) {
+          if (statsRes.integrity) document.getElementById('stat-defense-integrity').textContent = (statsRes.integrity.injections_blocked || 0) + (statsRes.integrity.rogue_modules_blocked || 0);
+          if (statsRes.yara) document.getElementById('stat-defense-yara').textContent = statsRes.yara.hits_total || 0;
+          if (statsRes.tarpit) document.getElementById('stat-defense-tarpit').textContent = statsRes.tarpit.total_connections_held || tarpitRes.length || 0;
+          if (statsRes.dns) document.getElementById('stat-defense-dns').textContent = statsRes.dns.sinkholed_total || 0;
+          if (statsRes.fim) document.getElementById('stat-defense-fim').textContent = statsRes.fim.healed_total || (fimRes && fimRes.stats ? fimRes.stats.healed_total : 0);
+        }
+
+        // 1. Tarpit Sessions
+        const tarpitTbody = document.getElementById('tarpit-tbody');
+        if (tarpitTbody) {
+          if (!tarpitRes || tarpitRes.length === 0) {
+            tarpitTbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: var(--text-muted); padding: 1.5rem;">No attacking sockets trapped in tarpit.</td></tr>';
+          } else {
+            tarpitTbody.innerHTML = tarpitRes.map(s => `
+              <tr>
+                <td><span class="ip-chip" style="color: var(--magenta);">${escapeHtml(s.remote_ip)}:${s.remote_port}</span></td>
+                <td><span class="badge badge-medium">${escapeHtml(s.service)}</span></td>
+                <td style="font-family: var(--font-mono); color: var(--amber); font-weight: 700;">${s.duration_sec}s</td>
+                <td style="font-family: var(--font-mono); color: var(--cyan);">${s.bytes_transferred} bytes</td>
+                <td><span class="badge badge-success">🪤 TRAPPED</span></td>
+              </tr>
+            `).join('');
+          }
+        }
+
+        // 2. DNS Sinkhole
+        const dnsTbody = document.getElementById('dns-tbody');
+        if (dnsTbody) {
+          if (!dnsRes || dnsRes.length === 0) {
+            dnsTbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: var(--text-muted); padding: 1.5rem;">No outbound C2 DNS requests intercepted.</td></tr>';
+          } else {
+            dnsTbody.innerHTML = dnsRes.slice().reverse().map(d => `
+              <tr>
+                <td style="font-family: var(--font-mono); font-weight: 600; color: var(--cyan);">${escapeHtml(d.domain)}</td>
+                <td><span class="badge badge-high">${escapeHtml(d.anomaly_type)}</span></td>
+                <td style="font-family: var(--font-mono);">${d.entropy ? d.entropy.toFixed(2) : '-'}</td>
+                <td><code style="color: var(--magenta); font-weight: 700;">${escapeHtml(d.sinkholed_to)}</code></td>
+                <td><span class="badge badge-critical">${d.threat_score}</span></td>
+              </tr>
+            `).join('');
+          }
+        }
+
+        // 3. FIM Targets
+        const fimTbody = document.getElementById('fim-tbody');
+        if (fimTbody) {
+          const targets = fimRes.targets || [];
+          if (targets.length === 0) {
+            fimTbody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: var(--text-muted); padding: 1.5rem;">No FIM targets registered.</td></tr>';
+          } else {
+            fimTbody.innerHTML = targets.map(t => `
+              <tr>
+                <td style="font-family: var(--font-mono); font-weight: 600;">${escapeHtml(t.path)}</td>
+                <td><code style="font-size: 0.72rem;">${escapeHtml(t.baseline_sha256.substring(0, 16))}...</code></td>
+                <td><span class="badge badge-success">🛡️ IMMUTABLE BASELINE</span></td>
+                <td style="font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-muted);">${new Date(t.last_checked_ms || Date.now()).toLocaleTimeString()}</td>
+              </tr>
+            `).join('');
+          }
+        }
+
+        // 4. In-Memory YARA & Integrity Interceptions
+        const yaraTbody = document.getElementById('defense-yara-tbody');
+        if (yaraTbody) {
+          const combined = [...(yaraRes || []).map(y => ({
+            pid: y.pid,
+            name: y.rule_name || y.process_name,
+            cat: y.category,
+            score: y.threat_score,
+            action: y.action_taken || 'MEM_INSPECTION_ALERT'
+          })), ...(integrityRes || []).map(i => ({
+            pid: i.pid,
+            name: `${i.process_name} (${i.event_type})`,
+            cat: 'ROOTKIT_INJECTION',
+            score: i.threat_score,
+            action: i.action_taken || 'SIGKILL_ENFORCED'
+          }))];
+
+          if (combined.length === 0) {
+            yaraTbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: var(--text-muted); padding: 1.5rem;">No in-memory shellcode or injection attempts detected.</td></tr>';
+          } else {
+            yaraTbody.innerHTML = combined.slice(0, 10).map(c => `
+              <tr>
+                <td style="font-family: var(--font-mono); font-weight: 700; color: var(--cyan);">PID ${c.pid}</td>
+                <td style="font-weight: 600;">${escapeHtml(c.name)}</td>
+                <td><span class="badge badge-high">${escapeHtml(c.cat)}</span></td>
+                <td><span class="badge badge-critical">${c.score}</span></td>
+                <td><span class="badge badge-success">${escapeHtml(c.action)}</span></td>
+              </tr>
+            `).join('');
+          }
+        }
+      } catch (err) {
+        console.error('Failed to refresh advanced defenses', err);
+      }
+    }
+
     // Auto-init
     window.addEventListener('DOMContentLoaded', () => {
       initWebSocket();
@@ -2299,6 +2551,7 @@
       refreshSigmaRules();
       refreshFleetNodes();
       refreshP2PTopology();
+      refreshAdvancedDefenses();
       
       // Auto-poll stats every 3s as fallback
       setInterval(() => {
@@ -2316,6 +2569,10 @@
         const p2pPanel = document.getElementById('tab-p2p');
         if (p2pPanel && p2pPanel.classList.contains('active')) {
           refreshP2PTopology();
+        }
+        const defensesPanel = document.getElementById('tab-advanced-defenses');
+        if (defensesPanel && defensesPanel.classList.contains('active')) {
+          refreshAdvancedDefenses();
         }
       }, 3000);
     });
