@@ -295,6 +295,20 @@
       background: var(--bg-card-hover);
     }
 
+    /* Row Insertion Animation & Severity Left Borders */
+    @keyframes rowInsertSlide {
+      0% { opacity: 0; transform: translateY(-8px); background: rgba(0, 243, 255, 0.12); }
+      100% { opacity: 1; transform: translateY(0); background: transparent; }
+    }
+    .incident-row {
+      animation: rowInsertSlide 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+      transition: background 0.25s ease, border-left-color 0.25s ease;
+    }
+    .row-crit { border-left: 3.5px solid var(--magenta) !important; }
+    .row-high { border-left: 3.5px solid #ff5500 !important; }
+    .row-med { border-left: 3.5px solid var(--amber) !important; }
+    .row-low { border-left: 3.5px solid var(--cyan) !important; }
+
     /* Chips, Badges & Normalized Telemetry Cells */
     .ip-chip {
       font-family: var(--font-mono);
@@ -1231,51 +1245,149 @@
       }
     }
 
-    // Smart Telemetry Normalization
+    // High-Precision Telemetry & EVE Log Summary Parsing
     function parseTelemetrySignal(rawLine, source) {
-      if (!rawLine) return { html: '<span style="color: var(--text-muted);">Empty telemetry line</span>', isJSON: false };
+      if (!rawLine) return { html: '<span style="color: var(--text-muted);">Empty telemetry payload</span>', isJSON: false };
 
       const trimmed = rawLine.trim();
 
-      // 1. Check if JSON (Suricata eve.json / structured logs)
-      if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+      // 1. Check if string contains JSON (Suricata eve.json / Auditd / Structured Log)
+      let jsonObj = null;
+      const firstBrace = trimmed.indexOf('{');
+      const lastBrace = trimmed.lastIndexOf('}');
+      if (firstBrace !== -1 && lastBrace > firstBrace) {
         try {
-          const obj = JSON.parse(trimmed);
-          if (obj.event_type === 'alert' && obj.alert) {
-            const sig = obj.alert.signature || 'Alert Triggered';
-            const proto = (obj.proto || 'IP').toUpperCase();
-            const srcPort = obj.src_port ? `:${obj.src_port}` : '';
-            const destPort = obj.dest_port ? `:${obj.dest_port}` : '';
-            return {
-              html: `<span class="chip chip-alert">ALERT</span> <span class="chip chip-proto">${proto}</span> <b>${escapeHtml(sig)}</b> <span style="color: var(--text-muted); font-size: 0.7rem;">(${obj.src_ip || ''}${srcPort} -> ${destPort})</span>`,
-              isJSON: true,
-              parsedObj: obj
-            };
-          }
-          if (obj.event_type === 'http' && obj.http) {
-            const method = obj.http.http_method || 'GET';
-            const url = obj.http.url || '/';
-            const status = obj.http.status || 200;
-            const statusClass = status >= 500 ? '5xx' : (status >= 400 ? '4xx' : '2xx');
-            return {
-              html: `<span class="chip chip-method">${escapeHtml(method)}</span> <span class="chip chip-status-${statusClass}">${status}</span> <span style="color: #cbd5e1;">${escapeHtml(url)}</span>`,
-              isJSON: true,
-              parsedObj: obj
-            };
-          }
-          if (obj.event_type === 'dns' && obj.dns) {
-            return {
-              html: `<span class="chip chip-proto">DNS</span> query: <b>${escapeHtml(obj.dns.rrname || '')}</b> (${obj.dns.rrtype || 'A'})`,
-              isJSON: true,
-              parsedObj: obj
-            };
-          }
+          jsonObj = JSON.parse(trimmed.substring(firstBrace, lastBrace + 1));
+        } catch(e) {}
+      }
+
+      if (jsonObj && typeof jsonObj === 'object') {
+        // 1a. Suricata Alert
+        if (jsonObj.event_type === 'alert' && jsonObj.alert) {
+          const sig = jsonObj.alert.signature || 'Suricata Security Alert';
+          const proto = (jsonObj.proto || 'IP').toUpperCase();
+          const srcPort = jsonObj.src_port ? `:${jsonObj.src_port}` : '';
+          const destPort = jsonObj.dest_port ? `:${jsonObj.dest_port}` : '';
+          const flow = (jsonObj.src_ip || jsonObj.dest_ip) ? ` (${jsonObj.src_ip || ''}${srcPort} -> ${jsonObj.dest_ip || ''}${destPort})` : '';
           return {
-            html: `<span class="chip chip-proto">JSON</span> <span style="color: #cbd5e1;">${escapeHtml(JSON.stringify(obj).substring(0, 70))}...</span>`,
+            html: `<span class="chip chip-alert">ALERT</span> <span class="chip chip-proto">${proto}</span> <b>${escapeHtml(sig)}</b> <span style="color: var(--text-muted); font-size: 0.7rem;">${escapeHtml(flow)}</span>`,
             isJSON: true,
-            parsedObj: obj
+            parsedObj: jsonObj
           };
-        } catch (e) {}
+        }
+
+        // 1b. Suricata HTTP
+        if (jsonObj.event_type === 'http' && jsonObj.http) {
+          const method = jsonObj.http.http_method || 'HTTP';
+          const host = jsonObj.http.hostname ? `${jsonObj.http.hostname}` : '';
+          const url = jsonObj.http.url || '/';
+          const fullUrl = host ? `${host}${url}` : url;
+          const status = jsonObj.http.status || 200;
+          const statusClass = status >= 500 ? '5xx' : (status >= 400 ? '4xx' : '2xx');
+          return {
+            html: `<span class="chip chip-method">${escapeHtml(method)}</span> <span class="chip chip-status-${statusClass}">${status}</span> <span style="color: #cbd5e1;">${escapeHtml(fullUrl)}</span>`,
+            isJSON: true,
+            parsedObj: jsonObj
+          };
+        }
+
+        // 1c. Suricata DNS
+        if (jsonObj.event_type === 'dns' && jsonObj.dns) {
+          const q = jsonObj.dns.rrname || (jsonObj.dns.query && jsonObj.dns.query[0] && jsonObj.dns.query[0].rrname) || 'DNS Query';
+          const type = jsonObj.dns.rrtype || jsonObj.dns.type || 'A';
+          return {
+            html: `<span class="chip chip-proto">DNS</span> query: <b>${escapeHtml(q)}</b> (${escapeHtml(type)})`,
+            isJSON: true,
+            parsedObj: jsonObj
+          };
+        }
+
+        // 1d. Suricata Flow
+        if (jsonObj.event_type === 'flow' || jsonObj.flow) {
+          const proto = (jsonObj.proto || 'TCP').toUpperCase();
+          const state = (jsonObj.flow && (jsonObj.flow.state || jsonObj.flow.reason)) || 'traffic';
+          const srcPort = jsonObj.src_port ? `:${jsonObj.src_port}` : '';
+          const destPort = jsonObj.dest_port ? `:${jsonObj.dest_port}` : '';
+          const flow = `${jsonObj.src_ip || 'src'}${srcPort} -> ${jsonObj.dest_ip || 'dst'}${destPort}`;
+          return {
+            html: `<span class="chip chip-proto">${proto}</span> <span class="chip chip-proto">FLOW</span> ${escapeHtml(flow)} <span style="color: var(--text-muted); font-size: 0.7rem;">(${escapeHtml(state)})</span>`,
+            isJSON: true,
+            parsedObj: jsonObj
+          };
+        }
+
+        // 1e. Suricata SSH
+        if (jsonObj.event_type === 'ssh' || jsonObj.ssh) {
+          const client = (jsonObj.ssh && (jsonObj.ssh.client && jsonObj.ssh.client.software_version)) || (jsonObj.ssh && (jsonObj.ssh.server && jsonObj.ssh.server.software_version)) || 'SSH Handshake';
+          return {
+            html: `<span class="chip chip-alert">SSH</span> <b>${escapeHtml(client)}</b>`,
+            isJSON: true,
+            parsedObj: jsonObj
+          };
+        }
+
+        // 1f. Suricata TLS
+        if (jsonObj.event_type === 'tls' || jsonObj.tls) {
+          const sni = (jsonObj.tls && (jsonObj.tls.sni || jsonObj.tls.subject || jsonObj.tls.version)) || 'TLS Handshake';
+          return {
+            html: `<span class="chip chip-proto">TLS</span> SNI: <b>${escapeHtml(sni)}</b>`,
+            isJSON: true,
+            parsedObj: jsonObj
+          };
+        }
+
+        // 1g. Suricata Fileinfo
+        if (jsonObj.event_type === 'fileinfo' || jsonObj.fileinfo) {
+          const fn = (jsonObj.fileinfo && (jsonObj.fileinfo.filename || jsonObj.fileinfo.magic)) || 'File Object';
+          return {
+            html: `<span class="chip chip-proto">FILE</span> <b>${escapeHtml(fn)}</b>`,
+            isJSON: true,
+            parsedObj: jsonObj
+          };
+        }
+
+        // 1h. Suricata Anomaly / Drop
+        if (jsonObj.event_type === 'anomaly' || jsonObj.anomaly) {
+          const ev = (jsonObj.anomaly && (jsonObj.anomaly.event || jsonObj.anomaly.type)) || 'Packet Anomaly';
+          return {
+            html: `<span class="chip chip-alert">ANOMALY</span> <b>${escapeHtml(ev)}</b>`,
+            isJSON: true,
+            parsedObj: jsonObj
+          };
+        }
+        if (jsonObj.event_type === 'drop' || jsonObj.event_type === 'reject') {
+          return {
+            html: `<span class="chip chip-alert">${jsonObj.event_type.toUpperCase()}</span> Packet dropped by kernel/IPS`,
+            isJSON: true,
+            parsedObj: jsonObj
+          };
+        }
+
+        // 1i. Generic Structured JSON: Extract actual useful fields, never leading timestamp!
+        let summaryParts = [];
+        const priorityKeys = ['message', 'msg', 'summary', 'log', 'description', 'action', 'event', 'reason', 'signature', 'user', 'cmd', 'command', 'path', 'uri'];
+        for (let k of priorityKeys) {
+          if (jsonObj[k] && typeof jsonObj[k] === 'string') {
+            summaryParts.push(`${k}: ${jsonObj[k]}`);
+            if (summaryParts.length >= 2) break;
+          }
+        }
+        if (summaryParts.length === 0) {
+          for (let k in jsonObj) {
+            if (!['timestamp', '@timestamp', 'time', 'flow_id', 'in_iface', 'pcap_cnt', 'tx_id', 'id'].includes(k)) {
+              if (typeof jsonObj[k] === 'string' || typeof jsonObj[k] === 'number') {
+                summaryParts.push(`${k}: ${jsonObj[k]}`);
+                if (summaryParts.length >= 2) break;
+              }
+            }
+          }
+        }
+        const summaryText = summaryParts.length > 0 ? summaryParts.join(' | ') : 'Security Telemetry Event';
+        return {
+          html: `<span class="chip chip-proto">JSON</span> <span style="color: #cbd5e1;">${escapeHtml(summaryText)}</span>`,
+          isJSON: true,
+          parsedObj: jsonObj
+        };
       }
 
       // 2. Web Access Log (Nginx / Apache / Caddy)
@@ -1291,25 +1403,50 @@
         };
       }
 
-      // 3. Auth / SSH / Syslog
-      const authFail = trimmed.match(/Failed password for (?:invalid user )?([a-zA-Z0-9_.-]+) from (\S+)/i);
+      // 3. Syslog / Auth / SSH (Clean syslog ISO/host prefix first)
+      const cleanLog = trimmed.replace(/^(?:[A-Z][a-z]{2}\s+\d+\s+\d{2}:\d{2}:\d{2}|\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:[+-]\d{2}:?\d{2}|Z)?)\s+(?:[\w.-]+)?\s*(?:[a-zA-Z0-9_.-]+\[\d+\]:?)?\s*/, '');
+
+      const authFail = cleanLog.match(/Failed password for (?:invalid user )?([a-zA-Z0-9_.-]+) from (\S+)/i);
       if (authFail) {
         return {
           html: `<span class="chip chip-alert">AUTH_FAIL</span> user: <b style="color: var(--amber);">${escapeHtml(authFail[1])}</b> from ${escapeHtml(authFail[2])}`,
           isJSON: false
         };
       }
-      const authOk = trimmed.match(/Accepted (?:password|publickey) for ([a-zA-Z0-9_.-]+) from (\S+)/i);
+      const pamFail = cleanLog.match(/PAM \d+ more authentication failure(?:s)?; (?:logname=.* )?user=([a-zA-Z0-9_.-]+)/i) || cleanLog.match(/authentication failure;.*rhost=(\S+)(?:.*user=([a-zA-Z0-9_.-]+))?/i);
+      if (pamFail) {
+        const user = pamFail[1] || pamFail[2] || 'unknown';
+        return {
+          html: `<span class="chip chip-alert">PAM_FAIL</span> user: <b style="color: var(--amber);">${escapeHtml(user)}</b>`,
+          isJSON: false
+        };
+      }
+      const invalidUser = cleanLog.match(/Invalid user ([a-zA-Z0-9_.-]+) from (\S+)/i);
+      if (invalidUser) {
+        return {
+          html: `<span class="chip chip-alert">INVALID_USER</span> user: <b style="color: var(--amber);">${escapeHtml(invalidUser[1])}</b> from ${escapeHtml(invalidUser[2])}`,
+          isJSON: false
+        };
+      }
+      const authOk = cleanLog.match(/Accepted (?:password|publickey) for ([a-zA-Z0-9_.-]+) from (\S+)/i);
       if (authOk) {
         return {
           html: `<span class="chip chip-status-2xx">AUTH_OK</span> user: <b style="color: var(--emerald);">${escapeHtml(authOk[1])}</b> from ${escapeHtml(authOk[2])}`,
           isJSON: false
         };
       }
+      const sudoMatch = cleanLog.match(/sudo:\s+([a-zA-Z0-9_.-]+)\s+:(?:.*COMMAND=(.*))?/i);
+      if (sudoMatch) {
+        const cmd = sudoMatch[2] ? ` (${sudoMatch[2].substring(0, 40)})` : '';
+        return {
+          html: `<span class="chip chip-proto">SUDO</span> user: <b>${escapeHtml(sudoMatch[1])}</b>${escapeHtml(cmd)}`,
+          isJSON: false
+        };
+      }
 
-      // Fallback
+      // 4. Default Clean Fallback
       return {
-        html: `<span style="color: #cbd5e1;">${escapeHtml(trimmed)}</span>`,
+        html: `<span style="color: #cbd5e1;">${escapeHtml(cleanLog.length > 0 ? cleanLog : trimmed)}</span>`,
         isJSON: false
       };
     }
@@ -1325,6 +1462,15 @@
 
       const index = eventsLog.indexOf(ev);
       const tr = document.createElement('tr');
+
+      // Add severity row border & animation class
+      let rowSeverityClass = 'row-low';
+      if (ev.threat_score >= 80) rowSeverityClass = 'row-crit';
+      else if (ev.threat_score >= 50) rowSeverityClass = 'row-high';
+      else if (ev.threat_score >= 30) rowSeverityClass = 'row-med';
+
+      tr.className = `incident-row ${rowSeverityClass}`;
+
       const scoreBadge = getScoreBadge(ev.threat_score);
       const timeStr = new Date(ev.timestamp_ms || Date.now()).toLocaleTimeString();
       const nodeLabel = ev.node_id || 'controller';
@@ -1399,8 +1545,14 @@
       const jsonContainer = document.getElementById('drawer-json-content');
 
       let parsed = null;
-      if (ev.raw_line && ev.raw_line.trim().startsWith('{')) {
-        try { parsed = JSON.parse(ev.raw_line); } catch(e) {}
+      if (ev.raw_line) {
+        const firstBrace = ev.raw_line.indexOf('{');
+        const lastBrace = ev.raw_line.lastIndexOf('}');
+        if (firstBrace !== -1 && lastBrace > firstBrace) {
+          try {
+            parsed = JSON.parse(ev.raw_line.substring(firstBrace, lastBrace + 1));
+          } catch(e) {}
+        }
       }
 
       if (parsed) {
@@ -1470,6 +1622,34 @@
       });
     }
 
+    // Metric Formatting Helpers
+    function formatMemoryMetric(memVal) {
+      if (memVal === undefined || memVal === null) return '0 MB';
+      const num = parseFloat(memVal);
+      if (isNaN(num)) return String(memVal);
+      if (num >= 1024) {
+        return `${(num / 1024).toFixed(2)} GB`;
+      }
+      if (num > 0 && num <= 100) {
+        return `${num.toFixed(1)}%`;
+      }
+      return `${num.toFixed(0)} MB`;
+    }
+
+    function formatUptimeMetric(seconds) {
+      if (!seconds || seconds <= 0) return '0s';
+      const sec = parseInt(seconds);
+      if (sec < 60) return `${sec}s`;
+      const mins = Math.floor(sec / 60);
+      if (mins < 60) return `${mins}m ${sec % 60}s`;
+      const hours = Math.floor(mins / 60);
+      const remMins = mins % 60;
+      if (hours < 24) return `${hours}h ${remMins}m`;
+      const days = Math.floor(hours / 24);
+      const remHours = hours % 24;
+      return `${days}d ${remHours}h`;
+    }
+
     // Fleet Sensors
     async function refreshFleetNodes() {
       try {
@@ -1484,7 +1664,8 @@
           const lastSeenSec = Math.round((Date.now() - (n.last_seen_ms || Date.now())) / 1000);
           const isOnline = lastSeenSec < 60;
           const statusBadge = isOnline ? '<span class="badge badge-success">ONLINE</span>' : '<span class="badge badge-critical">OFFLINE</span>';
-          const uptimeHours = (n.uptime_seconds / 3600).toFixed(1);
+          const uptimeStr = formatUptimeMetric(n.uptime_seconds);
+          const ramStr = formatMemoryMetric(n.memory_usage);
           return `
             <tr>
               <td style="font-family: var(--font-mono); font-weight: 700; color: var(--cyan);">${escapeHtml(n.node_id)}</td>
@@ -1492,9 +1673,9 @@
               <td><span class="badge badge-medium">${escapeHtml(n.group_name || 'DEFAULT_EDGE')}</span></td>
               <td><span class="ip-chip">${escapeHtml(n.remote_addr || '-')}</span></td>
               <td style="font-family: var(--font-mono);">${(n.cpu_usage || 0).toFixed(1)}%</td>
-              <td style="font-family: var(--font-mono);">${(n.memory_usage || 0).toFixed(1)}%</td>
+              <td style="font-family: var(--font-mono); color: var(--cyan); font-weight: 700;">${ramStr}</td>
               <td style="font-family: var(--font-mono); color: var(--amber); font-weight: 700;">${n.active_bans_count || 0}</td>
-              <td style="font-family: var(--font-mono); color: var(--text-muted);">${uptimeHours}h</td>
+              <td style="font-family: var(--font-mono); color: var(--text-muted);">${uptimeStr}</td>
               <td style="font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-muted);">${lastSeenSec}s ago</td>
               <td>${statusBadge}</td>
             </tr>
