@@ -264,7 +264,7 @@ func (s *StorageEngine) FlushInvalidQuarantines() (int64, error) {
 	          OR ip LIKE '172.25.%' OR ip LIKE '172.26.%' OR ip LIKE '172.27.%' OR ip LIKE '172.28.%' OR ip LIKE '172.29.%' OR ip LIKE '172.30.%' 
 	          OR ip LIKE '172.31.%' OR ip LIKE '100.%' OR ip = '8.8.8.8' OR ip = '8.8.4.4' OR ip = '1.1.1.1' OR ip = '1.0.0.1' 
 	          OR ip = '1.1.1.2' OR ip = '1.0.0.2' OR ip = '1.1.1.3' OR ip = '1.0.0.3' OR ip = '9.9.9.9' OR ip = '149.112.112.112' 
-	          OR ip = '208.67.222.222' OR ip = '208.67.220.220' OR ip = '37.59.108.186'
+	          OR ip = '208.67.222.222' OR ip = '208.67.220.220' OR ip = '213.186.33.99' OR ip = '213.186.33.100' OR ip = '2001:41d0:3:163::1' OR ip = '37.59.108.186'
 	          OR reason LIKE '%sudo_execution%' OR reason LIKE '%sudo:%' OR reason LIKE '%cron_tamper%' OR reason LIKE '%fim_drift%'`
 	res, err := s.db.Exec(query)
 	if err != nil {

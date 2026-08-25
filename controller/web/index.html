@@ -2753,9 +2753,26 @@
       return getCountryFlag(code);
     }
 
-    // Toast Notification System
-    function showToast(message, type = 'info', title = '', duration = 3500) {
+    // Toast Notification System with Anti-Spam & De-duplication
+    const activeToastHistory = new Map();
+
+    function showToast(message, type = 'info', title = '', duration = 3000) {
+      if (!message) return;
+      const key = `${type}:${title}:${message}`;
+      const now = Date.now();
+      if (activeToastHistory.has(key) && (now - activeToastHistory.get(key) < 3000)) {
+        return; // Suppress repetitive toast spam
+      }
+      activeToastHistory.set(key, now);
+
       const container = document.getElementById('toast-container');
+      if (!container) return;
+
+      // Cap on-screen notifications to maximum 3
+      while (container.children.length >= 3) {
+        container.removeChild(container.firstChild);
+      }
+
       const toast = document.createElement('div');
       toast.className = `toast toast-${type}`;
 
@@ -5671,11 +5688,12 @@
 
       const key = e.key;
 
-      // Esc: Close open drawer or modals
+      // Esc: Close open drawer, modals, or SOAR inspector
       if (key === 'Escape') {
         closePayloadDrawer();
         closeBanModal();
         closeSigmaModal();
+        if (typeof closeSOARInspector === 'function') closeSOARInspector();
         return;
       }
 

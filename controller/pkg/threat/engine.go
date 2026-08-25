@@ -134,6 +134,9 @@ func NewScoringEngine(banThreshold, tarpitThreshold int) *ScoringEngine {
 		"149.112.112.112/32",
 		"208.67.222.222/32", // OpenDNS
 		"208.67.220.220/32",
+		"213.186.33.99/32",  // OVH Primary DNS
+		"213.186.33.100/32", // OVH Secondary DNS
+		"2001:41d0:3:163::1/128", // OVH IPv6
 		"2001:4860:4860::8888/128",
 		"2001:4860:4860::8844/128",
 		"2606:4700:4700::1111/128",

@@ -377,15 +377,35 @@ func (e *Engine) ShouldTriggerSOAR(
 	rawLine string,
 	recentEventsCount int,
 ) (bool, string, string) {
-	// 1. Absolute Exclusions (Host/Bogon or benign static asset requests)
+	ruleLower := strings.ToLower(ruleID)
+	mitreUpper := strings.ToUpper(mitreID)
+
+	// 1. High-Severity Instant Triggers (Kernel Tamper / Rootkit / FIM / eBPF - applies to host-local too)
+	if strings.Contains(ruleLower, "rootkit") ||
+		strings.Contains(ruleLower, "ptrace") ||
+		strings.Contains(ruleLower, "fim_healing") ||
+		strings.Contains(ruleLower, "module_taint") ||
+		mitreUpper == "T1014" || mitreUpper == "T1055" {
+		return true, "Critical Kernel / Rootkit Security Violation Intercepted", "PB-402"
+	}
+
+	// 2. Absolute Exclusions (Host/Bogon or benign static asset requests)
 	ipClean := strings.TrimSpace(clientIP)
 	if ipClean == "" || ipClean == "-" {
 		return false, "", ""
 	}
 
+	// Filter out whitelisted DNS resolvers and local IPs for network attacks
+	if ipClean == "8.8.8.8" || ipClean == "8.8.4.4" || ipClean == "1.1.1.1" || ipClean == "1.0.0.1" ||
+		ipClean == "9.9.9.9" || ipClean == "208.67.222.222" || ipClean == "208.67.220.220" ||
+		ipClean == "213.186.33.99" || ipClean == "213.186.33.100" || ipClean == "127.0.0.1" || ipClean == "::1" ||
+		strings.HasPrefix(ipClean, "10.") || strings.HasPrefix(ipClean, "192.168.") || strings.HasPrefix(ipClean, "100.") {
+		return false, "", ""
+	}
+
 	rawLower := strings.ToLower(rawLine)
 
-	// Filter out benign static asset requests and routine health checks
+	// Filter out benign static asset requests, routine health checks, and standard DNS queries
 	if strings.Contains(rawLower, "robots.txt") ||
 		strings.Contains(rawLower, "favicon.ico") ||
 		strings.Contains(rawLower, ".png") ||
@@ -395,17 +415,17 @@ func (e *Engine) ShouldTriggerSOAR(
 		strings.Contains(rawLower, ".woff") ||
 		strings.Contains(rawLower, "/health") ||
 		strings.Contains(rawLower, "/metrics") ||
-		strings.Contains(rawLower, `"event_type":"stats"`) {
+		strings.Contains(rawLower, `"event_type":"stats"`) ||
+		strings.Contains(rawLower, `"event_type":"dns"`) ||
+		ruleID == "suricata_flow" || ruleID == "suricata_dns" {
 		return false, "", ""
 	}
 
-	// 2. High-Severity Instant Triggers (Kernel Tamper / Rootkit / FIM / eBPF)
-	ruleLower := strings.ToLower(ruleID)
-	if strings.Contains(ruleLower, "rootkit") ||
-		strings.Contains(ruleLower, "ptrace") ||
-		strings.Contains(ruleLower, "fim_healing") ||
-		strings.Contains(ruleLower, "module_taint") {
-		return true, "Critical Kernel / Rootkit Security Violation Intercepted", "PB-402"
+	// Filter out routine auditd command execution logs
+	if strings.Contains(rawLower, "type=user_cmd") || strings.Contains(rawLower, "type=cred_acq") || strings.Contains(rawLower, "type=syscall") {
+		if threatScore < 90 {
+			return false, "", ""
+		}
 	}
 
 	// 3. DNS C2 Tunneling / Exfiltration Interception

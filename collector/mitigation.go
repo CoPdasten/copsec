@@ -31,6 +31,9 @@ var knownPublicDNS = map[string]bool{
 	"149.112.112.112":      true,
 	"208.67.222.222":       true,
 	"208.67.220.220":       true,
+	"213.186.33.99":        true, // OVH Resolver
+	"213.186.33.100":       true, // OVH Resolver
+	"2001:41d0:3:163::1":   true, // OVH IPv6
 	"2001:4860:4860::8888": true,
 	"2001:4860:4860::8844": true,
 	"2606:4700:4700::1111": true,
