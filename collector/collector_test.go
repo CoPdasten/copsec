@@ -291,8 +291,8 @@ func TestFallbackEngineAutonomousInspection(t *testing.T) {
 }
 
 func TestSuricataAndAuthParsers(t *testing.T) {
-	// 1. Suricata Alert test
-	suriAlertLine := `{"timestamp":"2026-08-23T12:34:56.789000+0000","event_type":"alert","src_ip":"198.51.100.222","src_port":44321,"dest_ip":"10.0.0.5","dest_port":80,"proto":"TCP","alert":{"action":"allowed","gid":1,"signature_id":2010935,"rev":1,"signature":"ET SCAN Potential Nmap Scan","category":"Attempted Information Leak","severity":2}}`
+	// 1. Suricata Alert test (SQLi / Web Exploit -> T1190)
+	suriAlertLine := `{"timestamp":"2026-08-23T12:34:56.789000+0000","event_type":"alert","src_ip":"198.51.100.222","src_port":44321,"dest_ip":"10.0.0.5","dest_port":80,"proto":"TCP","alert":{"action":"allowed","gid":1,"signature_id":2010935,"rev":1,"signature":"ET WEB_SERVER Possible SQL Injection Attempt","category":"Web Application Attack","severity":1}}`
 	suriEv, ok := parseSuricataLine(suriAlertLine)
 	if !ok {
 		t.Fatalf("Expected parseSuricataLine to succeed on JSON")

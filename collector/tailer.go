@@ -397,6 +397,7 @@ type SuricataBase struct {
 	DestIP    string `json:"dest_ip"`
 	Alert     *struct {
 		Signature   string `json:"signature"`
+		Category    string `json:"category"`
 		Severity    int    `json:"severity"`
 		SignatureID int    `json:"signature_id"`
 	} `json:"alert,omitempty"`
@@ -427,7 +428,22 @@ func parseSuricataLine(line string) (*copsecproto.LogEvent, bool) {
 		if ruleID == "suricata_alert_0" || ruleID == "" {
 			ruleID = "suricata_ids_alert"
 		}
-		mitreID = "T1190"
+		sigLower := strings.ToLower(s.Alert.Signature)
+		catLower := strings.ToLower(s.Alert.Category)
+		if strings.Contains(sigLower, "sqli") || strings.Contains(sigLower, "sql injection") ||
+			strings.Contains(sigLower, "rce") || strings.Contains(sigLower, "exploit") ||
+			strings.Contains(sigLower, "command injection") || strings.Contains(catLower, "web") ||
+			strings.Contains(sigLower, "traversal") {
+			mitreID = "T1190"
+		} else if strings.Contains(sigLower, "scan") || strings.Contains(catLower, "scan") {
+			mitreID = "T1046"
+		} else if strings.Contains(sigLower, "brute") || strings.Contains(sigLower, "login") {
+			mitreID = "T1110"
+		} else if strings.Contains(sigLower, "c2") || strings.Contains(sigLower, "beacon") {
+			mitreID = "T1071"
+		} else {
+			mitreID = "T1190"
+		}
 	} else if s.EventType == "dns" {
 		ruleID = "suricata_dns"
 		threatScore = 0
@@ -517,7 +533,22 @@ func parseLogLine(sourceName, raw string) *copsecproto.LogEvent {
 				if ruleID == "" {
 					ruleID = "suricata_ids_alert"
 				}
-				mitreID = "T1190"
+				sigLower := strings.ToLower(s.Alert.Signature)
+				catLower := strings.ToLower(s.Alert.Category)
+				if strings.Contains(sigLower, "sqli") || strings.Contains(sigLower, "sql injection") ||
+					strings.Contains(sigLower, "rce") || strings.Contains(sigLower, "exploit") ||
+					strings.Contains(sigLower, "command injection") || strings.Contains(catLower, "web") ||
+					strings.Contains(sigLower, "traversal") {
+					mitreID = "T1190"
+				} else if strings.Contains(sigLower, "scan") || strings.Contains(catLower, "scan") {
+					mitreID = "T1046"
+				} else if strings.Contains(sigLower, "brute") || strings.Contains(sigLower, "login") {
+					mitreID = "T1110"
+				} else if strings.Contains(sigLower, "c2") || strings.Contains(sigLower, "beacon") {
+					mitreID = "T1071"
+				} else {
+					mitreID = "T1190"
+				}
 			} else if s.EventType == "dns" {
 				ruleID = "suricata_dns"
 				threatScore = 0

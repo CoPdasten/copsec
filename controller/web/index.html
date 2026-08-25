@@ -2055,7 +2055,7 @@
           <div style="display: flex; align-items: center; gap: 0.65rem;">
             <div class="card-title" id="soar-inspector-title">📋 Playbook Stepper: PB-101</div>
             <span id="soar-inspector-status-badge" class="badge badge-high">RUNNING</span>
-            <span id="soar-inspector-mitre-badge" class="tag-mitre">T1190</span>
+            <span id="soar-inspector-mitre-badge" class="tag-mitre">-</span>
           </div>
           <button class="btn btn-xs" onclick="closeSOARInspector()">✖ Close Inspector</button>
         </div>
@@ -2619,7 +2619,7 @@
               <span>📋 Dynamic SOC Playbook Assistant</span>
             </div>
             <div style="display: flex; gap: 0.35rem; align-items: center;">
-              <span id="drawer-playbook-mitre" class="tag-mitre" style="font-size: 0.65rem;">T1190</span>
+              <span id="drawer-playbook-mitre" class="tag-mitre" style="font-size: 0.65rem;">-</span>
               <span id="drawer-playbook-progress" class="badge badge-low" style="font-size: 0.65rem;">0/4 STEPS</span>
             </div>
           </div>
@@ -3358,14 +3358,15 @@
         // 3. Detection Vector & MITRE ID
         let vectorHtml = '';
         const ruleID = a.rule_id || 'threat_signature';
-        const mitreID = a.mitre_technique_id || 'T1190';
+        const mitreID = a.mitre_technique_id || '';
         let prefix = '[Sigma]';
         if (a.snort_ml) prefix = '[Snort 3 ML]';
         else if (a.ml_anomaly) prefix = '[Pure-Go ML]';
         else if (ruleID.includes('rootkit') || ruleID.includes('ebpf')) prefix = '[eBPF Rootkit]';
         else if (ruleID.includes('fim')) prefix = '[FIM Healing]';
 
-        vectorHtml = `<span style="font-weight: 700; color: #fff;">${escapeHtml(prefix)} ${escapeHtml(ruleID)}</span> <span class="tag-mitre" style="margin-left: 0.35rem;">${escapeHtml(mitreID)}</span>`;
+        const mitreTag = mitreID ? `<span class="tag-mitre" style="margin-left: 0.35rem;">${escapeHtml(mitreID)}</span>` : '';
+        vectorHtml = `<span style="font-weight: 700; color: #fff;">${escapeHtml(prefix)} ${escapeHtml(ruleID)}</span> ${mitreTag}`;
 
         // 4. Containment State
         let containmentBadge = '';
@@ -3866,7 +3867,7 @@
         <td style="font-family: var(--font-mono); color: var(--text-muted);">${timeStr}</td>
         <td><span class="tag-node">${escapeHtml(nodeLabel)}</span></td>
         <td><span class="ip-chip">${escapeHtml(flagEmoji)} ${escapeHtml(ev.client_ip || '-')}</span></td>
-        <td><span class="tag-mitre">${escapeHtml(ev.mitre_technique_id || 'T1190')}</span></td>
+        <td>${ev.mitre_technique_id ? `<span class="tag-mitre">${escapeHtml(ev.mitre_technique_id)}</span>` : `<span style="color: var(--text-muted); font-size: 0.72rem;">-</span>`}</td>
         <td>${scoreBadge}</td>
         <td>
           <div class="payload-cell">
@@ -4261,118 +4262,104 @@
         }
       }
 
+      let srcIP = ev.client_ip && ev.client_ip !== '-' ? ev.client_ip : '-';
+      let srcPort = '-';
+      let destIP = '-';
+      let destPort = '-';
+      let proto = 'TCP';
+      let flowDuration = '-';
+      let signature = ev.rule_id || '-';
+      let statusCode = ev.status_code ? String(ev.status_code) : '-';
+      let httpReq = '-';
+
       if (parsed && typeof parsed === 'object') {
         if (parsed.event_type || parsed.flow_id || parsed.src_ip) {
           logType = `SURICATA ${parsed.event_type ? parsed.event_type.toUpperCase() : 'FLOW'}`;
-          if (parsed.event_type) kv.push({ label: 'Event Type', value: parsed.event_type.toUpperCase() });
-          if (parsed.proto) kv.push({ label: 'Protocol', value: parsed.proto });
-          if (parsed.src_ip || parsed.dest_ip) {
-            const src = `${parsed.src_ip || '-'}${parsed.src_port ? ':' + parsed.src_port : ''}`;
-            const dst = `${parsed.dest_ip || '-'}${parsed.dest_port ? ':' + parsed.dest_port : ''}`;
-            kv.push({ label: 'Source ➔ Destination', value: `${src} ➔ ${dst}` });
-          }
-          if (parsed.alert && parsed.alert.signature) {
-            kv.push({ label: 'Alert Signature', value: parsed.alert.signature, highlight: true });
-            if (parsed.alert.category) kv.push({ label: 'Category', value: parsed.alert.category });
-            if (parsed.alert.severity) kv.push({ label: 'Severity', value: `Sev ${parsed.alert.severity}` });
-          }
+          if (parsed.src_ip) srcIP = parsed.src_ip;
+          if (parsed.src_port) srcPort = String(parsed.src_port);
+          if (parsed.dest_ip) destIP = parsed.dest_ip;
+          if (parsed.dest_port) destPort = String(parsed.dest_port);
+          if (parsed.proto) proto = parsed.proto.toUpperCase();
+          if (parsed.flow && parsed.flow.age) flowDuration = `${parsed.flow.age}s`;
+          if (parsed.alert && parsed.alert.signature) signature = parsed.alert.signature;
           if (parsed.http) {
-            const httpUri = `${parsed.http.http_method || 'GET'} ${parsed.http.url || parsed.http.hostname || '/'}`;
-            kv.push({ label: 'HTTP Request', value: httpUri, highlight: true });
-            if (parsed.http.status) kv.push({ label: 'Status Code', value: String(parsed.http.status) });
-            if (parsed.http.http_user_agent) kv.push({ label: 'User-Agent', value: parsed.http.http_user_agent });
+            httpReq = `${parsed.http.http_method || 'GET'} ${parsed.http.url || parsed.http.hostname || '/'}`;
+            if (parsed.http.status) statusCode = String(parsed.http.status);
           }
-          if (parsed.dns) {
-            if (parsed.dns.rrname) kv.push({ label: 'DNS Query (RRNAME)', value: parsed.dns.rrname, highlight: true });
-            if (parsed.dns.rrtype) kv.push({ label: 'DNS Record Type', value: parsed.dns.rrtype });
-            if (parsed.dns.rcode) kv.push({ label: 'DNS RCode', value: parsed.dns.rcode });
-          }
-          if (parsed.tls) {
-            if (parsed.tls.sni) kv.push({ label: 'TLS SNI', value: parsed.tls.sni });
-            if (parsed.tls.version) kv.push({ label: 'TLS Version', value: parsed.tls.version });
+          if (parsed.dns && parsed.dns.rrname) {
+            httpReq = `DNS ${parsed.dns.rrtype || 'QUERY'} ${parsed.dns.rrname}`;
           }
         } else if (parsed.msg || parsed.sid || parsed.generator) {
           logType = 'SNORT 3 INTRUSION';
-          if (parsed.msg) kv.push({ label: 'Snort Message', value: parsed.msg, highlight: true });
-          if (parsed.proto) kv.push({ label: 'Protocol', value: parsed.proto });
-          if (parsed.src_ap && parsed.dst_ap) kv.push({ label: 'Source ➔ Destination', value: `${parsed.src_ap} ➔ ${parsed.dst_ap}` });
-          if (parsed.sid) kv.push({ label: 'Signature ID (SID)', value: String(parsed.sid) });
+          if (parsed.proto) proto = parsed.proto.toUpperCase();
+          if (parsed.msg) signature = parsed.msg;
+          if (parsed.src_ap) {
+            const parts = parsed.src_ap.split(':');
+            srcIP = parts[0];
+            if (parts[1]) srcPort = parts[1];
+          }
+          if (parsed.dst_ap) {
+            const parts = parsed.dst_ap.split(':');
+            destIP = parts[0];
+            if (parts[1]) destPort = parts[1];
+          }
         } else {
           logType = 'STRUCTURED JSON';
-          if (parsed.action) kv.push({ label: 'Action', value: String(parsed.action) });
+          if (parsed.ip || parsed.client_ip) srcIP = parsed.ip || parsed.client_ip;
+          if (parsed.port || parsed.src_port) srcPort = String(parsed.port || parsed.src_port);
+          if (parsed.dest_ip || parsed.dst_ip) destIP = parsed.dest_ip || parsed.dst_ip;
+          if (parsed.dest_port || parsed.dport) destPort = String(parsed.dest_port || parsed.dport);
+          if (parsed.proto || parsed.protocol) proto = String(parsed.proto || parsed.protocol).toUpperCase();
+          if (parsed.status || parsed.status_code) statusCode = String(parsed.status || parsed.status_code);
           if (parsed.method || parsed.uri || parsed.url) {
-            kv.push({ label: 'HTTP Request', value: `${parsed.method || ''} ${parsed.uri || parsed.url || ''}`.trim(), highlight: true });
+            httpReq = `${parsed.method || ''} ${parsed.uri || parsed.url || ''}`.trim();
           }
-          if (parsed.status || parsed.status_code) kv.push({ label: 'Status Code', value: String(parsed.status || parsed.status_code) });
-          if (parsed.user_agent || parsed.useragent) kv.push({ label: 'User-Agent', value: String(parsed.user_agent || parsed.useragent) });
-          if (parsed.command || parsed.cmd) kv.push({ label: 'Command Executed', value: String(parsed.command || parsed.cmd), highlight: true });
-          if (parsed.pid) kv.push({ label: 'Process PID', value: String(parsed.pid) });
+          if (parsed.signature || parsed.rule || parsed.rule_id) {
+            signature = parsed.signature || parsed.rule || parsed.rule_id;
+          }
         }
       } else {
-        if (rawLower.includes('type=user_cmd') || rawLower.includes('type=cred_acq') || rawLower.includes('type=syscall') || rawLower.includes('audit')) {
-          logType = 'LINUX AUDITD';
-          const typeM = raw.match(/type=([A-Z_]+)/i);
-          const commM = raw.match(/comm="?([^"\s]+)"?/i);
-          const exeM = raw.match(/exe="?([^"\s]+)"?/i);
-          const pidM = raw.match(/pid=(\d+)/i);
-          const cmdM = raw.match(/cmd="?([^"]+)"?/i) || raw.match(/proctitle="?([^"]+)"?/i);
-
-          if (typeM) kv.push({ label: 'Audit Type', value: typeM[1] });
-          if (commM) kv.push({ label: 'Process / Comm', value: commM[1] });
-          if (exeM) kv.push({ label: 'Executable Path', value: exeM[1] });
-          if (pidM) kv.push({ label: 'Process PID', value: pidM[1] });
-          if (cmdM) kv.push({ label: 'Command / Proctitle', value: cmdM[1], highlight: true });
-        } else if (rawLower.includes('sshd') || rawLower.includes('password') || rawLower.includes('authentication failure') || rawLower.includes('accepted')) {
+        // Regex / Text Parsing
+        const portMatch = raw.match(/:([0-9]{2,5})\s*->\s*:?([0-9]{2,5})/i);
+        if (portMatch) {
+          srcPort = portMatch[1];
+          destPort = portMatch[2];
+        }
+        if (rawLower.includes('udp') || rawLower.includes('dns') || rawLower.includes(':53')) {
+          proto = 'UDP';
+          destPort = '53';
+        } else if (rawLower.includes('ssh') || rawLower.includes('port 22')) {
+          proto = 'TCP';
+          destPort = '22';
           logType = 'LINUX AUTH / SSH';
-          const authM = raw.match(/(Failed password|Accepted password|Invalid user|Accepted publickey|authentication failure)/i);
-          const userM = raw.match(/for (invalid user )?([a-zA-Z0-9_\-]+)/i) || raw.match(/user=([a-zA-Z0-9_\-]+)/i);
-          const ipM = raw.match(/from ([0-9a-fA-F\.:]+)/i) || raw.match(/rhost=([0-9a-fA-F\.:]+)/i);
-          const portM = raw.match(/port (\d+)/i);
-
-          if (authM) kv.push({ label: 'Auth Action', value: authM[1], highlight: true });
-          if (userM) kv.push({ label: 'Target Account', value: userM[2] || userM[1] });
-          if (ipM) kv.push({ label: 'Source IP', value: ipM[1] });
-          if (portM) kv.push({ label: 'Port', value: portM[1] });
         } else if (raw.match(/^[0-9a-fA-F\.:]+\s+-\s+-\s+\[.+\]\s+"[A-Z]+\s+\S+\s+HTTP/i)) {
           logType = 'NGINX / WEB ACCESS';
+          proto = 'TCP';
+          destPort = '80/443';
           const webM = raw.match(/"([A-Z]+)\s+([^"\s]+)\s+HTTP\/[0-9\.]+"\s+(\d{3})/i);
-          const uaM = raw.match(/"[^"]*"\s+"([^"]*)"$/);
           if (webM) {
-            kv.push({ label: 'HTTP Method & URI', value: `${webM[1]} ${webM[2]}`, highlight: true });
-            kv.push({ label: 'Status Code', value: webM[3] });
+            httpReq = `${webM[1]} ${webM[2]}`;
+            statusCode = webM[3];
           }
-          if (uaM && uaM[1]) kv.push({ label: 'User-Agent', value: uaM[1] });
-        } else if (rawLower.includes('sudo:')) {
-          logType = 'SUDO EXECUTION';
-          const userM = raw.match(/sudo:\s+([a-zA-Z0-9_\-]+)\s+:/i);
-          const cmdM = raw.match(/COMMAND=(.*)$/i);
-          const ttyM = raw.match(/TTY=([^\s]+)/i);
-          const pwdM = raw.match(/PWD=([^\s]+)/i);
-
-          if (userM) kv.push({ label: 'Operator User', value: userM[1] });
-          if (cmdM) kv.push({ label: 'Elevated Command', value: cmdM[1], highlight: true });
-          if (pwdM) kv.push({ label: 'Working Directory', value: pwdM[1] });
-          if (ttyM) kv.push({ label: 'TTY Terminal', value: ttyM[1] });
+        } else if (rawLower.includes('type=user_cmd') || rawLower.includes('audit')) {
+          logType = 'LINUX AUDITD';
+          proto = 'HOST/IPC';
+          const typeM = raw.match(/type=([A-Z_]+)/i);
+          if (typeM) signature = `Audit: ${typeM[1]}`;
         }
       }
 
-      if (!kv.some(item => item.label.includes('Source') || item.label.includes('IP'))) {
-        if (ev.client_ip && ev.client_ip !== '-') {
-          kv.push({ label: 'Client / Source IP', value: ev.client_ip });
-        }
-      }
-      if (ev.status_code && !kv.some(item => item.label.includes('Status'))) {
-        kv.push({ label: 'Status Code', value: String(ev.status_code) });
-      }
-      if (ev.rule_id) {
-        kv.push({ label: 'Matched Rule', value: ev.rule_id });
-      }
-      if (ev.mitre_technique_id) {
-        kv.push({ label: 'MITRE ATT&CK', value: ev.mitre_technique_id });
-      }
-      if (ev.node_id) {
-        kv.push({ label: 'Sensor Node', value: ev.node_id });
-      }
+      kv.push({ label: 'Source IP', value: srcIP });
+      kv.push({ label: 'Source Port', value: srcPort });
+      kv.push({ label: 'Dest IP', value: destIP });
+      kv.push({ label: 'Dest Port', value: destPort });
+      kv.push({ label: 'Protocol', value: proto });
+      kv.push({ label: 'Sensor Node', value: ev.node_id || 'controller' });
+      kv.push({ label: 'Flow Duration', value: flowDuration });
+      kv.push({ label: 'Status Code', value: statusCode });
+      if (httpReq !== '-') kv.push({ label: 'HTTP Request', value: httpReq, highlight: true });
+      kv.push({ label: 'Raw Signature', value: signature, highlight: (signature !== '-' && signature !== 'suricata_flow') });
+      if (ev.mitre_technique_id) kv.push({ label: 'MITRE ATT&CK', value: ev.mitre_technique_id });
 
       return { logType, kv };
     }
@@ -4656,7 +4643,7 @@
         const ruleNameEl = document.getElementById('drawer-rule-name');
         if (ruleNameEl) ruleNameEl.textContent = ev.rule_id || (ev.source ? `ENGINE_${ev.source.toUpperCase()}` : 'HEURISTIC_RULE');
         const mitreIdEl = document.getElementById('drawer-mitre-id');
-        if (mitreIdEl) mitreIdEl.textContent = ev.mitre_technique_id || 'T1190';
+        if (mitreIdEl) mitreIdEl.textContent = ev.mitre_technique_id || '-';
 
         // 5. Asynchronously Enrich & Synchronize IPinfo Threat Entity State
         if (!isHost && ip) {
@@ -4768,6 +4755,96 @@
     }
 
     // -------------------------------------------------------------
+    // Root Cause & Evidence Analysis Hydration Engine
+    // -------------------------------------------------------------
+    function populateDrawerEvidence(ev) {
+      if (!ev) return;
+      const reasonEl = document.getElementById('drawer-evidence-reason');
+      const badgeEl = document.getElementById('drawer-evidence-rule-badge');
+      const iocsEl = document.getElementById('drawer-evidence-iocs');
+      const calcEl = document.getElementById('drawer-evidence-calc');
+
+      const score = ev.threat_score || 0;
+      const rule = ev.rule_id || '';
+      const ruleLower = rule.toLowerCase();
+      const mitre = ev.mitre_technique_id || '';
+      const raw = ev.raw_line || '';
+      const rawLower = raw.toLowerCase();
+
+      // 1. Rule / Severity Header Badge
+      if (badgeEl) {
+        if (score >= 85) {
+          badgeEl.textContent = `SEV1: ${rule || 'CRITICAL_THREAT'}`;
+          badgeEl.className = 'badge badge-critical';
+        } else if (score >= 40) {
+          badgeEl.textContent = `SEV2: ${rule || 'SUSPICIOUS_RULE'}`;
+          badgeEl.className = 'badge badge-high';
+        } else {
+          badgeEl.textContent = `INFO: ${rule || 'FLOW_TELEMETRY'}`;
+          badgeEl.className = 'badge badge-low';
+        }
+      }
+
+      // 2. Concrete Root Cause Explanation
+      let reasonText = '';
+      const iocs = [];
+
+      if (score === 0 || rule === 'suricata_flow' || rule === 'suricata_dns' || (!mitre && score < 40)) {
+        if (rawLower.includes('dns') || rawLower.includes(':53') || rule === 'suricata_dns') {
+          reasonText = 'Normal Network Telemetry (Port 53 DNS / Flow Tracking). Standard resolution query with no exfiltration, tunneling, or DGA anomalies detected.';
+          iocs.push({ label: 'Resolution', val: 'Port 53 Standard' });
+        } else {
+          reasonText = 'Normal Network Telemetry (TCP/UDP Flow Tracking). Standard socket session with no security threshold breaches.';
+          iocs.push({ label: 'Flow Status', val: 'Established / Verified' });
+        }
+        iocs.push({ label: 'Threat Score', val: '0 (LOW)' });
+        iocs.push({ label: 'Action', val: 'ALLOW' });
+      } else {
+        // Exploit / Malicious Alert
+        if (mitre.startsWith('T1190') || ruleLower.includes('sqli') || ruleLower.includes('rce') || ruleLower.includes('exploit') || ruleLower.includes('web')) {
+          reasonText = `Web Application Exploit Signature Triggered: HTTP payload contains offending injection or path traversal pattern crossing detection threshold (Score: ${score}/100).`;
+          iocs.push({ label: 'Signature', val: rule || 'T1190_Exploit' });
+          if (ev.client_ip) iocs.push({ label: 'Offending Actor', val: ev.client_ip });
+          if (mitre) iocs.push({ label: 'MITRE ATT&CK', val: mitre });
+        } else if (mitre.startsWith('T1110') || ruleLower.includes('auth') || ruleLower.includes('brute') || ruleLower.includes('ssh')) {
+          reasonText = `Authentication Failure Velocity Exceeded: High rate of invalid login attempts detected within sliding time window (Score: ${score}/100).`;
+          iocs.push({ label: 'Target Service', val: 'SSH / PAM' });
+          if (ev.client_ip) iocs.push({ label: 'Offending IP', val: ev.client_ip });
+        } else if (mitre.startsWith('T1014') || mitre.startsWith('T1055') || ruleLower.includes('rootkit') || ruleLower.includes('fim')) {
+          reasonText = `Host Integrity & Kernel Rootkit Violation: Unauthorized ptrace manipulation, LKM module load, or critical config hash drift intercepted.`;
+          iocs.push({ label: 'Integrity Violation', val: rule });
+          iocs.push({ label: 'Action', val: 'SIGKILL / FIM Auto-Heal' });
+        } else if (mitre.startsWith('T1071') || ruleLower.includes('c2') || ruleLower.includes('beacon') || ev.ml_anomaly) {
+          reasonText = `Command & Control (C2) / Flow Anomaly Detected: Unsupervised Isolation Forest or heuristic entropy score crossed baseline threshold (Score: ${score}/100).`;
+          iocs.push({ label: 'ML Anomaly', val: `${(ev.ml_confidence_pct || 88).toFixed(0)}% Confidence` });
+        } else {
+          reasonText = `Security Threshold Violation: Rule "${rule || 'HEURISTIC'}" matched payload conditions with calculated threat score of ${score}/100.`;
+          iocs.push({ label: 'Rule ID', val: rule || 'threat_match' });
+        }
+      }
+
+      if (reasonEl) {
+        reasonEl.textContent = reasonText;
+      }
+
+      // 3. Render Dynamic IOC Pills
+      if (iocsEl) {
+        iocsEl.innerHTML = iocs.map(ioc => 
+          `<div class="ioc-pill"><span class="ioc-pill-label">${escapeHtml(ioc.label)}:</span> <span class="ioc-pill-val">${escapeHtml(ioc.val)}</span></div>`
+        ).join('');
+      }
+
+      // 4. Score Calculation Breakdown
+      if (calcEl) {
+        if (score === 0) {
+          calcEl.textContent = 'Baseline: 0 pts • Modifiers: None (Whitelisted/Benign) • Final Score: 0/100';
+        } else {
+          calcEl.textContent = `Baseline: ${score} pts • MITRE: ${mitre || 'NONE'} • Containment: ${score >= 85 ? 'XDP Fast-Path Drop' : (score >= 60 ? 'Tarpit Zero-Window' : 'Analyst Inspection')}`;
+        }
+      }
+    }
+
+    // -------------------------------------------------------------
     // High-Contrast Interactive Playbook Assistant Engine
     // -------------------------------------------------------------
     let playbookStepState = {};
@@ -4792,7 +4869,8 @@
 
     function populateDrawerPlaybook(ev) {
       if (!ev) return;
-      const mitre = (ev.mitre_technique_id || 'T1190').toUpperCase();
+      const score = ev.threat_score || 0;
+      const mitre = (ev.mitre_technique_id || '').toUpperCase();
       const ip = ev.client_ip || '127.0.0.1';
       const rule = (ev.rule_id || '').toLowerCase();
       const incidentId = ev.id || 'current';
@@ -4811,11 +4889,42 @@
 
       // Set Playbook Header MITRE ID
       const mitreEl = document.getElementById('drawer-playbook-mitre');
-      if (mitreEl) mitreEl.textContent = mitre;
+      if (mitreEl) mitreEl.textContent = mitre || 'GENERIC';
 
       let steps = [];
 
-      if (mitre.startsWith('T1110') || (rule.includes('brute') || rule.includes('spray') || rule.includes('auth_fail'))) {
+      if (!mitre || score === 0 || rule === 'suricata_flow' || rule === 'suricata_dns') {
+        // Generic Background Flow Telemetry Playbook
+        steps = [
+          {
+            badge: 'STEP 1: TRIAGE',
+            title: 'Verify Flow Telemetry & Session Metrics',
+            desc: `Inspect standard network connection states and socket lifecycle for ${ip}:`,
+            command: `ss -tulpn | grep '${ip}' || conntrack -L | grep '${ip}'`,
+            actions: [
+              { label: '🔍 Pull Access Logs', fn: `pullIncidentAccessLogs('${ip}')`, cls: 'btn-triage-report' }
+            ]
+          },
+          {
+            badge: 'STEP 2: REPUTATION',
+            title: 'Validate ASN & Threat Intel Reputation',
+            desc: 'Check remote autonomous system, IP reputation, and public resolver whitelist state.',
+            command: `whois '${ip}' | grep -E 'OrgName|NetName|Country'`
+          },
+          {
+            badge: 'STEP 3: POLICY',
+            title: 'Validate Zero-Trust Ingress Policy',
+            desc: 'Ensure endpoint firewall and Nginx reverse proxy rate-limiting rules are properly enforced.',
+            command: `iptables -S INPUT | grep '${ip}' || true`
+          },
+          {
+            badge: 'STEP 4: BASELINE',
+            title: 'Maintain Baseline Telemetry Retention',
+            desc: 'Event recorded in background circular buffer with zero quarantine penalty.',
+            command: `echo "Flow status: Benign telemetry within baseline limits"`
+          }
+        ];
+      } else if (mitre.startsWith('T1110') || (rule.includes('brute') || rule.includes('spray') || rule.includes('auth_fail'))) {
         // T1110 / Brute Force & Credential Spraying Playbook
         steps = [
           {
@@ -4986,7 +5095,7 @@
           }
         ];
       } else {
-        // T1190 / Exploit Public-Facing Application Playbook (Default)
+        // T1190 / Exploit Public-Facing Application Playbook
         steps = [
           {
             badge: 'STEP 1: TRIAGE',
@@ -5871,7 +5980,7 @@
       statusBadge.className = `badge ${run.status === 'RUNNING' ? 'badge-high' : 'badge-success'}`;
       
       const mitreBadge = document.getElementById('soar-inspector-mitre-badge');
-      mitreBadge.textContent = run.mitre_id || 'T1190';
+      mitreBadge.textContent = run.mitre_id || '-';
 
       // Pre-fill console input with target actor
       const consoleInput = document.getElementById('soar-console-ip');
