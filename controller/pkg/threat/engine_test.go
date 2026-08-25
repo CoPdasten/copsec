@@ -96,6 +96,21 @@ func TestWhitelistedEntityProtection(t *testing.T) {
 	if !res2.IsWhitelisted || res2.FinalScore != 0 || res2.Action != ActionAllow {
 		t.Errorf("Expected internal 10.0.5.22 to be protected, got %+v", res2)
 	}
+
+	res3 := engine.Evaluate("1.1.1.1", 95, "c2_dns_exfil", "T1071", 200, "Cloudflare DNS")
+	if !res3.IsWhitelisted || res3.FinalScore != 0 || res3.Action != ActionAllow {
+		t.Errorf("Expected public DNS 1.1.1.1 to be protected from scoring, got %+v", res3)
+	}
+
+	res4 := engine.Evaluate("8.8.8.8", 90, "rce_exploit", "T1190", 200, "Google DNS")
+	if !res4.IsWhitelisted || res4.FinalScore != 0 || res4.Action != ActionAllow {
+		t.Errorf("Expected public DNS 8.8.8.8 to be protected from scoring, got %+v", res4)
+	}
+
+	res5 := engine.Evaluate("100.64.10.5", 85, "auth_burst", "T1110", 200, "Tailscale")
+	if !res5.IsWhitelisted || res5.FinalScore != 0 || res5.Action != ActionAllow {
+		t.Errorf("Expected CGNAT/Tailscale 100.64.10.5 to be protected from scoring, got %+v", res5)
+	}
 }
 
 func TestHalfLifeScoreDecay(t *testing.T) {

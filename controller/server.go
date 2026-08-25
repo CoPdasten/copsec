@@ -424,12 +424,26 @@ func (s *CentralServer) processEvent(nodeID string, event *copsecproto.LogEvent)
 		}
 	}
 
-	// Ensure MITRE technique matches or Sigma rules have baseline score >= 60
-	if mitreID != "" && strings.HasPrefix(strings.ToUpper(mitreID), "T") && threatScore < 60 {
-		threatScore = 60
+	// Suricata flow de-noising: Generic flows, DNS queries and TLS handshakes must NEVER have false MITRE tags or elevated score
+	if ruleID == "suricata_flow" || (event.Source == "suricata" && !strings.Contains(event.RawLine, `"event_type":"alert"`) && !strings.Contains(event.RawLine, `"event_type": "alert"`)) {
+		threatScore = 0
+		mitreID = ""
 	}
-	if strings.HasPrefix(strings.ToLower(ruleID), "sigma") && threatScore < 60 {
-		threatScore = 60
+
+	// Global Infrastructure & Public DNS Whitelist protection
+	if isProtectedIP(event.ClientIp) {
+		threatScore = 0
+		if ruleScope != sigma.ScopeHostLocal && ruleID != "sudo_execution" {
+			mitreID = ""
+		}
+	} else {
+		// Ensure non-whitelisted MITRE technique matches or Sigma rules have baseline score >= 60
+		if mitreID != "" && strings.HasPrefix(strings.ToUpper(mitreID), "T") && threatScore < 60 && ruleID != "suricata_flow" {
+			threatScore = 60
+		}
+		if strings.HasPrefix(strings.ToLower(ruleID), "sigma") && threatScore < 60 {
+			threatScore = 60
+		}
 	}
 
 	// 5. Dynamic Sliding-Window & Time-Decayed Threat Scoring Engine

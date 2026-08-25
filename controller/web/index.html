@@ -2959,23 +2959,56 @@
       }
     }
 
+    const KNOWN_PUBLIC_DNS = new Set([
+      '8.8.8.8', '8.8.4.4', '1.1.1.1', '1.0.0.1', '1.1.1.2', '1.0.0.2', '1.1.1.3', '1.0.0.3',
+      '9.9.9.9', '149.112.112.112', '208.67.222.222', '208.67.220.220',
+      '2001:4860:4860::8888', '2001:4860:4860::8844', '2606:4700:4700::1111', '2606:4700:4700::1001'
+    ]);
+
+    function isProtectedClientIP(ip) {
+      if (!ip || ip === '-' || ip === '127.0.0.1' || ip === '::1' || ip === 'localhost' || ip === 'local') return true;
+      if (KNOWN_PUBLIC_DNS.has(ip) || ip === '37.59.108.186') return true;
+      if (ip.startsWith('10.') || ip.startsWith('192.168.') || ip.startsWith('172.16.') || ip.startsWith('172.17.') ||
+          ip.startsWith('172.18.') || ip.startsWith('172.19.') || ip.startsWith('172.20.') || ip.startsWith('172.21.') ||
+          ip.startsWith('172.22.') || ip.startsWith('172.23.') || ip.startsWith('172.24.') || ip.startsWith('172.25.') ||
+          ip.startsWith('172.26.') || ip.startsWith('172.27.') || ip.startsWith('172.28.') || ip.startsWith('172.29.') ||
+          ip.startsWith('172.30.') || ip.startsWith('172.31.') || ip.startsWith('100.')) {
+        return true;
+      }
+      return false;
+    }
+
     function isAlertActionable(ev) {
       if (!ev) return false;
       const score = ev.threat_score || 0;
       const rule = (ev.rule_id || '').toLowerCase();
       const mitre = (ev.mitre_technique_id || '').toUpperCase();
       const raw = (ev.raw_line || '').toLowerCase();
+      const ip = (ev.client_ip || '').trim();
+
+      // Zero score benign traffic stays strictly in raw telemetry stream
+      if (score === 0) return false;
+
+      // Filter out generic suricata flows and DNS lookups
+      if (rule === 'suricata_flow' || rule === 'suricata_dns' || (ev.source === 'suricata' && !raw.includes('"event_type":"alert"') && !raw.includes('"event_type": "alert"'))) {
+        return false;
+      }
+
+      // Filter out whitelisted public DNS resolvers & infrastructure unless host-local rootkit/FIM
+      const isKernelFIM = rule.includes('rootkit') || rule.includes('fim') || rule.includes('integrity') || rule.includes('ptrace') || rule.includes('lkm') || raw.includes('fim_healing');
+      if (isProtectedClientIP(ip) && !isKernelFIM && rule !== 'sudo_execution') {
+        return false;
+      }
 
       // De-noise routine successful sudo execution (score < 70): keep in Incident Stream, do not elevate to Critical Alerts
       if (rule === 'sudo_execution' || (rule.includes('sudo') && score < 70)) {
         return false;
       }
 
-      const hasMitre = mitre !== '' && mitre.startsWith('T');
+      const hasMitre = mitre !== '' && mitre.startsWith('T') && rule !== 'suricata_flow';
       const isScore40 = score >= 40;
       const isSigma = rule.startsWith('sigma') || rule.includes('revshell') || rule.includes('sqli') || rule.includes('rce') || rule.includes('c2') || rule.includes('evasion') || rule.includes('persistence');
       const isML = (ev.ml_anomaly && (ev.ml_confidence_pct >= 70 || ev.ml_confidence_pct >= 0.7)) || (ev.snort_ml && (ev.snort_confidence >= 0.7 || ev.snort_confidence >= 70));
-      const isKernelFIM = rule.includes('rootkit') || rule.includes('fim') || rule.includes('integrity') || rule.includes('ptrace') || rule.includes('lkm') || raw.includes('fim_healing');
 
       return hasMitre || isScore40 || isSigma || isML || isKernelFIM;
     }

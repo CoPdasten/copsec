@@ -113,14 +113,35 @@ func NewScoringEngine(banThreshold, tarpitThreshold int) *ScoringEngine {
 		}
 	}
 
-	// Initialize default private/local CIDRs to whitelist
+	// Initialize default private/local/DNS CIDRs to whitelist
 	defaultCIDRs := []string{
 		"127.0.0.0/8",
 		"::1/128",
 		"10.0.0.0/8",
 		"172.16.0.0/12",
 		"192.168.0.0/16",
-		"100.64.0.0/10", // Tailscale / CGNAT
+		"100.64.0.0/10",   // Tailscale / CGNAT
+		"169.254.0.0/16",  // Link-local
+		"8.8.8.8/32",      // Google Primary DNS
+		"8.8.4.4/32",      // Google Secondary DNS
+		"1.1.1.1/32",      // Cloudflare Primary DNS
+		"1.0.0.1/32",      // Cloudflare Secondary DNS
+		"1.1.1.2/32",      // Cloudflare Security DNS
+		"1.0.0.2/32",
+		"1.1.1.3/32",      // Cloudflare Family DNS
+		"1.0.0.3/32",
+		"9.9.9.9/32",      // Quad9 DNS
+		"149.112.112.112/32",
+		"208.67.222.222/32", // OpenDNS
+		"208.67.220.220/32",
+		"2001:4860:4860::8888/128",
+		"2001:4860:4860::8844/128",
+		"2606:4700:4700::1111/128",
+		"2606:4700:4700::1001/128",
+		"2620:fe::fe/128",
+		"2620:fe::9/128",
+		"2620:119:35::35/128",
+		"2620:119:53::53/128",
 	}
 	for _, cidr := range defaultCIDRs {
 		if _, ipNet, err := net.ParseCIDR(cidr); err == nil {

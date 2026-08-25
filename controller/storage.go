@@ -116,6 +116,7 @@ func NewStorageEngine(dbPath string) (*StorageEngine, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	_, _ = engine.FlushInvalidQuarantines()
 
 	log.Printf("[INFO] Embedded Storage initialized (WAL-mode SQLite) at %s", dbPath)
 	return engine, nil
@@ -257,7 +258,14 @@ func (s *StorageEngine) FlushInvalidQuarantines() (int64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	query := `DELETE FROM active_bans WHERE ip = '' OR ip = '127.0.0.1' OR ip = 'local' OR ip = 'localhost' OR ip LIKE '127.%' OR ip LIKE '10.%' OR ip LIKE '192.168.%' OR ip LIKE '172.16.%' OR ip LIKE '172.17.%' OR ip LIKE '172.18.%' OR ip LIKE '172.19.%' OR ip LIKE '172.20.%' OR ip LIKE '172.21.%' OR ip LIKE '172.22.%' OR ip LIKE '172.23.%' OR ip LIKE '172.24.%' OR ip LIKE '172.25.%' OR ip LIKE '172.26.%' OR ip LIKE '172.27.%' OR ip LIKE '172.28.%' OR ip LIKE '172.29.%' OR ip LIKE '172.30.%' OR ip LIKE '172.31.%' OR reason LIKE '%sudo_execution%' OR reason LIKE '%sudo:%' OR reason LIKE '%cron_tamper%' OR reason LIKE '%fim_drift%'`
+	query := `DELETE FROM active_bans WHERE ip = '' OR ip = '-' OR ip = '127.0.0.1' OR ip = 'local' OR ip = 'localhost' OR ip = '::1'
+	          OR ip LIKE '127.%' OR ip LIKE '10.%' OR ip LIKE '192.168.%' OR ip LIKE '172.16.%' OR ip LIKE '172.17.%' OR ip LIKE '172.18.%' 
+	          OR ip LIKE '172.19.%' OR ip LIKE '172.20.%' OR ip LIKE '172.21.%' OR ip LIKE '172.22.%' OR ip LIKE '172.23.%' OR ip LIKE '172.24.%' 
+	          OR ip LIKE '172.25.%' OR ip LIKE '172.26.%' OR ip LIKE '172.27.%' OR ip LIKE '172.28.%' OR ip LIKE '172.29.%' OR ip LIKE '172.30.%' 
+	          OR ip LIKE '172.31.%' OR ip LIKE '100.%' OR ip = '8.8.8.8' OR ip = '8.8.4.4' OR ip = '1.1.1.1' OR ip = '1.0.0.1' 
+	          OR ip = '1.1.1.2' OR ip = '1.0.0.2' OR ip = '1.1.1.3' OR ip = '1.0.0.3' OR ip = '9.9.9.9' OR ip = '149.112.112.112' 
+	          OR ip = '208.67.222.222' OR ip = '208.67.220.220' OR ip = '37.59.108.186'
+	          OR reason LIKE '%sudo_execution%' OR reason LIKE '%sudo:%' OR reason LIKE '%cron_tamper%' OR reason LIKE '%fim_drift%'`
 	res, err := s.db.Exec(query)
 	if err != nil {
 		return 0, err

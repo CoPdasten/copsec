@@ -307,8 +307,18 @@ func TestSuricataAndAuthParsers(t *testing.T) {
 	if !ok {
 		t.Fatalf("Expected parseSuricataLine to succeed on flow JSON")
 	}
-	if suriFlowEv.ThreatScore != 0 || suriFlowEv.ClientIp != "192.168.1.50" {
+	if suriFlowEv.ThreatScore != 0 || suriFlowEv.ClientIp != "192.168.1.50" || suriFlowEv.MitreTechniqueId != "" {
 		t.Errorf("Unexpected suricata flow event: %+v", suriFlowEv)
+	}
+
+	// 2b. Suricata DNS Query to 8.8.8.8
+	suriDNSLine := `{"timestamp":"2026-08-23T12:34:56.789000+0000","event_type":"dns","src_ip":"8.8.8.8","dest_ip":"10.0.0.5","proto":"UDP","dns":{"type":"query","rrname":"example.com"}}`
+	suriDNSEv, ok := parseSuricataLine(suriDNSLine)
+	if !ok {
+		t.Fatalf("Expected parseSuricataLine to succeed on dns JSON")
+	}
+	if suriDNSEv.ThreatScore != 0 || suriDNSEv.MitreTechniqueId != "" {
+		t.Errorf("Expected 8.8.8.8 DNS query to have ThreatScore 0 and empty MITRE, got: %+v", suriDNSEv)
 	}
 
 	// 3. Auth Failed Password test

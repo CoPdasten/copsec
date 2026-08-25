@@ -428,6 +428,19 @@ func parseSuricataLine(line string) (*copsecproto.LogEvent, bool) {
 			ruleID = "suricata_ids_alert"
 		}
 		mitreID = "T1190"
+	} else if s.EventType == "dns" {
+		ruleID = "suricata_dns"
+		threatScore = 0
+		mitreID = ""
+	} else {
+		ruleID = "suricata_flow"
+		threatScore = 0
+		mitreID = ""
+	}
+
+	if isProtectedIP(s.SrcIP) {
+		threatScore = 0
+		mitreID = ""
 	}
 
 	ts := time.Now().UnixMilli()
@@ -471,6 +484,10 @@ func parseAuthLine(line string) (*copsecproto.LogEvent, bool) {
 		ip = "127.0.0.1"
 	}
 
+	if isProtectedIP(ip) && ruleID != "sudo_execution" {
+		threatScore = 0
+	}
+
 	return &copsecproto.LogEvent{
 		Source:           "auth",
 		ClientIp:         ip,
@@ -501,7 +518,21 @@ func parseLogLine(sourceName, raw string) *copsecproto.LogEvent {
 					ruleID = "suricata_ids_alert"
 				}
 				mitreID = "T1190"
+			} else if s.EventType == "dns" {
+				ruleID = "suricata_dns"
+				threatScore = 0
+				mitreID = ""
+			} else {
+				ruleID = "suricata_flow"
+				threatScore = 0
+				mitreID = ""
 			}
+
+			if isProtectedIP(s.SrcIP) {
+				threatScore = 0
+				mitreID = ""
+			}
+
 			ts := nowMs
 			if s.Timestamp != "" {
 				if t, err := time.Parse(time.RFC3339Nano, s.Timestamp); err == nil {

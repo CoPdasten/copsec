@@ -15,21 +15,51 @@ var (
 	bannedIPMap sync.Map
 )
 
-// isProtectedIP checks if an IP belongs to local machine, private networks, or protected ranges.
+// knownPublicDNS contains static public resolver IPs that must never be banned or scored as threats.
+var knownPublicDNS = map[string]bool{
+	"8.8.8.8":              true,
+	"8.8.4.4":              true,
+	"1.1.1.1":              true,
+	"1.0.0.1":              true,
+	"1.1.1.2":              true,
+	"1.0.0.2":              true,
+	"1.1.1.3":              true,
+	"1.0.0.3":              true,
+	"9.9.9.9":              true,
+	"149.112.112.112":      true,
+	"208.67.222.222":       true,
+	"208.67.220.220":       true,
+	"2001:4860:4860::8888": true,
+	"2001:4860:4860::8844": true,
+	"2606:4700:4700::1111": true,
+	"2606:4700:4700::1001": true,
+	"2620:fe::fe":          true,
+	"2620:fe::9":           true,
+	"2620:119:35::35":      true,
+	"2620:119:53::53":      true,
+}
+
+// isProtectedIP checks if an IP belongs to local machine, private networks, CGNAT, or public DNS resolvers.
 func isProtectedIP(ipStr string) bool {
 	cleanIP := strings.TrimSpace(ipStr)
-	if cleanIP == "" || cleanIP == "127.0.0.1" || cleanIP == "::1" || cleanIP == "localhost" {
+	if cleanIP == "" || cleanIP == "-" || cleanIP == "127.0.0.1" || cleanIP == "::1" || cleanIP == "localhost" || cleanIP == "local" {
 		return true
 	}
-	if cleanIP == "37.59.108.186" || strings.HasPrefix(cleanIP, "100.") {
+	if knownPublicDNS[cleanIP] || cleanIP == "37.59.108.186" {
 		return true
 	}
 	parsed := net.ParseIP(cleanIP)
 	if parsed == nil {
 		return true
 	}
-	if parsed.IsLoopback() || parsed.IsPrivate() || parsed.IsUnspecified() {
+	if parsed.IsLoopback() || parsed.IsPrivate() || parsed.IsUnspecified() || parsed.IsLinkLocalUnicast() || parsed.IsLinkLocalMulticast() {
 		return true
+	}
+	// CGNAT (100.64.0.0/10) & Tailscale
+	if ip4 := parsed.To4(); ip4 != nil {
+		if ip4[0] == 100 && (ip4[1]&0xC0) == 64 {
+			return true
+		}
 	}
 	return false
 }
