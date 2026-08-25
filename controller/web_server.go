@@ -11,12 +11,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/copsec/controller/pkg/ai_agent"
 	"github.com/copsec/controller/pkg/ai_report"
 	"github.com/copsec/controller/pkg/dns"
 	"github.com/copsec/controller/pkg/ebpf"
 	"github.com/copsec/controller/pkg/geoip"
 	"github.com/copsec/controller/pkg/healing"
 	"github.com/copsec/controller/pkg/ml"
+	"github.com/copsec/controller/pkg/notifier"
 	"github.com/copsec/controller/pkg/p2p"
 	"github.com/copsec/controller/pkg/sigma"
 	"github.com/copsec/controller/pkg/tarpit"
@@ -42,6 +44,8 @@ type WebSOCServer struct {
 	honeypotSSH     *HoneypotSSHServer
 	p2pMesh         *p2p.GossipMesh
 
+	aiAgent         *ai_agent.Agent
+	notifier        *notifier.Dispatcher
 	integrityGuard  *ebpf.IntegrityGuard
 	yaraScanner     *yara.MemoryScanner
 	tarpitEngine    *tarpit.TarpitEngine
@@ -54,6 +58,10 @@ type SystemConfigDTO struct {
 	GRPCAddr         string `json:"grpc_addr"`
 	TelegramToken    string `json:"telegram_token"`
 	TelegramChat     string `json:"telegram_chat"`
+	DiscordWebhook   string `json:"discord_webhook"`
+	LLMAPIKey        string `json:"llm_api_key"`
+	LLMModel         string `json:"llm_model"`
+	LLMProvider      string `json:"llm_provider"`
 	HoneypotSSHAddr  string `json:"honeypot_ssh_addr"`
 	AutoBanThreshold int    `json:"autoban_threshold"`
 	ThreatIntelKey   string `json:"threat_intel_key"`
@@ -82,6 +90,8 @@ func NewWebSOCServer(
 		deceptionRouter: deceptionRouter,
 		rateLimiter:     rateLimiter,
 		honeypotSSH:     honeypotSSH,
+		aiAgent:         ai_agent.GetDefaultAgent(),
+		notifier:        notifier.GetDefaultDispatcher(),
 		integrityGuard:  ebpf.GetDefaultIntegrityGuard(),
 		yaraScanner:     yara.GetDefaultScanner(),
 		tarpitEngine:    tarpit.GetDefaultTarpit(),
@@ -119,6 +129,8 @@ func (ws *WebSOCServer) Start() error {
 	mux.HandleFunc("/api/geoip/lookup", ws.handleGeoIPLookup)
 	mux.HandleFunc("/api/report/incident", ws.handleIncidentReport)
 	mux.HandleFunc("/api/report/export", ws.handleExportReport)
+	mux.HandleFunc("/api/ai/agent/latest", ws.handleAIAgentLatest)
+	mux.HandleFunc("/api/ai/agent/test-dispatch", ws.handleAIAgentTestDispatch)
 	mux.HandleFunc("/api/p2p/topology", ws.handleP2PTopology)
 	mux.HandleFunc("/api/p2p/crdt", ws.handleP2PCRDT)
 	mux.HandleFunc("/api/p2p/logs", ws.handleP2PLogs)
@@ -250,6 +262,8 @@ func (ws *WebSOCServer) loadSystemConfig() *SystemConfigDTO {
 		GRPCAddr:         "0.0.0.0:8443",
 		HoneypotSSHAddr:  ":2222",
 		AutoBanThreshold: 50,
+		LLMModel:         "gemini-2.5-flash",
+		LLMProvider:      "local",
 		Configured:       false,
 	}
 
@@ -270,6 +284,18 @@ func (ws *WebSOCServer) loadSystemConfig() *SystemConfigDTO {
 	}
 	if v, ok := cfgMap["telegram_chat"]; ok {
 		dto.TelegramChat = v
+	}
+	if v, ok := cfgMap["discord_webhook"]; ok {
+		dto.DiscordWebhook = v
+	}
+	if v, ok := cfgMap["llm_api_key"]; ok {
+		dto.LLMAPIKey = v
+	}
+	if v, ok := cfgMap["llm_model"]; ok && v != "" {
+		dto.LLMModel = v
+	}
+	if v, ok := cfgMap["llm_provider"]; ok && v != "" {
+		dto.LLMProvider = v
 	}
 	if v, ok := cfgMap["honeypot_ssh_addr"]; ok && v != "" {
 		dto.HoneypotSSHAddr = v
@@ -298,6 +324,10 @@ func (ws *WebSOCServer) saveSystemConfig(cfg *SystemConfigDTO) error {
 		"grpc_addr":          cfg.GRPCAddr,
 		"telegram_token":     cfg.TelegramToken,
 		"telegram_chat":      cfg.TelegramChat,
+		"discord_webhook":    cfg.DiscordWebhook,
+		"llm_api_key":        cfg.LLMAPIKey,
+		"llm_model":          cfg.LLMModel,
+		"llm_provider":       cfg.LLMProvider,
 		"honeypot_ssh_addr":  cfg.HoneypotSSHAddr,
 		"autoban_threshold":  strconv.Itoa(cfg.AutoBanThreshold),
 		"threat_intel_key":   cfg.ThreatIntelKey,
@@ -319,6 +349,15 @@ func (ws *WebSOCServer) applyRuntimeConfig(cfg *SystemConfigDTO) {
 			}, ws.server)
 			ws.server.SetTelegramBot(tgBot)
 			log.Printf("[CONFIG] Telegram SOAR Bot dynamically updated (Chat ID: %s)", cfg.TelegramChat)
+		}
+
+		// Reconfigure Notifier dynamically
+		if ws.notifier != nil {
+			ws.notifier.UpdateConfig(notifier.Config{
+				TelegramBotToken: cfg.TelegramToken,
+				TelegramChatID:   cfg.TelegramChat,
+				DiscordWebhook:   cfg.DiscordWebhook,
+			})
 		}
 	}
 }
@@ -1019,5 +1058,99 @@ func (ws *WebSOCServer) handleAlertsTriage(w http.ResponseWriter, r *http.Reques
 		"success": true,
 		"action":  req.Action,
 		"ip":      cleanIP,
+	})
+}
+
+func (ws *WebSOCServer) handleAIAgentLatest(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if ws.aiAgent == nil {
+		json.NewEncoder(w).Encode([]*ai_agent.AITriageBrief{})
+		return
+	}
+	limit := 50
+	if q := r.URL.Query().Get("limit"); q != "" {
+		if l, err := strconv.Atoi(q); err == nil && l > 0 {
+			limit = l
+		}
+	}
+	briefs := ws.aiAgent.GetRecentBriefs(limit)
+	json.NewEncoder(w).Encode(briefs)
+}
+
+func (ws *WebSOCServer) handleAIAgentTestDispatch(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		NodeID           string `json:"node_id"`
+		Source           string `json:"source"`
+		RawLine          string `json:"raw_line"`
+		ClientIP         string `json:"client_ip"`
+		ThreatScore      int    `json:"threat_score"`
+		RuleID           string `json:"rule_id"`
+		MitreTechniqueID string `json:"mitre_technique_id"`
+	}
+
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	if req.NodeID == "" {
+		req.NodeID = "node-soc-edge"
+	}
+	if req.ClientIP == "" {
+		req.ClientIP = "198.51.100.44"
+	}
+	if req.ThreatScore <= 0 {
+		req.ThreatScore = 95
+	}
+	if req.RuleID == "" {
+		req.RuleID = "sigma-web-sqli"
+	}
+	if req.MitreTechniqueID == "" {
+		req.MitreTechniqueID = "T1190"
+	}
+	if req.RawLine == "" {
+		req.RawLine = "GET /api/v1/auth?user=admin' UNION SELECT 1,password,3 FROM users-- HTTP/1.1"
+	}
+
+	geo := geoip.GetDefaultEngine().Lookup(req.ClientIP)
+	ic := &ai_agent.IncidentContext{
+		NodeID:           req.NodeID,
+		Source:           req.Source,
+		RawLine:          req.RawLine,
+		ClientIP:         req.ClientIP,
+		ThreatScore:      req.ThreatScore,
+		RuleID:           req.RuleID,
+		MitreTechniqueID: req.MitreTechniqueID,
+		CountryCode:      geo.CountryCode,
+		CountryName:      geo.CountryName,
+		FlagEmoji:        geo.FlagEmoji,
+		ASN:              geo.ASN,
+		ContainmentState: "XDP_DROP (eBPF Swarm Fast-Path Active)",
+	}
+
+	agent := ws.aiAgent
+	if agent == nil {
+		agent = ai_agent.GetDefaultAgent()
+	}
+
+	brief, err := agent.AnalyzeIncident(r.Context(), ic)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("AI analysis failed: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	disp := ws.notifier
+	if disp == nil {
+		disp = notifier.GetDefaultDispatcher()
+	}
+
+	dispatchRes := disp.DispatchTriageAlert(r.Context(), brief)
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":         true,
+		"brief":           brief,
+		"dispatch_result": dispatchRes,
 	})
 }

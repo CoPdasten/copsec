@@ -1656,6 +1656,68 @@
       }, duration);
     }
 
+    // AI SOC Forensic Incident Triage Live Toast
+    function showAITriageToast(brief) {
+      if (!brief) return;
+      playSciFiAlertChime();
+      triggerNeonHUDAlert();
+
+      const container = document.getElementById('toast-container');
+      const toast = document.createElement('div');
+      toast.className = 'toast toast-danger';
+      toast.style.minWidth = '360px';
+      toast.style.maxWidth = '460px';
+      toast.style.borderLeft = '4px solid var(--magenta)';
+      toast.style.background = '#0a1024';
+      toast.style.boxShadow = '0 8px 32px rgba(255, 0, 85, 0.25)';
+
+      const isHost = brief.client_ip === '127.0.0.1' || brief.client_ip === 'local' || !brief.client_ip;
+      const actorLabel = isHost ? '🖥️ HOST LOCAL' : `${escapeHtml(brief.flag_emoji || '🌐')} ${escapeHtml(brief.client_ip)}`;
+
+      let actionBtns = '';
+      if (!isHost) {
+        actionBtns += `<button class="btn-triage-xs btn-triage-ban" style="padding: 0.2rem 0.5rem;" onclick="triageQuickBan('${escapeHtml(brief.client_ip)}')">⚡ Ban Fleet</button>`;
+        actionBtns += `<button class="btn-triage-xs btn-triage-tarpit" style="padding: 0.2rem 0.5rem;" onclick="triageSendTarpit('${escapeHtml(brief.client_ip)}')">🕳️ Tarpit</button>`;
+      }
+
+      toast.innerHTML = `
+        <div class="toast-content" style="width: 100%;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
+            <div class="toast-title" style="color: var(--magenta); font-size: 0.82rem; display: flex; align-items: center; gap: 0.4rem;">
+              <span>🚨 AI FORENSIC INCIDENT TRIAGE</span>
+              <span class="badge badge-critical" style="font-size: 0.65rem;">${brief.threat_score} CRIT</span>
+            </div>
+            <button class="toast-close" onclick="this.closest('.toast').remove()">✖</button>
+          </div>
+          <div style="font-size: 0.73rem; color: #fff; font-weight: 600; margin-bottom: 0.25rem;">
+            ${escapeHtml(brief.vector_and_target || 'High-Severity Security Incident')}
+          </div>
+          <div style="font-size: 0.7rem; color: var(--text-muted); line-height: 1.35; margin-bottom: 0.4rem; background: rgba(255,255,255,0.03); padding: 0.35rem; border-radius: 4px;">
+            🧠 <strong>Threat Assessment:</strong> ${escapeHtml(brief.threat_assessment || 'Malicious activity detected')}<br>
+            🛡️ <strong>Mitigation:</strong> <code style="color: var(--cyan);">${escapeHtml(brief.enforced_mitigation || 'XDP_DROP')}</code><br>
+            💡 <strong>Action:</strong> <em>${escapeHtml(brief.recommended_action || 'Inspect system logs')}</em>
+          </div>
+          <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.68rem; color: var(--text-muted);">
+            <div><strong>Actor:</strong> ${actorLabel}</div>
+            <div style="display: flex; gap: 0.3rem;">
+              ${actionBtns}
+            </div>
+          </div>
+        </div>
+      `;
+
+      container.appendChild(toast);
+
+      setTimeout(() => {
+        if (toast.parentElement) {
+          toast.style.transition = 'opacity 0.4s ease, transform 0.4s ease';
+          toast.style.opacity = '0';
+          toast.style.transform = 'translateX(100%)';
+          setTimeout(() => toast.remove(), 400);
+        }
+      }, 10000);
+    }
+
     // Toggle Input Masking for Sensitive Fields
     function toggleMask(inputId, btn) {
       const input = document.getElementById(inputId);
@@ -2127,6 +2189,8 @@
       } else if (msg.type === 'honeypot_hit') {
         prependHoneypotRow(msg.payload);
         showToast(`Honeypot intrusion captured from ${msg.payload.client_ip}`, 'danger', 'Deception Triggered');
+      } else if (msg.type === 'ai_triage') {
+        showAITriageToast(msg.payload);
       }
     }
 

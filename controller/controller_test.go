@@ -545,3 +545,75 @@ func TestSOCAlertsTriageAPI(t *testing.T) {
 		t.Fatalf("Expected 198.51.100.44 to be active in TTL manager, got %+v", bans)
 	}
 }
+
+func TestAIAgentAndNotifierAPIs(t *testing.T) {
+	tmpDir := t.TempDir()
+	store, err := NewStorageEngine(filepath.Join(tmpDir, "ai_test.db"))
+	if err != nil {
+		t.Fatalf("Failed to initialize storage: %v", err)
+	}
+	defer store.Close()
+
+	analyzer := NewRuleEngine("")
+	server := NewCentralServer(store, analyzer)
+	ttlMgr := NewTTLBanManager(store, server)
+	defer ttlMgr.Stop()
+	wsHub := NewWSHub()
+
+	webSoc := NewWebSOCServer(":0", server, store, ttlMgr, nil, wsHub, nil, nil, nil)
+
+	// 1. Test POST /api/ai/agent/test-dispatch
+	dispatchBody, _ := json.Marshal(map[string]interface{}{
+		"node_id":            "node-soc-prod",
+		"source":             "nginx",
+		"raw_line":           "GET /api/v1/users?id=1 UNION SELECT null,username,password FROM accounts-- HTTP/1.1",
+		"client_ip":          "198.51.100.44",
+		"threat_score":       96,
+		"rule_id":            "sigma-web-sqli",
+		"mitre_technique_id": "T1190",
+	})
+
+	dispatchReq := httptest.NewRequest("POST", "/api/ai/agent/test-dispatch", bytes.NewBuffer(dispatchBody))
+	dispatchReq.Header.Set("Content-Type", "application/json")
+	dispatchRec := httptest.NewRecorder()
+	webSoc.handleAIAgentTestDispatch(dispatchRec, dispatchReq)
+
+	if dispatchRec.Code != http.StatusOK {
+		t.Fatalf("Expected status 200 from /api/ai/agent/test-dispatch, got %d: %s", dispatchRec.Code, dispatchRec.Body.String())
+	}
+
+	var dispatchResp map[string]interface{}
+	if err := json.Unmarshal(dispatchRec.Body.Bytes(), &dispatchResp); err != nil {
+		t.Fatalf("Failed to parse dispatch response: %v", err)
+	}
+
+	if dispatchResp["success"] != true {
+		t.Errorf("Expected success to be true in dispatch response")
+	}
+
+	// 2. Test GET /api/ai/agent/latest
+	latestReq := httptest.NewRequest("GET", "/api/ai/agent/latest?limit=10", nil)
+	latestRec := httptest.NewRecorder()
+	webSoc.handleAIAgentLatest(latestRec, latestReq)
+
+	if latestRec.Code != http.StatusOK {
+		t.Fatalf("Expected status 200 from /api/ai/agent/latest, got %d", latestRec.Code)
+	}
+
+	var briefs []map[string]interface{}
+	if err := json.Unmarshal(latestRec.Body.Bytes(), &briefs); err != nil {
+		t.Fatalf("Failed to parse latest briefs response: %v", err)
+	}
+
+	if len(briefs) == 0 {
+		t.Fatalf("Expected at least 1 AI triage brief in history, got 0")
+	}
+
+	firstBrief := briefs[0]
+	if firstBrief["client_ip"] != "198.51.100.44" {
+		t.Errorf("Expected client_ip 198.51.100.44, got %v", firstBrief["client_ip"])
+	}
+	if firstBrief["threat_score"].(float64) != 96 {
+		t.Errorf("Expected threat_score 96, got %v", firstBrief["threat_score"])
+	}
+}

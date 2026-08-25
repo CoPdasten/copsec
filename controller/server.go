@@ -13,8 +13,10 @@ import (
 	"time"
 
 	copsecproto "github.com/copsec/collector/proto"
+	"github.com/copsec/controller/pkg/ai_agent"
 	"github.com/copsec/controller/pkg/geoip"
 	"github.com/copsec/controller/pkg/ml"
+	"github.com/copsec/controller/pkg/notifier"
 	"github.com/copsec/controller/pkg/sigma"
 	"github.com/copsec/controller/pkg/snort"
 	"github.com/copsec/controller/pkg/threat"
@@ -53,6 +55,8 @@ type CentralServer struct {
 	wsHub        *WSHub
 	telegramBot  *TelegramSOARBot
 	aiEngine     *AIEngine
+	aiAgent      *ai_agent.Agent
+	notifier     *notifier.Dispatcher
 	threatEngine *threat.ScoringEngine
 	nodes        map[string]*NodeSession
 	eventSubChan chan *StoredEvent
@@ -75,6 +79,8 @@ func NewCentralServer(storage *StorageEngine, analyzer *RuleEngine) *CentralServ
 		storage:          storage,
 		analyzer:         analyzer,
 		aiEngine:         NewAIEngine(),
+		aiAgent:          ai_agent.GetDefaultAgent(),
+		notifier:         notifier.GetDefaultDispatcher(),
 		threatEngine:     threat.GetDefaultEngine(),
 		nodes:            make(map[string]*NodeSession),
 		eventSubChan:     make(chan *StoredEvent, 4096),
@@ -83,6 +89,13 @@ func NewCentralServer(storage *StorageEngine, analyzer *RuleEngine) *CentralServ
 		ipHistory:        make(map[string][]int64),
 		autoBanned:       make(map[string]int64),
 	}
+
+	// Register notifier toast listener to broadcast live AI triage briefs to Web SOC
+	srv.notifier.SetToastListener(func(brief *ai_agent.AITriageBrief) {
+		if srv.wsHub != nil {
+			srv.wsHub.Broadcast("ai_triage", brief)
+		}
+	})
 
 	// EPS Calculator ticker
 	go func() {
@@ -459,14 +472,53 @@ func (s *CentralServer) processEvent(nodeID string, event *copsecproto.LogEvent)
 	hub := s.wsHub
 	s.mu.RUnlock()
 
+	// 1. Autonomous LLM SOC Analyst & Real-Time Multi-Channel Incident Dispatcher
+	if s.aiAgent != nil && s.aiAgent.ShouldAnalyze(stored.ThreatScore, stored.ClientIP, stored.RuleID) {
+		go func(ev *StoredEvent) {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+
+			geo := geoip.GetDefaultEngine().Lookup(ev.ClientIP)
+			ic := &ai_agent.IncidentContext{
+				NodeID:           ev.NodeID,
+				Source:           ev.Source,
+				RawLine:          ev.RawLine,
+				ClientIP:         ev.ClientIP,
+				StatusCode:       ev.StatusCode,
+				ThreatScore:      ev.ThreatScore,
+				RuleID:           ev.RuleID,
+				MitreTechniqueID: ev.MitreTechniqueID,
+				CountryCode:      geo.CountryCode,
+				CountryName:      geo.CountryName,
+				FlagEmoji:        geo.FlagEmoji,
+				ASN:              geo.ASN,
+				MLAnomaly:        ev.MLAnomaly,
+				MLConfidencePct:  ev.MLConfidencePct,
+				SnortML:          ev.SnortML,
+				SnortConfidence:  ev.SnortConfidence,
+			}
+
+			brief, err := s.aiAgent.AnalyzeIncident(ctx, ic)
+			if err == nil && brief != nil {
+				ev.AIAnalysis = brief.RawMarkdown
+				_ = s.storage.UpdateEventAI(ev.ID, brief.RawMarkdown)
+				if s.notifier != nil {
+					s.notifier.DispatchTriageAlert(ctx, brief)
+				}
+			}
+		}(stored)
+	}
+
 	if ai != nil && (stored.ThreatScore >= 65 || strings.Contains(stored.RuleID, "anomaly") || strings.Contains(stored.RuleID, "rce") || strings.Contains(stored.RuleID, "sqli") || strings.Contains(stored.RuleID, "sigma")) {
 		go func(ev *StoredEvent) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
 			intel := ai.AnalyzeIntent(ctx, ev)
 			summary := fmt.Sprintf("• Intent: %s\n• Root Cause: %s\n• Mitigation: %s", intel.AttackerIntent, intel.RootCause, intel.Mitigation)
-			ev.AIAnalysis = summary
-			_ = s.storage.UpdateEventAI(ev.ID, summary)
+			if ev.AIAnalysis == "" {
+				ev.AIAnalysis = summary
+				_ = s.storage.UpdateEventAI(ev.ID, summary)
+			}
 
 			if bot != nil && (ev.ThreatScore >= 40 || ev.StatusCode >= 400) {
 				bot.ProcessEvent(ev)
