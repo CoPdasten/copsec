@@ -248,6 +248,24 @@ func (se *ScoringEngine) Evaluate(
 		}
 	}
 
+	// 0. Background Benign Telemetry Bypass (suricata_flow, suricata_dns, benign queries)
+	rLower := strings.ToLower(ruleID)
+	if rLower == "suricata_flow" || rLower == "suricata_dns" || rLower == "dns_query" || rLower == "dns_resolution" || (rawScore == 0 && mitreID == "") {
+		return ThreatAssessment{
+			IP:                  ipStr,
+			FinalScore:          0,
+			BaseScore:           0,
+			DecayedScore:        0,
+			CumulativeIncrement: 0,
+			RiskMultiplier:      1.0,
+			IsWhitelisted:       false,
+			Action:              ActionAllow,
+			Tier:                "NORMAL",
+			Breakdown:           fmt.Sprintf("Benign Background Telemetry [%s] (Score: 0)", ruleID),
+			TimestampMs:         now,
+		}
+	}
+
 	shard := se.getShard(ipStr)
 	shard.mu.Lock()
 	defer shard.mu.Unlock()
@@ -365,7 +383,7 @@ func (se *ScoringEngine) Evaluate(
 		baseIncrement = 60.0
 		breakdownDetails = append(breakdownDetails, "DNS Tunneling / High-Entropy DGA Resolution (+60)")
 
-	} else if mitreID != "" && strings.HasPrefix(strings.ToUpper(mitreID), "T") {
+	} else if mitreID != "" && strings.HasPrefix(strings.ToUpper(mitreID), "T") && !strings.Contains(rLower, "flow") && !strings.Contains(rLower, "dns") {
 		tier = "TIER_3_CUMULATIVE"
 		eventType = "MITRE_TECHNIQUE"
 		baseIncrement = float64(rawScore)
@@ -374,14 +392,14 @@ func (se *ScoringEngine) Evaluate(
 		}
 		breakdownDetails = append(breakdownDetails, fmt.Sprintf("MITRE Technique %s (%s, +%.0f Base)", mitreID, ruleID, baseIncrement))
 
-	} else if strings.Contains(strings.ToLower(ruleID), "flow") || strings.Contains(strings.ToLower(ruleID), "probe") || strings.Contains(strings.ToLower(ruleID), "scan") {
+	} else if (strings.Contains(rLower, "probe") || strings.Contains(rLower, "scan") || strings.Contains(rLower, "nmap")) && !strings.Contains(rLower, "flow") && !strings.Contains(rLower, "dns") {
 		tier = "TIER_3_CUMULATIVE"
 		eventType = "NETWORK_PROBE_BURST"
 		baseIncrement = 15.0
 		if float64(rawScore) > baseIncrement {
 			baseIncrement = float64(rawScore)
 		}
-		breakdownDetails = append(breakdownDetails, fmt.Sprintf("Network Flow/Probe Burst: %s (+%.0f)", ruleID, baseIncrement))
+		breakdownDetails = append(breakdownDetails, fmt.Sprintf("Network Probe Burst: %s (+%.0f)", ruleID, baseIncrement))
 
 	} else {
 		tier = "NORMAL"
@@ -481,6 +499,9 @@ func (se *ScoringEngine) ResetEntity(ipStr string) {
 func isTier1Rule(ruleID, mitreID string) bool {
 	r := strings.ToLower(ruleID)
 	m := strings.ToUpper(mitreID)
+	if r == "suricata_flow" || r == "suricata_dns" || r == "dns_query" {
+		return false
+	}
 	return strings.Contains(r, "revshell") ||
 		strings.Contains(r, "rootkit") ||
 		strings.Contains(r, "injection") ||
@@ -491,23 +512,35 @@ func isTier1Rule(ruleID, mitreID string) bool {
 
 func isDeceptionEvent(ruleID string, rawScore int) bool {
 	r := strings.ToLower(ruleID)
+	if r == "suricata_flow" || r == "suricata_dns" {
+		return false
+	}
 	return strings.Contains(r, "honey") || strings.Contains(r, "deception") || strings.Contains(r, "canary")
 }
 
 func isAuthFailure(ruleID string, rawScore int) bool {
 	r := strings.ToLower(ruleID)
+	if strings.Contains(r, "success") || r == "suricata_flow" || r == "suricata_dns" {
+		return false
+	}
 	return strings.Contains(r, "auth") || strings.Contains(r, "bruteforce") || strings.Contains(r, "ssh") || strings.Contains(r, "login")
 }
 
 func isWebBurst(ruleID string) bool {
 	r := strings.ToLower(ruleID)
+	if r == "suricata_flow" || r == "suricata_dns" || r == "dns_query" {
+		return false
+	}
 	return strings.Contains(r, "scanner") || strings.Contains(r, "fuzz") || strings.Contains(r, "dirsearch") || strings.Contains(r, "nikto")
 }
 
 func isDNSAnomaly(ruleID, mitreID string) bool {
 	r := strings.ToLower(ruleID)
 	m := strings.ToUpper(mitreID)
-	return strings.Contains(r, "dns") || strings.Contains(r, "dga") || strings.Contains(r, "tunnel") || m == "T1048.003" || m == "T1568.002"
+	if r == "suricata_dns" || r == "dns_query" || r == "dns_resolution" || r == "suricata_flow" {
+		return false
+	}
+	return strings.Contains(r, "dga") || strings.Contains(r, "tunnel") || strings.Contains(r, "dns_exfil") || strings.Contains(r, "sinkhole") || m == "T1048.003" || m == "T1568.002" || m == "T1071.004"
 }
 
 func isHighImpactMitre(mitreID string) bool {

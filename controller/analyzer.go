@@ -271,11 +271,25 @@ func (e *RuleEngine) Analyze(rawLine string, statusCode int, source string) (rul
 		return "", "", 0, false
 	}
 
+	lowerRaw := strings.ToLower(rawLine)
+
+	// Bypass non-alert Suricata telemetry
+	if source == "suricata" && !strings.Contains(lowerRaw, `"event_type":"alert"`) && !strings.Contains(lowerRaw, `"event_type": "alert"`) {
+		return "", "", 0, false
+	}
+
+	// Bypass standard DNS queries unless verified tunneling/DGA/IOC
+	if strings.Contains(lowerRaw, `"event_type":"dns"`) || strings.Contains(lowerRaw, `"event_type": "dns"`) ||
+		strings.Contains(lowerRaw, `"dest_port":53`) || strings.Contains(lowerRaw, `"dest_port": 53`) {
+		if !strings.Contains(lowerRaw, "tunnel") && !strings.Contains(lowerRaw, "dga") && !strings.Contains(lowerRaw, "oastify") {
+			return "", "", 0, false
+		}
+	}
+
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 
 	normalized := NormalizePayload(rawLine)
-	lowerRaw := strings.ToLower(rawLine)
 	lowerNorm := strings.ToLower(normalized)
 
 	// 1. Signature & Multi-Vector Payload Inspection

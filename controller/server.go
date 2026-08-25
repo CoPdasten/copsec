@@ -424,10 +424,17 @@ func (s *CentralServer) processEvent(nodeID string, event *copsecproto.LogEvent)
 		}
 	}
 
-	// Suricata flow de-noising: Generic flows, DNS queries and TLS handshakes must NEVER have false MITRE tags or elevated score
-	if ruleID == "suricata_flow" || (event.Source == "suricata" && !strings.Contains(event.RawLine, `"event_type":"alert"`) && !strings.Contains(event.RawLine, `"event_type": "alert"`)) {
-		threatScore = 0
-		mitreID = ""
+	// Suricata flow & DNS de-noising: Generic flows, standard DNS queries and TLS handshakes must NEVER have false MITRE tags or elevated score
+	rawLower := strings.ToLower(event.RawLine)
+	isSuricataNonAlert := event.Source == "suricata" && !strings.Contains(rawLower, `"event_type":"alert"`) && !strings.Contains(rawLower, `"event_type": "alert"`)
+	isStandardDNS := ruleID == "suricata_dns" || strings.Contains(rawLower, `"event_type":"dns"`) || strings.Contains(rawLower, `"dest_port":53`) || strings.Contains(rawLower, `"dest_port": 53`)
+
+	if ruleID == "suricata_flow" || ruleID == "suricata_dns" || isSuricataNonAlert || isStandardDNS {
+		// Only elevate DNS if explicitly verified as tunneling/DGA/sinkhole IOC match
+		if !strings.Contains(rawLower, "tunnel") && !strings.Contains(rawLower, "dga") && !strings.Contains(rawLower, "c2_ioc_match") {
+			threatScore = 0
+			mitreID = ""
+		}
 	}
 
 	// Global Infrastructure & Public DNS Whitelist protection
@@ -438,7 +445,7 @@ func (s *CentralServer) processEvent(nodeID string, event *copsecproto.LogEvent)
 		}
 	} else {
 		// Ensure non-whitelisted MITRE technique matches or Sigma rules have baseline score >= 60
-		if mitreID != "" && strings.HasPrefix(strings.ToUpper(mitreID), "T") && threatScore < 60 && ruleID != "suricata_flow" {
+		if mitreID != "" && strings.HasPrefix(strings.ToUpper(mitreID), "T") && threatScore < 60 && ruleID != "suricata_flow" && ruleID != "suricata_dns" {
 			threatScore = 60
 		}
 		if strings.HasPrefix(strings.ToLower(ruleID), "sigma") && threatScore < 60 {

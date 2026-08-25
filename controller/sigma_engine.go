@@ -380,6 +380,27 @@ func (se *SigmaEngine) EvaluateEvent(rawLine string, fields map[string]string) (
 		return nil, false
 	}
 
+	lowerRaw := strings.ToLower(rawLine)
+	src := ""
+	if fields != nil {
+		src = strings.ToLower(fields["source"])
+	}
+
+	// Bypass non-alert Suricata telemetry JSON
+	if (src == "suricata" || (strings.Contains(lowerRaw, `"event_type"`) && strings.Contains(lowerRaw, "suricata"))) &&
+		!strings.Contains(lowerRaw, `"event_type":"alert"`) &&
+		!strings.Contains(lowerRaw, `"event_type": "alert"`) {
+		return nil, false
+	}
+
+	// Bypass standard DNS queries unless verified tunneling/DGA/IOC
+	if strings.Contains(lowerRaw, `"event_type":"dns"`) || strings.Contains(lowerRaw, `"event_type": "dns"`) ||
+		strings.Contains(lowerRaw, `"dest_port":53`) || strings.Contains(lowerRaw, `"dest_port": 53`) {
+		if !strings.Contains(lowerRaw, "tunnel") && !strings.Contains(lowerRaw, "dga") && !strings.Contains(lowerRaw, "oastify") {
+			return nil, false
+		}
+	}
+
 	normalizedRaw := NormalizePayload(rawLine)
 
 	for _, rule := range se.rules {

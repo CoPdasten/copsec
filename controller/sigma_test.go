@@ -226,3 +226,29 @@ func TestCuratedSigmaRulePackDetections(t *testing.T) {
 		})
 	}
 }
+
+func TestSigmaBenignDNSAndFlowSuppression(t *testing.T) {
+	engine := NewSigmaEngine("")
+
+	// 1. Standard DNS query to 8.8.8.8:53
+	dnsQuery := `{"timestamp":"2026-08-25T12:00:00Z","event_type":"dns","src_ip":"192.168.1.100","dest_ip":"8.8.8.8","dest_port":53,"proto":"UDP","dns":{"type":"query","rrname":"google.com"}}`
+	rule, matched := engine.EvaluateEvent(dnsQuery, map[string]string{
+		"source":    "suricata",
+		"client_ip": "8.8.8.8",
+		"raw":       dnsQuery,
+	})
+	if matched || rule != nil {
+		t.Errorf("Expected benign DNS query to be suppressed from Sigma matching, but matched: %+v", rule)
+	}
+
+	// 2. Generic Suricata network flow
+	flowLog := `{"timestamp":"2026-08-25T12:00:00Z","event_type":"flow","src_ip":"192.168.1.100","dest_ip":"1.1.1.1","dest_port":443,"proto":"TCP"}`
+	rule, matched = engine.EvaluateEvent(flowLog, map[string]string{
+		"source":    "suricata",
+		"client_ip": "1.1.1.1",
+		"raw":       flowLog,
+	})
+	if matched || rule != nil {
+		t.Errorf("Expected generic Suricata flow to be suppressed from Sigma matching, but matched: %+v", rule)
+	}
+}
