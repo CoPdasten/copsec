@@ -20,6 +20,7 @@ import (
 	"github.com/copsec/controller/pkg/notifier"
 	"github.com/copsec/controller/pkg/sigma"
 	"github.com/copsec/controller/pkg/snort"
+	"github.com/copsec/controller/pkg/soar"
 	"github.com/copsec/controller/pkg/threat"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -597,52 +598,52 @@ func (s *CentralServer) checkAutonomousBanPolicy(event *StoredEvent) {
 		return
 	}
 
-	triggerAutoBan := false
-	banReason := ""
+	// Calculate recent correlated events count within 60s
+	history := s.ipHistory[ip]
+	var recent []int64
+	for _, ts := range history {
+		if now-ts <= 60 {
+			recent = append(recent, ts)
+		}
+	}
+	recent = append(recent, now)
+	s.ipHistory[ip] = recent
+	recentCount := len(recent)
 
-	// Condition 1: Static Critical / High-Threat Threshold
+	// High-Fidelity SOAR Trigger Gating
+	soarEngine := soar.GetDefaultEngine()
+	shouldTrigger, reason, pbID := soarEngine.ShouldTriggerSOAR(
+		event.ThreatScore,
+		ip,
+		event.RuleID,
+		event.MitreTechniqueID,
+		event.RawLine,
+		recentCount,
+	)
+
+	// Fallback check against configured threshold if user set a custom threshold
 	threshold := s.autoBanThreshold
 	if threshold <= 0 {
 		threshold = 50
 	}
-	if event.ThreatScore >= threshold {
-		triggerAutoBan = true
-		ruleName := event.RuleID
-		if ruleName == "" {
-			ruleName = "threat_anomaly"
-		}
-		mitreID := event.MitreTechniqueID
-		if mitreID == "" {
-			mitreID = "T1190"
-		}
-		banReason = fmt.Sprintf("Auto-Ban: Threat Score %d triggered [Rule: %s, MITRE: %s]", event.ThreatScore, ruleName, mitreID)
+	if !shouldTrigger && event.ThreatScore >= threshold {
+		shouldTrigger = true
+		reason = fmt.Sprintf("Autonomous Threshold Match (Score: %d)", event.ThreatScore)
+		pbID = "PB-101"
 	}
 
-	// Condition 2: Correlational Spike / Brute-Force Threshold (>= 3 high-threat events in 60s)
-	if event.ThreatScore >= 35 {
-		history := s.ipHistory[ip]
-		var recent []int64
-		for _, ts := range history {
-			if now-ts <= 60 {
-				recent = append(recent, ts)
-			}
-		}
-		recent = append(recent, now)
-		s.ipHistory[ip] = recent
-
-		if len(recent) >= 3 && !triggerAutoBan {
-			triggerAutoBan = true
-			banReason = fmt.Sprintf("Auto-Ban: Correlational Spike Threshold (%d attacks in 60s) [Rule: %s, MITRE: %s]", len(recent), event.RuleID, event.MitreTechniqueID)
-		}
-	}
-
-	if triggerAutoBan {
+	if shouldTrigger {
 		s.autoBanned[ip] = now
+		banReason := fmt.Sprintf("SOAR Auto-Quarantine [%s]: %s", pbID, reason)
+
+		// Start and track dedicated Playbook Run
+		run := soarEngine.StartPlaybookRun(event.ID, pbID, ip, event.NodeID, event.ThreatScore, event.MitreTechniqueID, reason)
 
 		// Enforce via TTLBanManager if present, or direct broadcast fallback
 		s.mu.RLock()
 		ttlMgr := s.ttlManager
 		bot := s.telegramBot
+		hub := s.wsHub
 		s.mu.RUnlock()
 
 		dispatched := 0
@@ -668,7 +669,19 @@ func (s *CentralServer) checkAutonomousBanPolicy(event *StoredEvent) {
 			}
 		}
 
-		log.Printf("[SOAR_AUTOBAN] Autonomous Ban executed for IP %s (Reason: %s, Dispatched: %d nodes)", ip, banReason, dispatched)
+		// Advance Playbook Step 1 & 2 to show active containment in SOAR Hub
+		_, _ = soarEngine.AdvanceStep(run.RunID, 0, "COMPLETED", fmt.Sprintf("Correlated telemetry: %s", event.RuleID))
+		_, _ = soarEngine.AdvanceStep(run.RunID, 1, "COMPLETED", fmt.Sprintf("Enforced auto-quarantine across %d node(s)", dispatched))
+
+		log.Printf("[SOAR_AUTOBAN] High-Fidelity Auto-Ban executed for IP %s (Playbook: %s, Reason: %s, Dispatched: %d nodes)", ip, pbID, banReason, dispatched)
+
+		// Broadcast SOAR Playbook Run update to Web SOC
+		if hub != nil {
+			hub.Broadcast("soar_playbook_run", map[string]interface{}{
+				"run": run,
+				"active_runs": soarEngine.GetActiveRuns(),
+			})
+		}
 
 		// Dispatch high-priority autonomous Telegram alert
 		if bot != nil {

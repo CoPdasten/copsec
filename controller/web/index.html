@@ -1428,6 +1428,136 @@
     .json-bool { color: var(--emerald); }
     .json-null { color: var(--gray); }
 
+    /* SOAR Playbooks Hub Styles */
+    .soar-stepper-track {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: relative;
+      width: 100%;
+      margin: 1rem 0 1.5rem 0;
+    }
+    .soar-stepper-track::before {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 30px;
+      right: 30px;
+      height: 2px;
+      background: #1e293b;
+      transform: translateY(-50%);
+      z-index: 1;
+    }
+    .soar-step-node {
+      position: relative;
+      z-index: 2;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.35rem;
+      background: #030712;
+      padding: 0 0.5rem;
+    }
+    .soar-node-circle {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.75rem;
+      font-weight: 800;
+      font-family: var(--font-mono);
+      background: #0b1329;
+      border: 2px solid #334155;
+      color: var(--text-muted);
+      transition: all 0.3s ease;
+    }
+    .soar-step-node.completed .soar-node-circle {
+      background: rgba(16, 185, 129, 0.2);
+      border-color: var(--emerald);
+      color: var(--emerald);
+      box-shadow: 0 0 12px rgba(16, 185, 129, 0.4);
+    }
+    .soar-step-node.active .soar-node-circle {
+      background: rgba(0, 243, 255, 0.2);
+      border-color: var(--cyan);
+      color: var(--cyan);
+      box-shadow: 0 0 15px rgba(0, 243, 255, 0.6);
+      animation: pulseNodeGlow 2s infinite ease-in-out;
+    }
+    @keyframes pulseNodeGlow {
+      0%, 100% { transform: scale(1); box-shadow: 0 0 12px rgba(0, 243, 255, 0.5); }
+      50% { transform: scale(1.1); box-shadow: 0 0 20px rgba(0, 243, 255, 0.8); }
+    }
+    .soar-node-label {
+      font-size: 0.68rem;
+      font-family: var(--font-mono);
+      font-weight: 700;
+      color: var(--text-muted);
+      text-align: center;
+      max-width: 110px;
+    }
+    .soar-step-node.completed .soar-node-label {
+      color: var(--emerald);
+    }
+    .soar-step-node.active .soar-node-label {
+      color: var(--cyan);
+    }
+    .soar-blueprint-card {
+      background: #070c1a;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 8px;
+      padding: 1.1rem;
+      transition: all 0.25s ease;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    .soar-blueprint-card:hover {
+      border-color: var(--cyan);
+      box-shadow: 0 0 16px rgba(0, 243, 255, 0.15);
+      transform: translateY(-2px);
+    }
+    .soar-blueprint-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 0.5rem;
+      margin-bottom: 0.5rem;
+    }
+    .soar-blueprint-id {
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      font-weight: 800;
+      color: #c084fc;
+      background: rgba(168, 85, 247, 0.15);
+      padding: 0.15rem 0.4rem;
+      border-radius: 4px;
+      border: 1px solid rgba(168, 85, 247, 0.4);
+    }
+    .soar-blueprint-name {
+      font-size: 0.88rem;
+      font-weight: 700;
+      color: #fff;
+      margin-bottom: 0.4rem;
+    }
+    .soar-blueprint-desc {
+      font-size: 0.74rem;
+      color: var(--text-muted);
+      line-height: 1.45;
+      margin-bottom: 0.75rem;
+      flex: 1;
+    }
+    .soar-blueprint-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-top: 0.65rem;
+      border-top: 1px solid rgba(255, 255, 255, 0.05);
+      gap: 0.5rem;
+    }
+
     /* Modals */
     .modal-overlay {
       position: fixed;
@@ -1564,10 +1694,11 @@
     <nav class="nav-tabs">
       <button class="nav-tab active" onclick="switchTab('tab-telemetry')">📡 Incident Stream</button>
       <button class="nav-tab" id="nav-tab-alerts" onclick="switchTab('tab-alerts')">🚨 Active Alerts <span id="alerts-badge-count" class="alert-badge-count" style="display: none;">0</span></button>
+      <button class="nav-tab" id="nav-tab-playbooks" onclick="switchTab('tab-playbooks')">📘 SOAR Playbooks <span id="playbooks-badge-count" class="alert-badge-count" style="display: none;">0</span></button>
       <button class="nav-tab" onclick="switchTab('tab-nodes')">🌐 Fleet Sensors</button>
       <button class="nav-tab" onclick="switchTab('tab-p2p')">🔗 P2P Defense Mesh</button>
       <button class="nav-tab" onclick="switchTab('tab-advanced-defenses')">🛡️ Advanced Defenses</button>
-      <button class="nav-tab" onclick="switchTab('tab-soar')">🛡️ SOAR Quarantine</button>
+      <button class="nav-tab" onclick="switchTab('tab-soar')">⚡ SOAR Quarantine</button>
       <button class="nav-tab" onclick="switchTab('tab-sigma')">📜 SigmaHQ Rules</button>
       <button class="nav-tab" onclick="switchTab('tab-honeypot')">🍯 Deception Traps</button>
       <button class="nav-tab" onclick="switchTab('tab-config')">⚙️ Configuration</button>
@@ -1747,6 +1878,131 @@
               <tr><td colspan="6" style="text-align: center; color: var(--text-muted); padding: 2.5rem;">No active high-priority security alerts pending triage. Swarm integrity clean.</td></tr>
             </tbody>
           </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB: Playbooks & SOAR Hub -->
+    <div id="tab-playbooks" class="tab-panel">
+      <!-- SOAR Hub KPI Stats Grid -->
+      <div class="stat-grid" style="margin-bottom: 1.25rem;">
+        <div class="stat-card">
+          <div class="stat-title">SOAR Automation Engine</div>
+          <div class="stat-value" style="color: var(--emerald); font-size: 1.25rem;">ACTIVE (L3/L4/L7)</div>
+          <div class="stat-sub" style="color: var(--emerald);">⚡ High-Fidelity Gating (Score ≥ 80)</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-title">Active Playbook Runs</div>
+          <div class="stat-value" id="soar-active-runs-count" style="color: var(--cyan);">0</div>
+          <div class="stat-sub">🚀 Real-time remediation workflows</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-title">Automated Interventions</div>
+          <div class="stat-value" id="soar-interventions-count" style="color: var(--magenta);">0</div>
+          <div class="stat-sub">🛡️ Fleet XDP & Tarpit executions</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-title">Mean Containment SLA</div>
+          <div class="stat-value" style="color: var(--amber);">⚡ &lt; 45s</div>
+          <div class="stat-sub">⏱️ Autonomous response velocity</div>
+        </div>
+      </div>
+
+      <!-- Main Deck: Left side (Active Runs & Workflow Visualizer) + Right side (Remediation Console & Catalog) -->
+      <div class="split-grid" style="grid-template-columns: 1.6fr 1fr; margin-bottom: 1.25rem;">
+        <!-- Active Playbook Runs Table -->
+        <div class="card" style="margin-bottom: 0;">
+          <div class="card-header">
+            <div>
+              <div class="card-title">🚀 Active Playbook Execution Deck</div>
+              <div style="font-size: 0.72rem; color: var(--text-muted);">Real-time incident response state machine, node progress &amp; containment milestones</div>
+            </div>
+            <button class="btn" onclick="fetchSOARRuns()">🔄 Refresh Runs</button>
+          </div>
+          <div class="table-container" style="max-height: 380px;">
+            <table>
+              <thead>
+                <tr>
+                  <th style="width: 90px;">Incident</th>
+                  <th style="width: 170px;">Playbook Name</th>
+                  <th style="width: 170px;">Target Actor</th>
+                  <th style="width: 110px;">Phase</th>
+                  <th style="width: 90px;">Status</th>
+                  <th style="width: 100px;">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="soar-runs-tbody">
+                <tr><td colspan="6" style="text-align: center; color: var(--text-muted); padding: 2rem;">No active playbook executions in flight. Swarm operating within normal thresholds.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- One-Click Instant Remediation Console -->
+        <div class="card" style="margin-bottom: 0;">
+          <div class="card-header">
+            <div class="card-title">⚡ Instant SOAR Remediation Console</div>
+            <span class="badge badge-critical">Fleet-Wide Override</span>
+          </div>
+          <div style="padding: 1rem 1.25rem;">
+            <div style="margin-bottom: 0.85rem;">
+              <label style="font-size: 0.72rem; color: var(--text-muted); display: block; margin-bottom: 0.35rem; font-family: var(--font-mono); font-weight: 700;">TARGET ACTOR IP / HOST</label>
+              <input type="text" id="soar-console-ip" class="cyber-input" placeholder="e.g. 198.51.100.45 or 2001:db8::1" autocomplete="off">
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 0.55rem;">
+              <button class="btn btn-triage-ban" style="width: 100%; font-size: 0.76rem; padding: 0.55rem;" onclick="executeManualSOARAction('XDP_BLACKHOLE')">
+                ⚡ Enforce Fleet-Wide XDP Blackhole
+              </button>
+              <button class="btn btn-triage-tarpit" style="width: 100%; font-size: 0.76rem; padding: 0.55rem;" onclick="executeManualSOARAction('TARPIT_TRAP')">
+                🕳️ Route TCP to Zero-Window Tarpit
+              </button>
+              <button class="btn btn-triage-report" style="width: 100%; font-size: 0.76rem; padding: 0.55rem;" onclick="executeManualSOARAction('SWARM_SYNC')">
+                🔗 Broadcast P2P Swarm Threat Sync
+              </button>
+              <button class="btn" style="width: 100%; font-size: 0.76rem; padding: 0.55rem; border-color: #8b5cf6; color: #c084fc; background: rgba(139, 92, 246, 0.1);" onclick="executeManualSOARAction('ISOLATE_HOST')">
+                🛡️ Isolate Compromised Host Service
+              </button>
+              <button class="btn" style="width: 100%; font-size: 0.76rem; padding: 0.55rem; border-color: #38bdf8; color: #38bdf8; background: rgba(56, 189, 248, 0.1);" onclick="executeManualSOARAction('REVOKE_SESSION')">
+                🔒 Invalidate Active Shell Sessions
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Playbook Stepper Inspector (Active Selection) -->
+      <div id="soar-active-run-inspector" class="card" style="display: none; margin-bottom: 1.25rem;">
+        <div class="card-header">
+          <div style="display: flex; align-items: center; gap: 0.65rem;">
+            <div class="card-title" id="soar-inspector-title">📋 Playbook Stepper: PB-101</div>
+            <span id="soar-inspector-status-badge" class="badge badge-high">RUNNING</span>
+            <span id="soar-inspector-mitre-badge" class="tag-mitre">T1190</span>
+          </div>
+          <button class="btn btn-xs" onclick="closeSOARInspector()">✖ Close Inspector</button>
+        </div>
+        <div style="padding: 1.25rem;">
+          <div id="soar-stepper-nodes" class="soar-stepper-track">
+            <!-- Dynamic Step Graph Nodes -->
+          </div>
+          <div id="soar-stepper-cards" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 0.75rem;">
+            <!-- Dynamic Step Detail Cards -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Curated Industrial Playbooks Catalog Grid -->
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">📚 Curated Industrial SOAR Playbooks Catalog</div>
+            <div style="font-size: 0.72rem; color: var(--text-muted);">Standard operating remediation procedures mapped to MITRE ATT&amp;CK tactics &amp; autonomous triggers</div>
+          </div>
+          <span class="badge badge-success">5 Curated Blueprints</span>
+        </div>
+        <div style="padding: 1.25rem;">
+          <div id="soar-catalog-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1rem;">
+            <!-- Dynamic Playbook Blueprint Cards -->
+          </div>
         </div>
       </div>
     </div>
@@ -3105,6 +3361,7 @@
       if (panel) panel.classList.add('active');
 
       if (tabId === 'tab-alerts') refreshAlerts();
+      if (tabId === 'tab-playbooks') { fetchSOARPlaybooks(); fetchSOARRuns(); }
       if (tabId === 'tab-nodes') refreshFleetNodes();
       if (tabId === 'tab-p2p') refreshP2PTopology();
       if (tabId === 'tab-advanced-defenses') refreshAdvancedDefenses();
@@ -3155,8 +3412,22 @@
       } else if (msg.type === 'ban_change') {
         refreshBans();
         refreshAlerts();
+        fetchSOARRuns();
         if (msg.payload && msg.payload.ban) {
           showToast(`Quarantine updated for ${msg.payload.ban.ip} (${msg.payload.action})`, 'warning', 'SOAR Event');
+        }
+      } else if (msg.type === 'soar_playbook_run') {
+        if (msg.payload && msg.payload.active_runs) {
+          soarActiveRuns = msg.payload.active_runs;
+          renderSOARRuns(soarActiveRuns);
+        }
+        if (msg.payload && msg.payload.run) {
+          updateSOARInspectorIfOpen(msg.payload.run);
+          showToast(`SOAR Playbook ${msg.payload.run.playbook_id} triggered on ${msg.payload.run.actor_ip}`, 'danger', 'SOAR Automation');
+        }
+      } else if (msg.type === 'soar_action_executed') {
+        if (msg.payload && msg.payload.message) {
+          showToast(msg.payload.message, 'success', 'SOAR Remediation');
         }
       } else if (msg.type === 'honeypot_hit') {
         prependHoneypotRow(msg.payload);
@@ -4989,6 +5260,342 @@
         });
     }
 
+    // -------------------------------------------------------------
+    // SOAR Playbooks & Remediation Hub Engine
+    // -------------------------------------------------------------
+    let soarPlaybooks = [];
+    let soarActiveRuns = [];
+    let activeInspectedRunId = null;
+
+    async function fetchSOARPlaybooks() {
+      try {
+        const res = await fetch('/api/soar/playbooks');
+        const data = await res.json();
+        if (data && data.playbooks) {
+          soarPlaybooks = data.playbooks;
+          renderSOARPlaybooksCatalog(soarPlaybooks);
+        }
+      } catch (err) {
+        console.error('Failed to fetch SOAR playbooks', err);
+      }
+    }
+
+    async function fetchSOARRuns() {
+      try {
+        const res = await fetch('/api/soar/runs');
+        const data = await res.json();
+        if (data && data.runs) {
+          soarActiveRuns = data.runs;
+          renderSOARRuns(soarActiveRuns);
+        }
+      } catch (err) {
+        console.error('Failed to fetch SOAR runs', err);
+      }
+    }
+
+    function renderSOARPlaybooksCatalog(playbooks) {
+      const container = document.getElementById('soar-catalog-grid');
+      if (!container) return;
+      if (!playbooks || playbooks.length === 0) {
+        container.innerHTML = '<div style="color: var(--text-muted); font-size: 0.8rem;">No playbook blueprints found in catalog.</div>';
+        return;
+      }
+
+      container.innerHTML = playbooks.map(pb => {
+        const mitreBadges = (pb.mitre_techniques || []).map(t => `<span class="tag-mitre">${escapeHtml(t)}</span>`).join(' ');
+        const rulesList = (pb.trigger_rules || []).map(r => `<span style="font-family: var(--font-mono); font-size: 0.68rem; color: #94a3b8; background: #0b1329; padding: 0.1rem 0.35rem; border-radius: 3px; border: 1px solid #1e293b;">${escapeHtml(r)}</span>`).join(' ');
+        const stepsCount = (pb.steps || []).length;
+        const sevClass = pb.severity_target === 'CRITICAL' ? 'badge-critical' : 'badge-high';
+
+        return `
+          <div class="soar-blueprint-card">
+            <div>
+              <div class="soar-blueprint-header">
+                <span class="soar-blueprint-id">${escapeHtml(pb.id)}</span>
+                <span class="badge ${sevClass}">${escapeHtml(pb.severity_target)}</span>
+              </div>
+              <div class="soar-blueprint-name">${escapeHtml(pb.name)}</div>
+              <div class="soar-blueprint-desc">${escapeHtml(pb.description)}</div>
+              <div style="margin-bottom: 0.65rem;">
+                <div style="font-size: 0.65rem; color: var(--text-muted); margin-bottom: 0.25rem; font-weight: 700;">MITRE ATT&amp;CK TACTICS:</div>
+                <div style="display: flex; flex-wrap: wrap; gap: 0.3rem;">${mitreBadges}</div>
+              </div>
+              <div style="margin-bottom: 0.75rem;">
+                <div style="font-size: 0.65rem; color: var(--text-muted); margin-bottom: 0.25rem; font-weight: 700;">AUTO-TRIGGER RULES:</div>
+                <div style="display: flex; flex-wrap: wrap; gap: 0.3rem;">${rulesList}</div>
+              </div>
+            </div>
+            <div class="soar-blueprint-footer">
+              <div style="font-size: 0.72rem; color: var(--text-muted);">
+                <span>⏱️ SLA: <strong>${pb.sla_target_seconds}s</strong></span> · 
+                <span>📋 Steps: <strong>${stepsCount}</strong></span>
+              </div>
+              <button class="btn btn-xs btn-primary" onclick="launchPlaybookFromCatalog('${escapeHtml(pb.id)}')">▶ Launch Run</button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function renderSOARRuns(runs) {
+      const tbody = document.getElementById('soar-runs-tbody');
+      const activeCountEl = document.getElementById('soar-active-runs-count');
+      const interventionsCountEl = document.getElementById('soar-interventions-count');
+      const badgeEl = document.getElementById('playbooks-badge-count');
+
+      const runningRuns = (runs || []).filter(r => r.status === 'RUNNING');
+      if (activeCountEl) activeCountEl.textContent = runningRuns.length;
+      if (interventionsCountEl) interventionsCountEl.textContent = (runs || []).length;
+      if (badgeEl) {
+        if (runningRuns.length > 0) {
+          badgeEl.textContent = runningRuns.length;
+          badgeEl.style.display = 'inline-block';
+        } else {
+          badgeEl.style.display = 'none';
+        }
+      }
+
+      if (!tbody) return;
+      if (!runs || runs.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--text-muted); padding: 2rem;">No active playbook executions in flight. Swarm operating within normal thresholds.</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = runs.map(run => {
+        const isRunning = run.status === 'RUNNING';
+        const isContained = run.status === 'CONTAINED';
+        const statusBadge = isRunning 
+          ? `<span class="badge badge-high" style="animation: pulse 1.5s infinite;">RUNNING</span>`
+          : (isContained ? `<span class="badge badge-success">CONTAINED</span>` : `<span class="badge">${escapeHtml(run.status)}</span>`);
+        
+        const phaseLabel = `Step ${run.current_step_idx + 1}/${run.total_steps}`;
+        const incidentIdLabel = run.incident_id > 0 ? `#${run.incident_id}` : run.run_id.substring(0, 10);
+        const actorFlag = getFlagEmoji(run.actor_ip);
+        const isSelected = activeInspectedRunId === run.run_id;
+
+        return `
+          <tr class="incident-row ${isSelected ? 'active-keyboard-row' : ''}" onclick="openSOARRunInspector('${escapeHtml(run.run_id)}')" style="cursor: pointer;">
+            <td><span style="font-family: var(--font-mono); font-weight: 700; color: var(--cyan);">${escapeHtml(incidentIdLabel)}</span></td>
+            <td>
+              <div style="font-weight: 700; color: #fff; font-size: 0.78rem;">${escapeHtml(run.playbook_id)}</div>
+              <div style="font-size: 0.7rem; color: var(--text-muted);">${escapeHtml(run.playbook_name)}</div>
+            </td>
+            <td>
+              <div style="font-family: var(--font-mono); font-size: 0.78rem; font-weight: 700;">${actorFlag} ${escapeHtml(run.actor_ip)}</div>
+              <div style="font-size: 0.68rem; color: var(--text-muted);">${escapeHtml(run.trigger_reason || 'Autonomous Alert Trigger')}</div>
+            </td>
+            <td><span class="badge" style="background: rgba(168, 85, 247, 0.2); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.4);">${phaseLabel}</span></td>
+            <td>${statusBadge}</td>
+            <td>
+              <div style="display: flex; gap: 0.35rem;" onclick="event.stopPropagation()">
+                <button class="btn-triage-xs btn-triage-report" onclick="openSOARRunInspector('${escapeHtml(run.run_id)}')">🔍 Inspect</button>
+                ${isRunning ? `<button class="btn-triage-xs btn-triage-ban" onclick="executeSOARActionForRun('${escapeHtml(run.run_id)}', 'XDP_BLACKHOLE', '${escapeHtml(run.actor_ip)}')">⚡ Drop</button>` : ''}
+              </div>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function openSOARRunInspector(runId) {
+      activeInspectedRunId = runId;
+      const run = soarActiveRuns.find(r => r.run_id === runId);
+      if (!run) return;
+
+      const inspectorCard = document.getElementById('soar-active-run-inspector');
+      if (!inspectorCard) return;
+      inspectorCard.style.display = 'block';
+
+      document.getElementById('soar-inspector-title').textContent = `📋 Playbook Stepper: ${run.playbook_id} (${run.playbook_name})`;
+      const statusBadge = document.getElementById('soar-inspector-status-badge');
+      statusBadge.textContent = run.status;
+      statusBadge.className = `badge ${run.status === 'RUNNING' ? 'badge-high' : 'badge-success'}`;
+      
+      const mitreBadge = document.getElementById('soar-inspector-mitre-badge');
+      mitreBadge.textContent = run.mitre_id || 'T1190';
+
+      // Pre-fill console input with target actor
+      const consoleInput = document.getElementById('soar-console-ip');
+      if (consoleInput && run.actor_ip) {
+        consoleInput.value = run.actor_ip;
+      }
+
+      // Render Stepper Nodes Track
+      const track = document.getElementById('soar-stepper-nodes');
+      if (track) {
+        track.innerHTML = (run.steps || []).map((s, i) => {
+          let nodeState = 'pending';
+          if (s.status === 'COMPLETED') nodeState = 'completed';
+          else if (s.status === 'IN_PROGRESS' || i === run.current_step_idx) nodeState = 'active';
+
+          return `
+            <div class="soar-step-node ${nodeState}">
+              <div class="soar-node-circle">${s.status === 'COMPLETED' ? '✔' : i + 1}</div>
+              <div class="soar-node-label">${escapeHtml(s.title.substring(0, 22))}...</div>
+            </div>
+          `;
+        }).join('');
+      }
+
+      // Render Step Detail Cards
+      const cardsContainer = document.getElementById('soar-stepper-cards');
+      if (cardsContainer) {
+        cardsContainer.innerHTML = (run.steps || []).map((s, i) => {
+          let cardClass = 'pending';
+          if (s.status === 'COMPLETED') cardClass = 'completed';
+          else if (s.status === 'IN_PROGRESS' || i === run.current_step_idx) cardClass = 'in-progress';
+
+          const cmdSnippet = s.command ? `
+            <div class="code-snippet-box" style="margin-left: 0; margin-top: 0.5rem;">
+              <code>${escapeHtml(s.command)}</code>
+              <button class="btn-code-copy" onclick="copyCommandSnippet('${escapeHtml(s.command)}', this)">📋 Copy</button>
+            </div>
+          ` : '';
+
+          const actionBtn = s.automated_action ? `
+            <button class="btn btn-xs btn-primary" style="margin-top: 0.5rem; width: 100%;" onclick="executeSOARActionForRun('${escapeHtml(run.run_id)}', '${escapeHtml(s.automated_action)}', '${escapeHtml(run.actor_ip)}')">
+              ⚡ Execute ${escapeHtml(s.automated_action)}
+            </button>
+          ` : '';
+
+          const completeBtn = s.status !== 'COMPLETED' ? `
+            <button class="btn btn-xs btn-triage-dismiss" style="margin-top: 0.4rem; width: 100%;" onclick="advanceSOARStep('${escapeHtml(run.run_id)}', ${i}, 'COMPLETED')">
+              ✔ Mark Step Complete
+            </button>
+          ` : `<div style="font-size: 0.68rem; color: var(--emerald); font-weight: 700; margin-top: 0.4rem;">✔ Step Completed</div>`;
+
+          return `
+            <div class="playbook-step-card ${cardClass}" style="margin-bottom: 0;">
+              <div class="playbook-step-top">
+                <div class="playbook-step-left">
+                  <span class="playbook-step-badge">${escapeHtml(s.badge || 'STEP ' + (i + 1))}</span>
+                  <div class="playbook-step-title">${escapeHtml(s.title)}</div>
+                </div>
+              </div>
+              <div class="playbook-step-desc" style="margin-left: 0;">${escapeHtml(s.description)}</div>
+              ${cmdSnippet}
+              ${actionBtn}
+              ${completeBtn}
+            </div>
+          `;
+        }).join('');
+      }
+
+      inspectorCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    function updateSOARInspectorIfOpen(updatedRun) {
+      if (activeInspectedRunId && updatedRun && activeInspectedRunId === updatedRun.run_id) {
+        openSOARRunInspector(updatedRun.run_id);
+      }
+    }
+
+    function closeSOARInspector() {
+      activeInspectedRunId = null;
+      const inspectorCard = document.getElementById('soar-active-run-inspector');
+      if (inspectorCard) inspectorCard.style.display = 'none';
+    }
+
+    async function advanceSOARStep(runId, stepIdx, status, output) {
+      try {
+        const res = await fetch('/api/soar/execute', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            run_id: runId,
+            step_index: stepIdx,
+            status: status || 'COMPLETED',
+            output: output || 'Completed by analyst'
+          })
+        });
+        const data = await res.json();
+        if (data && data.run) {
+          openSOARRunInspector(runId);
+          fetchSOARRuns();
+          showToast(`Playbook step ${stepIdx + 1} marked completed`, 'success', 'SOAR Advanced');
+        }
+      } catch (err) {
+        showToast('Failed to advance playbook step: ' + err, 'danger');
+      }
+    }
+
+    async function executeSOARActionForRun(runId, actionType, actorIp) {
+      try {
+        const res = await fetch('/api/soar/execute', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action_type: actionType,
+            actor_ip: actorIp,
+            run_id: runId
+          })
+        });
+        const data = await res.json();
+        if (data && data.message) {
+          showToast(data.message, 'success', 'Action Dispatched');
+          fetchSOARRuns();
+          refreshBans();
+        }
+      } catch (err) {
+        showToast('Action execution failed: ' + err, 'danger');
+      }
+    }
+
+    async function executeManualSOARAction(actionType) {
+      const ipInput = document.getElementById('soar-console-ip');
+      const actorIp = ipInput ? ipInput.value.trim() : '';
+      if (!actorIp && actionType !== 'AI_FORENSICS') {
+        showToast('Please specify target IP or hostname in console input', 'warning', 'SOAR Console');
+        if (ipInput) ipInput.focus();
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/soar/execute', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action_type: actionType,
+            actor_ip: actorIp
+          })
+        });
+        const data = await res.json();
+        if (data && data.message) {
+          showToast(data.message, 'success', 'Remediation Applied');
+          refreshBans();
+          fetchSOARRuns();
+        } else {
+          showToast(`Remediation ${actionType} executed`, 'info', 'SOAR Complete');
+        }
+      } catch (err) {
+        showToast('Action failed: ' + err, 'danger');
+      }
+    }
+
+    async function launchPlaybookFromCatalog(pbId) {
+      let targetIp = document.getElementById('soar-console-ip')?.value.trim();
+      if (!targetIp) {
+        targetIp = prompt(`Enter target Attacker IP or Hostname to execute ${pbId}:`, "198.51.100.45");
+        if (!targetIp) return;
+      }
+
+      try {
+        const res = await fetch('/api/soar/execute', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action_type: 'LAUNCH_PLAYBOOK',
+            actor_ip: targetIp,
+            param: pbId
+          })
+        });
+        showToast(`Playbook ${pbId} execution launched on ${targetIp}`, 'success', 'Playbook Started');
+        fetchSOARRuns();
+      } catch (err) {
+        showToast('Launch failed: ' + err, 'danger');
+      }
+    }
+
     function escapeHtml(str) {
       if (!str) return '';
       return String(str)
@@ -5326,6 +5933,8 @@
       updateAudioButtonState();
       checkFirstBootOnboarding();
       refreshAlerts();
+      fetchSOARPlaybooks();
+      fetchSOARRuns();
       refreshBans();
       refreshSigmaRules();
       refreshFleetNodes();
@@ -5344,6 +5953,10 @@
         const alertsPanel = document.getElementById('tab-alerts');
         if (alertsPanel && alertsPanel.classList.contains('active')) {
           refreshAlerts();
+        }
+        const playbooksPanel = document.getElementById('tab-playbooks');
+        if (playbooksPanel && playbooksPanel.classList.contains('active')) {
+          fetchSOARRuns();
         }
         const nodesPanel = document.getElementById('tab-nodes');
         if (nodesPanel && nodesPanel.classList.contains('active')) {
