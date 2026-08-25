@@ -28,6 +28,7 @@ type StoredEvent struct {
 	MitreTechniqueID string `json:"mitre_technique_id"`
 	ThreatScore      int    `json:"threat_score"`
 	AIAnalysis       string `json:"ai_analysis,omitempty"`
+	AnalystNotes     string `json:"analyst_notes,omitempty"`
 	CountryCode      string `json:"country_code,omitempty"`
 	CountryName      string `json:"country_name,omitempty"`
 	City             string `json:"city,omitempty"`
@@ -223,6 +224,7 @@ func (s *StorageEngine) initSchema() error {
 		"ALTER TABLE node_registry ADD COLUMN memory_usage REAL DEFAULT 0",
 		"ALTER TABLE node_registry ADD COLUMN active_bans_count INTEGER DEFAULT 0",
 		"ALTER TABLE node_registry ADD COLUMN uptime_seconds INTEGER DEFAULT 0",
+		"ALTER TABLE events ADD COLUMN analyst_notes TEXT DEFAULT ''",
 	}
 	for _, colSQL := range cols {
 		_, _ = s.db.Exec(colSQL)
@@ -292,6 +294,16 @@ func (s *StorageEngine) UpdateEventAI(eventID int64, aiAnalysis string) error {
 
 	query := `UPDATE events SET ai_analysis = ? WHERE id = ?`
 	_, err := s.db.Exec(query, aiAnalysis, eventID)
+	return err
+}
+
+// UpdateEventNotes updates analyst case notes for a stored incident.
+func (s *StorageEngine) UpdateEventNotes(eventID int64, notes string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	query := `UPDATE events SET analyst_notes = ? WHERE id = ?`
+	_, err := s.db.Exec(query, notes, eventID)
 	return err
 }
 
@@ -482,7 +494,7 @@ func (s *StorageEngine) GetRecentEvents(limit int) ([]*StoredEvent, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	query := `SELECT id, node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis
+	query := `SELECT id, node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis, analyst_notes
 	          FROM events ORDER BY timestamp_ms DESC LIMIT ?`
 	rows, err := s.db.Query(query, limit)
 	if err != nil {
@@ -498,7 +510,7 @@ func (s *StorageEngine) GetCriticalEvents(limit int) ([]*StoredEvent, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	query := `SELECT id, node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis
+	query := `SELECT id, node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis, analyst_notes
 	          FROM events WHERE threat_score >= 50 ORDER BY timestamp_ms DESC LIMIT ?`
 	rows, err := s.db.Query(query, limit)
 	if err != nil {
@@ -563,7 +575,7 @@ func (s *StorageEngine) SearchEvents(filterStr string, limit int) ([]*StoredEven
 		whereClause = "WHERE " + strings.Join(conditions, " AND ")
 	}
 
-	query := fmt.Sprintf(`SELECT id, node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis
+	query := fmt.Sprintf(`SELECT id, node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis, analyst_notes
 	                       FROM events %s ORDER BY timestamp_ms DESC LIMIT ?`, whereClause)
 	args = append(args, limit)
 
@@ -581,7 +593,9 @@ func scanEvents(rows *sql.Rows) ([]*StoredEvent, error) {
 	geo := geoip.GetDefaultEngine()
 	for rows.Next() {
 		ev := &StoredEvent{}
-		if err := rows.Scan(&ev.ID, &ev.NodeID, &ev.Source, &ev.RawLine, &ev.ClientIP, &ev.StatusCode, &ev.TimestampMs, &ev.RuleID, &ev.MitreTechniqueID, &ev.ThreatScore, &ev.AIAnalysis); err == nil {
+		var notes sql.NullString
+		if err := rows.Scan(&ev.ID, &ev.NodeID, &ev.Source, &ev.RawLine, &ev.ClientIP, &ev.StatusCode, &ev.TimestampMs, &ev.RuleID, &ev.MitreTechniqueID, &ev.ThreatScore, &ev.AIAnalysis, &notes); err == nil {
+			ev.AnalystNotes = notes.String
 			if ev.ClientIP != "" && ev.ClientIP != "-" {
 				loc := geo.Lookup(ev.ClientIP)
 				ev.CountryCode = loc.CountryCode

@@ -135,6 +135,7 @@ func (ws *WebSOCServer) Start() error {
 	mux.HandleFunc("/api/ipinfo/lookup", ws.handleIPInfoLookup)
 	mux.HandleFunc("/api/report/incident", ws.handleIncidentReport)
 	mux.HandleFunc("/api/report/export", ws.handleExportReport)
+	mux.HandleFunc("/api/events/notes", ws.handleEventNotes)
 	mux.HandleFunc("/api/ai/agent/latest", ws.handleAIAgentLatest)
 	mux.HandleFunc("/api/ai/agent/test-dispatch", ws.handleAIAgentTestDispatch)
 	mux.HandleFunc("/api/p2p/topology", ws.handleP2PTopology)
@@ -1268,4 +1269,34 @@ func (ws *WebSOCServer) handleIPInfoLookup(w http.ResponseWriter, r *http.Reques
 	}
 
 	json.NewEncoder(w).Encode(resp)
+}
+
+func (ws *WebSOCServer) handleEventNotes(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		ID    int64  `json:"id"`
+		Notes string `json:"notes"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if ws.storage != nil && req.ID > 0 {
+		if err := ws.storage.UpdateEventNotes(req.ID, req.Notes); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status": "success",
+		"id":     req.ID,
+		"saved":  true,
+	})
 }
