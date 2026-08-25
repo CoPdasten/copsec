@@ -238,9 +238,14 @@ func (s *StorageEngine) flushInvalidQuarantinesLocked() {
 	query := `DELETE FROM active_bans WHERE ip = '' OR ip = '127.0.0.1' OR ip = 'local' OR ip = 'localhost' OR ip LIKE '127.%' OR ip LIKE '10.%' OR ip LIKE '192.168.%' OR ip LIKE '172.16.%' OR ip LIKE '172.17.%' OR ip LIKE '172.18.%' OR ip LIKE '172.19.%' OR ip LIKE '172.20.%' OR ip LIKE '172.21.%' OR ip LIKE '172.22.%' OR ip LIKE '172.23.%' OR ip LIKE '172.24.%' OR ip LIKE '172.25.%' OR ip LIKE '172.26.%' OR ip LIKE '172.27.%' OR ip LIKE '172.28.%' OR ip LIKE '172.29.%' OR ip LIKE '172.30.%' OR ip LIKE '172.31.%' OR reason LIKE '%sudo_execution%' OR reason LIKE '%sudo:%' OR reason LIKE '%cron_tamper%' OR reason LIKE '%fim_drift%'`
 	_, _ = s.db.Exec(query)
 
-	// Normalize historical penalty tiers
-	_, _ = s.db.Exec(`UPDATE active_bans SET penalty_tier = 'AUTOBAN_SOAR' WHERE (penalty_tier = 'TEMP_ISOLATION' OR penalty_tier = '') AND reason LIKE 'Auto-Ban%'`)
+	// Normalize historical penalty tiers and legacy alert labels
+	_, _ = s.db.Exec(`UPDATE active_bans SET penalty_tier = 'AUTOBAN_SOAR' WHERE penalty_tier = 'TEMP_ISOLATION' OR penalty_tier = '' OR penalty_tier IS NULL`)
+	_, _ = s.db.Exec(`UPDATE active_bans SET reason = 'Autonomous Threat Score Escalation [AUTOBAN_SOAR]' WHERE reason = 'Manual/SOAR Alert' OR reason = '' OR reason IS NULL`)
 	_, _ = s.db.Exec(`UPDATE active_bans SET penalty_tier = 'EXTERNAL_QUARANTINE' WHERE penalty_tier = 'EXTENDED_QUARANTINE'`)
+
+	// Prune orphaned entries where expire_time_ms is in the past or status is not ACTIVE
+	nowMs := time.Now().UnixMilli()
+	_, _ = s.db.Exec(`DELETE FROM active_bans WHERE status != 'ACTIVE' OR (expire_time_ms > 0 AND expire_time_ms < ?)`, nowMs)
 }
 
 // FlushInvalidQuarantines purges all false-positive and host-local ban records from SQLite.
@@ -254,8 +259,13 @@ func (s *StorageEngine) FlushInvalidQuarantines() (int64, error) {
 		return 0, err
 	}
 
-	_, _ = s.db.Exec(`UPDATE active_bans SET penalty_tier = 'AUTOBAN_SOAR' WHERE (penalty_tier = 'TEMP_ISOLATION' OR penalty_tier = '') AND reason LIKE 'Auto-Ban%'`)
+	_, _ = s.db.Exec(`UPDATE active_bans SET penalty_tier = 'AUTOBAN_SOAR' WHERE penalty_tier = 'TEMP_ISOLATION' OR penalty_tier = '' OR penalty_tier IS NULL`)
+	_, _ = s.db.Exec(`UPDATE active_bans SET reason = 'Autonomous Threat Score Escalation [AUTOBAN_SOAR]' WHERE reason = 'Manual/SOAR Alert' OR reason = '' OR reason IS NULL`)
 	_, _ = s.db.Exec(`UPDATE active_bans SET penalty_tier = 'EXTERNAL_QUARANTINE' WHERE penalty_tier = 'EXTENDED_QUARANTINE'`)
+
+	nowMs := time.Now().UnixMilli()
+	_, _ = s.db.Exec(`DELETE FROM active_bans WHERE status != 'ACTIVE' OR (expire_time_ms > 0 AND expire_time_ms < ?)`, nowMs)
+
 	return res.RowsAffected()
 }
 

@@ -423,6 +423,14 @@ func (s *CentralServer) processEvent(nodeID string, event *copsecproto.LogEvent)
 		}
 	}
 
+	// Ensure MITRE technique matches or Sigma rules have baseline score >= 60
+	if mitreID != "" && strings.HasPrefix(strings.ToUpper(mitreID), "T") && threatScore < 60 {
+		threatScore = 60
+	}
+	if strings.HasPrefix(strings.ToLower(ruleID), "sigma") && threatScore < 60 {
+		threatScore = 60
+	}
+
 	// 5. Dynamic Sliding-Window & Time-Decayed Threat Scoring Engine
 	loc := geoip.GetDefaultEngine().Lookup(event.ClientIp)
 	var assessment threat.ThreatAssessment

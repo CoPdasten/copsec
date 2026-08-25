@@ -1973,6 +1973,7 @@
       if (!ev) return false;
       const score = ev.threat_score || 0;
       const rule = (ev.rule_id || '').toLowerCase();
+      const mitre = (ev.mitre_technique_id || '').toUpperCase();
       const raw = (ev.raw_line || '').toLowerCase();
 
       // De-noise routine successful sudo execution (score < 70): keep in Incident Stream, do not elevate to Critical Alerts
@@ -1980,12 +1981,13 @@
         return false;
       }
 
-      const isCritical = score >= 70;
+      const hasMitre = mitre !== '' && mitre.startsWith('T');
+      const isScore40 = score >= 40;
       const isSigma = rule.startsWith('sigma') || rule.includes('revshell') || rule.includes('sqli') || rule.includes('rce') || rule.includes('c2') || rule.includes('evasion') || rule.includes('persistence');
-      const isML = (ev.ml_anomaly && (ev.ml_confidence_pct >= 80 || ev.ml_confidence_pct >= 0.8)) || (ev.snort_ml && (ev.snort_confidence >= 0.8 || ev.snort_confidence >= 80));
+      const isML = (ev.ml_anomaly && (ev.ml_confidence_pct >= 70 || ev.ml_confidence_pct >= 0.7)) || (ev.snort_ml && (ev.snort_confidence >= 0.7 || ev.snort_confidence >= 70));
       const isKernelFIM = rule.includes('rootkit') || rule.includes('fim') || rule.includes('integrity') || rule.includes('ptrace') || rule.includes('lkm') || raw.includes('fim_healing');
 
-      return isCritical || isSigma || isML || isKernelFIM;
+      return hasMitre || isScore40 || isSigma || isML || isKernelFIM;
     }
 
     function formatRelativeTime(timestampMs) {
@@ -2947,6 +2949,13 @@
     }
 
     // Payload Drawer Inspector
+    function openPayloadDrawerById(id) {
+      const alert = activeAlerts.find(a => a.id === id) || eventsLog.find(e => e.id === id);
+      if (alert) {
+        openPayloadDrawer(alert);
+      }
+    }
+
     function openPayloadDrawerByIndex(idx) {
       const ev = eventsLog[idx];
       if (!ev) return;

@@ -476,14 +476,21 @@ func (c *Client) deriveSecurityContext(resp *IPInfoResponse) {
 
 func cleanIPAddress(ipStr string) string {
 	ipStr = strings.TrimSpace(ipStr)
-	ipStr = strings.Trim(ipStr, "[]")
+	if ipStr == "" {
+		return ""
+	}
 	if host, _, err := net.SplitHostPort(ipStr); err == nil {
 		ipStr = host
 	}
+	ipStr = strings.Trim(ipStr, "[]")
 	if idx := strings.Index(ipStr, "/"); idx != -1 {
 		ipStr = ipStr[:idx]
 	}
-	return strings.TrimSpace(ipStr)
+	ipStr = strings.TrimSpace(ipStr)
+	if parsed := net.ParseIP(ipStr); parsed != nil {
+		return parsed.String()
+	}
+	return ipStr
 }
 
 func isPrivateOrExcluded(ipStr string) bool {

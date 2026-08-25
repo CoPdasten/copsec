@@ -344,6 +344,24 @@ func (se *ScoringEngine) Evaluate(
 		baseIncrement = 60.0
 		breakdownDetails = append(breakdownDetails, "DNS Tunneling / High-Entropy DGA Resolution (+60)")
 
+	} else if mitreID != "" && strings.HasPrefix(strings.ToUpper(mitreID), "T") {
+		tier = "TIER_3_CUMULATIVE"
+		eventType = "MITRE_TECHNIQUE"
+		baseIncrement = float64(rawScore)
+		if baseIncrement <= 0 || (isHighImpactMitre(mitreID) && baseIncrement < 60.0) {
+			baseIncrement = 60.0
+		}
+		breakdownDetails = append(breakdownDetails, fmt.Sprintf("MITRE Technique %s (%s, +%.0f Base)", mitreID, ruleID, baseIncrement))
+
+	} else if strings.Contains(strings.ToLower(ruleID), "flow") || strings.Contains(strings.ToLower(ruleID), "probe") || strings.Contains(strings.ToLower(ruleID), "scan") {
+		tier = "TIER_3_CUMULATIVE"
+		eventType = "NETWORK_PROBE_BURST"
+		baseIncrement = 15.0
+		if float64(rawScore) > baseIncrement {
+			baseIncrement = float64(rawScore)
+		}
+		breakdownDetails = append(breakdownDetails, fmt.Sprintf("Network Flow/Probe Burst: %s (+%.0f)", ruleID, baseIncrement))
+
 	} else {
 		tier = "NORMAL"
 		eventType = "GENERIC_RULE"
@@ -469,4 +487,14 @@ func isDNSAnomaly(ruleID, mitreID string) bool {
 	r := strings.ToLower(ruleID)
 	m := strings.ToUpper(mitreID)
 	return strings.Contains(r, "dns") || strings.Contains(r, "dga") || strings.Contains(r, "tunnel") || m == "T1048.003" || m == "T1568.002"
+}
+
+func isHighImpactMitre(mitreID string) bool {
+	m := strings.ToUpper(mitreID)
+	return strings.HasPrefix(m, "T1078") || // Valid Accounts / Credential Abuse
+		strings.HasPrefix(m, "T1190") || // Exploit Public-Facing Application
+		strings.HasPrefix(m, "T1059") || // Command & Scripting Interpreter / Execution
+		strings.HasPrefix(m, "T1068") || // Exploitation for Privilege Escalation
+		strings.HasPrefix(m, "T1071") || // Application Layer Protocol C2
+		strings.HasPrefix(m, "T1021")    // Remote Services
 }

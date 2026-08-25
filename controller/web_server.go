@@ -1003,18 +1003,19 @@ func (ws *WebSOCServer) handleAlerts(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		scope := sigma.DetermineRuleScope(ev.RuleID, "", "", "", nil)
-		isHostLocalRule := scope == sigma.ScopeHostLocal || strings.Contains(strings.ToLower(ev.RuleID), "cron")
-		isSigma := strings.HasPrefix(strings.ToLower(ev.RuleID), "sigma")
-		isML := (ev.MLAnomaly && ev.MLConfidencePct >= 80) || (ev.SnortML && ev.SnortConfidence >= 0.80)
-		isCritical := ev.ThreatScore >= 70
+		hasMitre := ev.MitreTechniqueID != "" && strings.HasPrefix(strings.ToUpper(ev.MitreTechniqueID), "T")
+		isSigma := strings.HasPrefix(strings.ToLower(ev.RuleID), "sigma") || strings.Contains(strings.ToLower(ev.RuleID), "rce") || strings.Contains(strings.ToLower(ev.RuleID), "sqli") || strings.Contains(strings.ToLower(ev.RuleID), "revshell")
+		isScore40 := ev.ThreatScore >= 40
+		isML := (ev.MLAnomaly && ev.MLConfidencePct >= 70) || (ev.SnortML && ev.SnortConfidence >= 0.70)
 		isKernelOrFIM := strings.Contains(strings.ToLower(ev.RuleID), "rootkit") ||
 			strings.Contains(strings.ToLower(ev.RuleID), "fim") ||
 			strings.Contains(strings.ToLower(ev.RuleID), "integrity") ||
 			strings.Contains(strings.ToLower(ev.RuleID), "ptrace") ||
 			strings.Contains(strings.ToLower(ev.RuleID), "lkm")
+		scope := sigma.DetermineRuleScope(ev.RuleID, "", "", "", nil)
+		isHostLocalRule := scope == sigma.ScopeHostLocal || strings.Contains(strings.ToLower(ev.RuleID), "cron")
 
-		if !isCritical && !isSigma && !isML && !isKernelOrFIM && !isHostLocalRule {
+		if !hasMitre && !isSigma && !isScore40 && !isML && !isKernelOrFIM && !isHostLocalRule {
 			continue
 		}
 

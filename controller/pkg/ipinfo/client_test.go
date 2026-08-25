@@ -213,3 +213,39 @@ func TestLiveIPInfoNetherlandsKerkradeMapping(t *testing.T) {
 		t.Errorf("Expected flag 🇳🇱, got %s", resp.FlagEmoji)
 	}
 }
+
+func TestIPv6IPInfoLookup(t *testing.T) {
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{
+			"ip": "2a01:4f8:c010:d56::1",
+			"city": "Dunkirk",
+			"region": "Hauts-de-France",
+			"country": "FR",
+			"loc": "51.0343,2.3768",
+			"org": "AS24940 Hetzner Online GmbH",
+			"postal": "59140",
+			"timezone": "Europe/Paris"
+		}`))
+	}))
+	defer mockServer.Close()
+
+	client := NewClient("5d61b28f40a2d8")
+	client.SetBaseURL(mockServer.URL)
+
+	// Test IPv6 with port and brackets
+	resp, err := client.Lookup(context.Background(), "[2a01:4f8:c010:d56::1]:443")
+	if err != nil {
+		t.Fatalf("Lookup failed: %v", err)
+	}
+
+	if resp.City != "Dunkirk" || resp.Region != "Hauts-de-France" || resp.Postal != "59140" {
+		t.Errorf("Expected Dunkirk, Hauts-de-France, 59140, got %s, %s, %s", resp.City, resp.Region, resp.Postal)
+	}
+	if resp.Country != "FR" || resp.CountryName != "France" {
+		t.Errorf("Expected France, got %s / %s", resp.Country, resp.CountryName)
+	}
+	if !resp.IsHosting {
+		t.Errorf("Expected Hetzner IPv6 to be identified as Hosting")
+	}
+}
