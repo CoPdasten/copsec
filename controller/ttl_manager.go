@@ -16,7 +16,8 @@ type PenaltyTier string
 const (
 	TierRateLimit          PenaltyTier = "RATE_LIMIT"          // 300 seconds (5 min)
 	TierTempIsolation      PenaltyTier = "TEMP_ISOLATION"      // 3600 seconds (1 hour)
-	TierExtendedQuarantine PenaltyTier = "EXTENDED_QUARANTINE" // 86400 seconds (24 hours)
+	TierAutoBanSOAR        PenaltyTier = "AUTOBAN_SOAR"        // Autonomous SOAR threshold / sigma / suricata trigger
+	TierExtendedQuarantine PenaltyTier = "EXTERNAL_QUARANTINE" // 86400 seconds (24 hours)
 	TierPermanent          PenaltyTier = "PERMANENT"           // 0 or -1 (Indefinite)
 )
 

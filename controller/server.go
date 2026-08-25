@@ -524,14 +524,22 @@ func (s *CentralServer) checkAutonomousBanPolicy(event *StoredEvent) {
 	triggerAutoBan := false
 	banReason := ""
 
-	// Condition 1: Static Critical / High-Threat Threshold (ThreatScore >= 50)
+	// Condition 1: Static Critical / High-Threat Threshold
 	threshold := s.autoBanThreshold
 	if threshold <= 0 {
 		threshold = 50
 	}
 	if event.ThreatScore >= threshold {
 		triggerAutoBan = true
-		banReason = fmt.Sprintf("Auto-ban: Threat Score %d/100 triggered (Rule: %s, MITRE: %s)", event.ThreatScore, event.RuleID, event.MitreTechniqueID)
+		ruleName := event.RuleID
+		if ruleName == "" {
+			ruleName = "threat_anomaly"
+		}
+		mitreID := event.MitreTechniqueID
+		if mitreID == "" {
+			mitreID = "T1190"
+		}
+		banReason = fmt.Sprintf("Auto-Ban: Threat Score %d triggered [Rule: %s, MITRE: %s]", event.ThreatScore, ruleName, mitreID)
 	}
 
 	// Condition 2: Correlational Spike / Brute-Force Threshold (>= 3 high-threat events in 60s)
@@ -548,7 +556,7 @@ func (s *CentralServer) checkAutonomousBanPolicy(event *StoredEvent) {
 
 		if len(recent) >= 3 && !triggerAutoBan {
 			triggerAutoBan = true
-			banReason = fmt.Sprintf("Correlational Spike Threshold (%d attacks in 60s)", len(recent))
+			banReason = fmt.Sprintf("Auto-Ban: Correlational Spike Threshold (%d attacks in 60s) [Rule: %s, MITRE: %s]", len(recent), event.RuleID, event.MitreTechniqueID)
 		}
 	}
 
@@ -563,12 +571,24 @@ func (s *CentralServer) checkAutonomousBanPolicy(event *StoredEvent) {
 
 		dispatched := 0
 		if ttlMgr != nil {
-			_, _ = ttlMgr.BanIP(ip, banReason, 86400, TierExtendedQuarantine)
+			_, _ = ttlMgr.BanIP(ip, banReason, 86400, TierAutoBanSOAR)
 			dispatched = len(s.GetNodesSnapshot())
 		} else {
-			dispatched = s.BroadcastSOARCommand("BAN_IP", ip, 86400)
+			dispatched = s.BroadcastSOARCommandWithReason("BAN_IP", ip, banReason, 86400)
 			if s.storage != nil {
-				_ = s.storage.RecordBan(ip, banReason, 86400)
+				_ = s.storage.RecordDetailedBan(&DetailedBanRecord{
+					IP:              ip,
+					Reason:          banReason,
+					BanTimeMs:       time.Now().UnixMilli(),
+					DurationSeconds: 86400,
+					ExpireTimeMs:    time.Now().UnixMilli() + 86400000,
+					PenaltyTier:     TierAutoBanSOAR,
+					Status:          "ACTIVE",
+					L3Active:        true,
+					L4Active:        true,
+					L7Active:        true,
+					OffenseCount:    1,
+				})
 			}
 		}
 
@@ -660,6 +680,11 @@ func (s *CentralServer) SyncCommands(stream copsecproto.CopsecStreamService_Sync
 
 // BroadcastSOARCommand sends a command to all connected edge nodes (Fleet Ban).
 func (s *CentralServer) BroadcastSOARCommand(actionType, targetIP string, durationSec int64) int {
+	return s.BroadcastSOARCommandWithReason(actionType, targetIP, "Manual/SOAR Alert", durationSec)
+}
+
+// BroadcastSOARCommandWithReason sends a command with specific reason attribution to all connected edge nodes.
+func (s *CentralServer) BroadcastSOARCommandWithReason(actionType, targetIP, reason string, durationSec int64) int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -683,14 +708,14 @@ func (s *CentralServer) BroadcastSOARCommand(actionType, targetIP string, durati
 
 	if s.storage != nil {
 		if actionType == "BAN_IP" {
-			_ = s.storage.RecordBan(targetIP, "Manual/SOAR Alert", durationSec)
+			_ = s.storage.RecordBan(targetIP, reason, durationSec)
 		} else if actionType == "UNBAN_IP" || actionType == "WHITELIST_IP" {
 			_ = s.storage.RemoveBan(targetIP)
 		}
 		_ = s.storage.RecordSOARAction(actionType, targetIP, dispatched)
 	}
 
-	log.Printf("[SOAR_BROADCAST] Dispatched %s for IP %s to %d nodes", actionType, targetIP, dispatched)
+	log.Printf("[SOAR_BROADCAST] Dispatched %s for IP %s to %d nodes (Reason: %s)", actionType, targetIP, dispatched, reason)
 	return dispatched
 }
 

@@ -94,21 +94,29 @@ func CountryCodeToEmoji(code string) string {
 // Lookup resolves an IP address to its GeoLocation record.
 func (e *Engine) Lookup(ipStr string) *GeoLocation {
 	ipStr = strings.TrimSpace(ipStr)
-	if ipStr == "" || ipStr == "-" {
+	if ipStr == "" || ipStr == "-" || ipStr == "127.0.0.1" || ipStr == "local" || ipStr == "localhost" || ipStr == "::1" {
 		return &GeoLocation{
-			IP:          "-",
-			CountryCode: "UN",
-			CountryName: "Unknown Origin",
-			City:        "Unknown",
-			ASN:         "AS0 Unknown",
-			FlagEmoji:   "🌐",
+			IP:          ipStr,
+			CountryCode: "LOC",
+			CountryName: "Local / Host Execution",
+			City:        "Internal",
+			ASN:         "Local Host",
+			Latitude:    0.0,
+			Longitude:   0.0,
+			FlagEmoji:   "🏠",
+			IsPrivate:   true,
 		}
 	}
 
-	// Remove port if present
+	// Remove brackets, ports, and CIDR suffix if present (e.g. "[2001:db8::1]:80" or "198.51.100.1:443" or "1.2.3.4/32")
+	ipStr = strings.Trim(ipStr, "[]")
 	if host, _, err := net.SplitHostPort(ipStr); err == nil {
 		ipStr = host
 	}
+	if idx := strings.Index(ipStr, "/"); idx != -1 {
+		ipStr = ipStr[:idx]
+	}
+	ipStr = strings.TrimSpace(ipStr)
 
 	e.mu.RLock()
 	if cached, ok := e.cache[ipStr]; ok {
@@ -122,15 +130,17 @@ func (e *Engine) Lookup(ipStr string) *GeoLocation {
 		return &GeoLocation{
 			IP:          ipStr,
 			CountryCode: "UN",
-			CountryName: "Invalid IP",
+			CountryName: "Unknown Origin",
 			City:        "Unknown",
 			ASN:         "AS0 Unknown",
+			Latitude:    0.0,
+			Longitude:   0.0,
 			FlagEmoji:   "🌐",
 		}
 	}
 
-	// 1. Check if Private / Loopback / CGNAT
-	if parsedIP.IsLoopback() || parsedIP.IsPrivate() || isCGNAT(parsedIP) {
+	// 1. Check if Private / Loopback / CGNAT (100.64.0.0/10)
+	if parsedIP.IsLoopback() || parsedIP.IsPrivate() || isCGNAT(parsedIP) || parsedIP.IsUnspecified() {
 		loc := &GeoLocation{
 			IP:          ipStr,
 			CountryCode: "LOC",
