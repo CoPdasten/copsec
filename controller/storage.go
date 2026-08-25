@@ -29,6 +29,7 @@ type StoredEvent struct {
 	ThreatScore      int    `json:"threat_score"`
 	AIAnalysis       string `json:"ai_analysis,omitempty"`
 	AnalystNotes     string `json:"analyst_notes,omitempty"`
+	PlaybookProgress string `json:"playbook_progress,omitempty"`
 	CountryCode      string `json:"country_code,omitempty"`
 	CountryName      string `json:"country_name,omitempty"`
 	City             string `json:"city,omitempty"`
@@ -225,6 +226,7 @@ func (s *StorageEngine) initSchema() error {
 		"ALTER TABLE node_registry ADD COLUMN active_bans_count INTEGER DEFAULT 0",
 		"ALTER TABLE node_registry ADD COLUMN uptime_seconds INTEGER DEFAULT 0",
 		"ALTER TABLE events ADD COLUMN analyst_notes TEXT DEFAULT ''",
+		"ALTER TABLE events ADD COLUMN playbook_progress TEXT DEFAULT ''",
 	}
 	for _, colSQL := range cols {
 		_, _ = s.db.Exec(colSQL)
@@ -304,6 +306,32 @@ func (s *StorageEngine) UpdateEventNotes(eventID int64, notes string) error {
 
 	query := `UPDATE events SET analyst_notes = ? WHERE id = ?`
 	_, err := s.db.Exec(query, notes, eventID)
+	return err
+}
+
+// UpdateEventNotesAndPlaybook updates both analyst notes and playbook checklist state.
+func (s *StorageEngine) UpdateEventNotesAndPlaybook(eventID int64, notes string, playbookProgress string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if playbookProgress != "" && notes != "" {
+		_, err := s.db.Exec(`UPDATE events SET analyst_notes = ?, playbook_progress = ? WHERE id = ?`, notes, playbookProgress, eventID)
+		return err
+	} else if playbookProgress != "" {
+		_, err := s.db.Exec(`UPDATE events SET playbook_progress = ? WHERE id = ?`, playbookProgress, eventID)
+		return err
+	}
+	_, err := s.db.Exec(`UPDATE events SET analyst_notes = ? WHERE id = ?`, notes, eventID)
+	return err
+}
+
+// UpdateEventPlaybookProgress updates the playbook checklist state for an incident.
+func (s *StorageEngine) UpdateEventPlaybookProgress(eventID int64, playbookProgress string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	query := `UPDATE events SET playbook_progress = ? WHERE id = ?`
+	_, err := s.db.Exec(query, playbookProgress, eventID)
 	return err
 }
 
@@ -494,7 +522,7 @@ func (s *StorageEngine) GetRecentEvents(limit int) ([]*StoredEvent, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	query := `SELECT id, node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis, analyst_notes
+	query := `SELECT id, node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis, analyst_notes, playbook_progress
 	          FROM events ORDER BY timestamp_ms DESC LIMIT ?`
 	rows, err := s.db.Query(query, limit)
 	if err != nil {
@@ -510,7 +538,7 @@ func (s *StorageEngine) GetCriticalEvents(limit int) ([]*StoredEvent, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	query := `SELECT id, node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis, analyst_notes
+	query := `SELECT id, node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis, analyst_notes, playbook_progress
 	          FROM events WHERE threat_score >= 50 ORDER BY timestamp_ms DESC LIMIT ?`
 	rows, err := s.db.Query(query, limit)
 	if err != nil {
@@ -575,7 +603,7 @@ func (s *StorageEngine) SearchEvents(filterStr string, limit int) ([]*StoredEven
 		whereClause = "WHERE " + strings.Join(conditions, " AND ")
 	}
 
-	query := fmt.Sprintf(`SELECT id, node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis, analyst_notes
+	query := fmt.Sprintf(`SELECT id, node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis, analyst_notes, playbook_progress
 	                       FROM events %s ORDER BY timestamp_ms DESC LIMIT ?`, whereClause)
 	args = append(args, limit)
 
@@ -594,8 +622,10 @@ func scanEvents(rows *sql.Rows) ([]*StoredEvent, error) {
 	for rows.Next() {
 		ev := &StoredEvent{}
 		var notes sql.NullString
-		if err := rows.Scan(&ev.ID, &ev.NodeID, &ev.Source, &ev.RawLine, &ev.ClientIP, &ev.StatusCode, &ev.TimestampMs, &ev.RuleID, &ev.MitreTechniqueID, &ev.ThreatScore, &ev.AIAnalysis, &notes); err == nil {
+		var pb sql.NullString
+		if err := rows.Scan(&ev.ID, &ev.NodeID, &ev.Source, &ev.RawLine, &ev.ClientIP, &ev.StatusCode, &ev.TimestampMs, &ev.RuleID, &ev.MitreTechniqueID, &ev.ThreatScore, &ev.AIAnalysis, &notes, &pb); err == nil {
 			ev.AnalystNotes = notes.String
+			ev.PlaybookProgress = pb.String
 			if ev.ClientIP != "" && ev.ClientIP != "-" {
 				loc := geo.Lookup(ev.ClientIP)
 				ev.CountryCode = loc.CountryCode

@@ -136,6 +136,7 @@ func (ws *WebSOCServer) Start() error {
 	mux.HandleFunc("/api/report/incident", ws.handleIncidentReport)
 	mux.HandleFunc("/api/report/export", ws.handleExportReport)
 	mux.HandleFunc("/api/events/notes", ws.handleEventNotes)
+	mux.HandleFunc("/api/alerts/notes", ws.handleEventNotes)
 	mux.HandleFunc("/api/ai/agent/latest", ws.handleAIAgentLatest)
 	mux.HandleFunc("/api/ai/agent/test-dispatch", ws.handleAIAgentTestDispatch)
 	mux.HandleFunc("/api/p2p/topology", ws.handleP2PTopology)
@@ -1278,25 +1279,63 @@ func (ws *WebSOCServer) handleEventNotes(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	var req struct {
-		ID    int64  `json:"id"`
-		Notes string `json:"notes"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	var raw map[string]interface{}
+	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
 		http.Error(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	if ws.storage != nil && req.ID > 0 {
-		if err := ws.storage.UpdateEventNotes(req.ID, req.Notes); err != nil {
+	var eventID int64
+	if v, ok := raw["id"]; ok {
+		switch n := v.(type) {
+		case float64:
+			eventID = int64(n)
+		case int64:
+			eventID = n
+		case string:
+			eventID, _ = strconv.ParseInt(n, 10, 64)
+		}
+	}
+	if eventID == 0 {
+		if v, ok := raw["incident_id"]; ok {
+			switch n := v.(type) {
+			case float64:
+				eventID = int64(n)
+			case int64:
+				eventID = n
+			case string:
+				cleaned := strings.TrimPrefix(n, "LIVE-")
+				cleaned = strings.TrimPrefix(cleaned, "#")
+				eventID, _ = strconv.ParseInt(cleaned, 10, 64)
+			}
+		}
+	}
+
+	notes, _ := raw["notes"].(string)
+
+	var playbookProgress string
+	if pb, ok := raw["playbook_progress"]; ok {
+		switch v := pb.(type) {
+		case string:
+			playbookProgress = v
+		case map[string]interface{}:
+			if b, err := json.Marshal(v); err == nil {
+				playbookProgress = string(b)
+			}
+		}
+	}
+
+	if ws.storage != nil && eventID > 0 {
+		if err := ws.storage.UpdateEventNotesAndPlaybook(eventID, notes, playbookProgress); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 	}
 
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"status": "success",
-		"id":     req.ID,
-		"saved":  true,
+		"status":      "success",
+		"incident_id": eventID,
+		"id":          eventID,
+		"saved":       true,
 	})
 }

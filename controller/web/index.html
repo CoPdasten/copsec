@@ -3494,6 +3494,24 @@
     // -------------------------------------------------------------
     let playbookStepState = {};
 
+    function pullIncidentAccessLogs(ip) {
+      if (!ip || ip === '127.0.0.1' || ip === 'local' || ip === '-') {
+        showToast('No external IP target associated with incident', 'info');
+        return;
+      }
+      showToast(`Filtering live telemetry stream for ${ip}...`, 'info', 'Telemetry Query');
+      const searchBox = document.getElementById('search-box');
+      if (searchBox) {
+        searchBox.value = `ip:${ip}`;
+        searchBox.dispatchEvent(new Event('input'));
+      }
+    }
+
+    function revalidateFIMKernel() {
+      showToast('Swarm-wide eBPF Kernel & FIM integrity verification initiated', 'success', 'FIM Guard');
+      fetch('/api/security/fim').catch(() => {});
+    }
+
     function populateDrawerPlaybook(ev) {
       if (!ev) return;
       const mitre = (ev.mitre_technique_id || 'T1190').toUpperCase();
@@ -3502,19 +3520,65 @@
       const rule = (ev.rule_id || '').toLowerCase();
       const incidentId = ev.id || 'current';
 
+      // Restore persisted playbook progress if available
+      if (ev.playbook_progress) {
+        try {
+          const savedPb = typeof ev.playbook_progress === 'string' ? JSON.parse(ev.playbook_progress) : ev.playbook_progress;
+          if (typeof savedPb === 'object' && savedPb !== null) {
+            for (const k in savedPb) {
+              playbookStepState[`pb-${incidentId}-${k}`] = !!savedPb[k];
+            }
+          }
+        } catch(e) {}
+      }
+
       // Set Playbook Header MITRE ID
       const mitreEl = document.getElementById('drawer-playbook-mitre');
       if (mitreEl) mitreEl.textContent = mitre;
 
       let steps = [];
 
-      if (mitre.startsWith('T1078') || rule.includes('auth') || rule.includes('pam') || rule.includes('ssh')) {
-        // T1078 / SSH & PAM Brute Force Playbook
+      if (mitre.startsWith('T1110') || (rule.includes('brute') || rule.includes('spray') || rule.includes('auth_fail'))) {
+        // T1110 / Brute Force & Credential Spraying Playbook
+        steps = [
+          {
+            badge: 'STEP 1: TRIAGE',
+            title: 'Analyze Authentication Failure Velocity',
+            desc: `Inspect rate of authentication attempts from ${ip}: <code>grep '${ip}' /var/log/auth.log | grep -E 'Failed password|authentication failure' | tail -n 20</code>`,
+            actions: [
+              { label: '🔍 Pull Access Logs', fn: `pullIncidentAccessLogs('${ip}')`, cls: 'btn-triage-report' }
+            ]
+          },
+          {
+            badge: 'STEP 2: SCOPE',
+            title: 'Verify Targeted Accounts & Breach Status',
+            desc: `Check if any targeted accounts were successfully accessed from attacker IP: <code>grep '${ip}' /var/log/auth.log | grep 'Accepted'</code>`
+          },
+          {
+            badge: 'STEP 3: CONTAINMENT',
+            title: 'Enforce Immediate Swarm Quarantine & Drop',
+            desc: 'Enforce kernel XDP fast-path drop rule and trap active sockets in Zero-Window Tarpit.',
+            actions: [
+              { label: '⚡ Enforce Swarm Drop', fn: `triageQuickBan('${ip}')`, cls: 'btn-triage-ban' },
+              { label: '🕳️ Route to Tarpit', fn: `triageSendTarpit('${ip}')`, cls: 'btn-triage-tarpit' }
+            ]
+          },
+          {
+            badge: 'STEP 4: ERADICATION',
+            title: 'Lock Affected Accounts & Enforce MFA',
+            desc: 'Temporary lockout targeted accounts (passwd -l), invalidate existing sessions, and verify fail2ban/pam rate-limiting.'
+          }
+        ];
+      } else if (mitre.startsWith('T1078') || rule.includes('pam') || rule.includes('ssh') || rule.includes('valid_accounts')) {
+        // T1078 / Valid Accounts & SSH Credential Abuse Playbook
         steps = [
           {
             badge: 'STEP 1: TRIAGE',
             title: 'Verify Authentication Audit Logs',
-            desc: `Inspect /var/log/auth.log or journalctl for successful logon sessions originated from ${ip} following failed bursts: <code>grep -E 'Accepted|session opened' /var/log/auth.log | grep '${ip}'</code>`
+            desc: `Inspect /var/log/auth.log or journalctl for successful logon sessions originated from ${ip}: <code>grep -E 'Accepted|session opened' /var/log/auth.log | grep '${ip}'</code>`,
+            actions: [
+              { label: '🔍 Pull Access Logs', fn: `pullIncidentAccessLogs('${ip}')`, cls: 'btn-triage-report' }
+            ]
           },
           {
             badge: 'STEP 2: SCOPE',
@@ -3526,8 +3590,8 @@
             title: 'Isolate Attacker IP & Terminate Open Sockets',
             desc: 'Enforce kernel XDP fast-path drop rule and terminate active TCP connections.',
             actions: [
-              { label: '⚡ Enforce XDP Fleet Drop', fn: `triageQuickBan('${ip}')`, cls: 'btn-triage-ban' },
-              { label: '🕳️ Trap in Tarpit', fn: `triageSendTarpit('${ip}')`, cls: 'btn-triage-tarpit' }
+              { label: '⚡ Enforce Swarm Drop', fn: `triageQuickBan('${ip}')`, cls: 'btn-triage-ban' },
+              { label: '🕳️ Route to Tarpit', fn: `triageSendTarpit('${ip}')`, cls: 'btn-triage-tarpit' }
             ]
           },
           {
@@ -3537,12 +3601,15 @@
           }
         ];
       } else if (mitre.startsWith('T1059') || rule.includes('revshell') || rule.includes('rce') || rule.includes('exec')) {
-        // T1059 / Command Execution & Reverse Shell Playbook
+        // T1059 / Command and Scripting Interpreter & Reverse Shell Playbook
         steps = [
           {
             badge: 'STEP 1: TRIAGE',
             title: 'Inspect Process Tree & Command Lineage',
-            desc: `Check active processes spawned by web server / unprivileged daemons: <code>ps auxf | grep -E 'sh|bash|python|perl|nc'</code>`
+            desc: `Check active processes spawned by web server / unprivileged daemons: <code>ps auxf | grep -E 'sh|bash|python|perl|nc'</code>`,
+            actions: [
+              { label: '🧠 Run AI Forensics', fn: `triageAIReport(0)`, cls: 'btn-triage-report' }
+            ]
           },
           {
             badge: 'STEP 2: SCOPE',
@@ -3552,10 +3619,10 @@
           {
             badge: 'STEP 3: CONTAINMENT',
             title: 'Enforce Immediate Swarm Quarantine',
-            desc: 'Enforce zero-trust network quarantine and trigger AI forensic brief.',
+            desc: 'Enforce zero-trust network quarantine and isolate rogue process socket.',
             actions: [
-              { label: '⚡ Enforce XDP Fleet Drop', fn: `triageQuickBan('${ip}')`, cls: 'btn-triage-ban' },
-              { label: '🧠 Run AI Root Cause', fn: `triageAIReport(0)`, cls: 'btn-triage-report' }
+              { label: '⚡ Enforce Swarm Drop', fn: `triageQuickBan('${ip}')`, cls: 'btn-triage-ban' },
+              { label: '🕳️ Route to Tarpit', fn: `triageSendTarpit('${ip}')`, cls: 'btn-triage-tarpit' }
             ]
           },
           {
@@ -3564,25 +3631,60 @@
             desc: 'Audit /tmp, /dev/shm, /var/tmp, crontabs (crontab -l, /etc/cron.*), and systemd services for rogue persistence scripts.'
           }
         ];
+      } else if (mitre.startsWith('T1071') || ev.ml_anomaly || rule.includes('c2') || rule.includes('beacon')) {
+        // T1071 / Application Layer Protocol & Flow ML Anomaly Playbook
+        steps = [
+          {
+            badge: 'STEP 1: TRIAGE',
+            title: 'Evaluate Shannon Entropy & Flow Distribution',
+            desc: `Review statistical payload entropy and packet distribution score: <code>ss -tulpn | grep '${ip}'</code>`,
+            actions: [
+              { label: '🧠 Run AI Forensics', fn: `triageAIReport(0)`, cls: 'btn-triage-report' }
+            ]
+          },
+          {
+            badge: 'STEP 2: SCOPE',
+            title: 'Correlate C2 Beaconing Frequency & Jitter',
+            desc: 'Inspect periodic heartbeat intervals and check for DNS tunneling / HTTP beaconing payloads.'
+          },
+          {
+            badge: 'STEP 3: CONTAINMENT',
+            title: 'Drop Malicious C2 Traffic at Kernel XDP Layer',
+            desc: 'Inject IP into kernel XDP ring-buffer filter across all nodes.',
+            actions: [
+              { label: '⚡ Enforce Swarm Drop', fn: `triageQuickBan('${ip}')`, cls: 'btn-triage-ban' },
+              { label: '🕳️ Route to Tarpit', fn: `triageSendTarpit('${ip}')`, cls: 'btn-triage-tarpit' }
+            ]
+          },
+          {
+            badge: 'STEP 4: ERADICATION',
+            title: 'Sinkhole Domain on Local DNS Resolver',
+            desc: 'Add beaconing domain to CoPSeC DNS sinkhole filter and purge local resolver cache.'
+          }
+        ];
       } else if (mitre.startsWith('T1014') || rule.includes('rootkit') || rule.includes('ptrace') || rule.includes('fim')) {
-        // T1014 / Kernel & FIM Integrity Playbook
+        // T1014 / Rootkit & Kernel / Module Tampering Playbook
         steps = [
           {
             badge: 'STEP 1: TRIAGE',
             title: 'Audit eBPF Kernel Hooks & Module Symbols',
-            desc: 'Inspect /proc/modules and kernel ring buffer for tainted flags: <code>dmesg -T | grep -E "taint|module|hook"</code>'
+            desc: 'Inspect /proc/modules and kernel ring buffer for tainted flags: <code>dmesg -T | grep -E "taint|module|hook"</code>',
+            actions: [
+              { label: '🛡️ Re-Validate FIM / Kernel', fn: `revalidateFIMKernel()`, cls: 'btn-triage-report' }
+            ]
           },
           {
             badge: 'STEP 2: SCOPE',
             title: 'Verify File Integrity Hashes',
-            desc: 'Verify SHA256 integrity of system binaries in /bin, /sbin, /usr/bin against package manager baselines.'
+            desc: 'Verify SHA256 integrity of system binaries in /bin, /sbin, /usr/bin against package manager baselines (dpkg -V / rpm -V).'
           },
           {
             badge: 'STEP 3: CONTAINMENT',
             title: 'Trigger FIM Self-Healing Restoration',
             desc: 'Re-sync critical files from immutable controller snapshot store and enforce process termination.',
             actions: [
-              { label: '🛡️ Re-Validate FIM / Kernel', fn: `showToast('FIM Integrity scan initiated swarm-wide', 'success', 'FIM Guard')`, cls: 'btn-triage-report' }
+              { label: '🛡️ Re-Validate FIM / Kernel', fn: `revalidateFIMKernel()`, cls: 'btn-triage-report' },
+              { label: '⚡ Enforce Swarm Drop', fn: `triageQuickBan('${ip}')`, cls: 'btn-triage-ban' }
             ]
           },
           {
@@ -3592,12 +3694,15 @@
           }
         ];
       } else {
-        // T1190 / Generic Web & Network Exploit Playbook
+        // T1190 / Exploit Public-Facing Application Playbook (Default)
         steps = [
           {
             badge: 'STEP 1: TRIAGE',
             title: 'Inspect Target Web Application Logs',
-            desc: `Correlate request URI in web server access log around timestamp: <code>grep '${ip}' /var/log/nginx/access.log | tail -n 25</code>`
+            desc: `Correlate request URI in web server access log around timestamp: <code>grep '${ip}' /var/log/nginx/access.log | tail -n 25</code>`,
+            actions: [
+              { label: '🔍 Pull Access Logs', fn: `pullIncidentAccessLogs('${ip}')`, cls: 'btn-triage-report' }
+            ]
           },
           {
             badge: 'STEP 2: SCOPE',
@@ -3607,10 +3712,10 @@
           {
             badge: 'STEP 3: CONTAINMENT',
             title: 'Enforce Fleet-Wide Edge Isolation',
-            desc: 'Inject IP into kernel XDP ring-buffer filter across all nodes.',
+            desc: 'Inject IP into kernel XDP ring-buffer filter across all nodes and trap connection in Tarpit.',
             actions: [
-              { label: '⚡ Enforce XDP Fleet Drop', fn: `triageQuickBan('${ip}')`, cls: 'btn-triage-ban' },
-              { label: '🕳️ Trap in Tarpit', fn: `triageSendTarpit('${ip}')`, cls: 'btn-triage-tarpit' },
+              { label: '⚡ Enforce Swarm Drop', fn: `triageQuickBan('${ip}')`, cls: 'btn-triage-ban' },
+              { label: '🕳️ Route to Tarpit', fn: `triageSendTarpit('${ip}')`, cls: 'btn-triage-tarpit' },
               { label: '🧠 Run AI Forensics', fn: `triageAIReport(0)`, cls: 'btn-triage-report' }
             ]
           },
@@ -3636,7 +3741,7 @@
             <div id="${stepKey}" class="playbook-step-card ${isDone ? 'completed' : ''}">
               <div class="playbook-step-top">
                 <div class="playbook-step-left">
-                  <input type="checkbox" style="cursor: pointer; accent-color: #10b981;" onchange="togglePlaybookStep('${stepKey}', this)" ${isDone ? 'checked' : ''}>
+                  <input type="checkbox" style="cursor: pointer; accent-color: #10b981;" onchange="togglePlaybookStep('${stepKey}', this, ${idx})" ${isDone ? 'checked' : ''}>
                   <span class="playbook-step-badge">${step.badge}</span>
                   <span class="playbook-step-title">${escapeHtml(step.title)}</span>
                 </div>
@@ -3651,7 +3756,7 @@
       updatePlaybookProgress(incidentId, steps.length);
     }
 
-    function togglePlaybookStep(stepKey, checkboxEl) {
+    function togglePlaybookStep(stepKey, checkboxEl, stepIdx) {
       playbookStepState[stepKey] = checkboxEl.checked;
       const card = document.getElementById(stepKey);
       if (card) {
@@ -3663,6 +3768,22 @@
       }
       const incidentId = currentDrawerEvent ? (currentDrawerEvent.id || 'current') : 'current';
       updatePlaybookProgress(incidentId, 4);
+
+      // Persist playbook progress to backend
+      let progressMap = {};
+      for (let i = 0; i < 4; i++) {
+        progressMap[String(i)] = !!playbookStepState[`pb-${incidentId}-${i}`];
+      }
+      if (currentDrawerEvent) {
+        currentDrawerEvent.playbook_progress = JSON.stringify(progressMap);
+      }
+      if (incidentId && incidentId !== 'current') {
+        fetch('/api/alerts/notes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ incident_id: incidentId, playbook_progress: JSON.stringify(progressMap) })
+        }).catch(() => {});
+      }
     }
 
     function updatePlaybookProgress(incidentId, totalSteps) {
@@ -3707,18 +3828,20 @@
         if (!currentDrawerEvent) return;
         currentDrawerEvent.analyst_notes = val;
 
+        const incidentId = currentDrawerEvent.id || 0;
+
         // Also update matching items in activeAlerts / eventsLog
-        if (currentDrawerEvent.id) {
-          const matchAlert = activeAlerts.find(a => a.id === currentDrawerEvent.id);
+        if (incidentId) {
+          const matchAlert = activeAlerts.find(a => a.id === incidentId);
           if (matchAlert) matchAlert.analyst_notes = val;
-          const matchEv = eventsLog.find(e => e.id === currentDrawerEvent.id);
+          const matchEv = eventsLog.find(e => e.id === incidentId);
           if (matchEv) matchEv.analyst_notes = val;
         }
 
-        fetch('/api/events/notes', {
+        fetch('/api/alerts/notes', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: currentDrawerEvent.id || 0, notes: val })
+          body: JSON.stringify({ incident_id: incidentId, id: incidentId, notes: val })
         })
         .then(res => res.json())
         .then(data => {
