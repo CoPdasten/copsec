@@ -288,6 +288,104 @@
       color: #fff;
     }
 
+    /* Triage Filter Chips */
+    .triage-filter-chips-container {
+      display: flex;
+      gap: 0.4rem;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-bottom: 0.75rem;
+    }
+    .triage-chip {
+      padding: 0.3rem 0.75rem;
+      font-size: 0.72rem;
+      font-weight: 700;
+      font-family: var(--font-mono);
+      background: rgba(15, 23, 42, 0.8);
+      color: #94a3b8;
+      border: 1px solid var(--border-color);
+      border-radius: 20px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+    .triage-chip:hover {
+      border-color: var(--cyan);
+      color: #fff;
+      box-shadow: 0 0 8px rgba(0, 243, 255, 0.3);
+    }
+    .triage-chip.active {
+      background: rgba(0, 243, 255, 0.15);
+      border-color: var(--cyan);
+      color: var(--cyan);
+      box-shadow: 0 0 10px var(--cyan-glow);
+    }
+    .triage-chip.chip-crit.active {
+      background: rgba(244, 63, 94, 0.2);
+      border-color: #f43f5e;
+      color: #f43f5e;
+      box-shadow: 0 0 10px rgba(244, 63, 94, 0.4);
+    }
+
+    /* Repeat Count Multiplier Pill */
+    .repeat-count-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.2rem;
+      padding: 0.12rem 0.45rem;
+      font-size: 0.65rem;
+      font-weight: 800;
+      font-family: var(--font-mono);
+      background: linear-gradient(135deg, rgba(239, 68, 68, 0.3), rgba(249, 115, 22, 0.3));
+      color: #fca5a5;
+      border: 1px solid rgba(239, 68, 68, 0.6);
+      border-radius: 12px;
+      margin-left: 0.4rem;
+      animation: pulseGlow 2s infinite;
+    }
+    @keyframes pulseGlow {
+      0%, 100% { box-shadow: 0 0 4px rgba(239, 68, 68, 0.4); }
+      50% { box-shadow: 0 0 10px rgba(239, 68, 68, 0.8); }
+    }
+
+    /* Critical Row Pulsing & Smooth Resolving Animation */
+    .row-critical-pulsing {
+      box-shadow: inset 0 0 12px rgba(244, 63, 94, 0.2);
+      border-left: 3px solid #f43f5e !important;
+    }
+    .row-resolving {
+      opacity: 0 !important;
+      transform: translateX(40px) !important;
+      transition: all 0.35s ease !important;
+    }
+
+    /* Threat Arcs & SVG Map Tooltip */
+    .threat-arc {
+      stroke-dasharray: 6 3;
+      animation: threatDash 1.5s linear infinite;
+    }
+    @keyframes threatDash {
+      from { stroke-dashoffset: 18; }
+      to { stroke-dashoffset: 0; }
+    }
+    .svg-map-tooltip {
+      position: absolute;
+      background: rgba(9, 14, 28, 0.95);
+      border: 1px solid var(--cyan);
+      box-shadow: 0 0 15px var(--cyan-glow);
+      border-radius: 6px;
+      padding: 0.5rem 0.8rem;
+      color: #fff;
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      pointer-events: none;
+      z-index: 1000;
+      display: none;
+      white-space: nowrap;
+    }
+
     /* Main Container */
     main {
       padding: 1.25rem 1.5rem;
@@ -1008,6 +1106,16 @@
         </div>
       </div>
 
+      <!-- Live Triage Filter Chips -->
+      <div class="triage-filter-chips-container">
+        <span style="font-size: 0.72rem; color: var(--text-muted); font-family: var(--font-mono); margin-right: 0.4rem; font-weight: 700;">TRIAGE FILTER:</span>
+        <button class="triage-chip active" id="chip-filter-all" onclick="setTriageChip('ALL')">🌐 All Alerts</button>
+        <button class="triage-chip chip-crit" id="chip-filter-unmitigated" onclick="setTriageChip('UNMITIGATED')">🚨 Unmitigated</button>
+        <button class="triage-chip" id="chip-filter-contained" onclick="setTriageChip('CONTAINED')">🛡️ Banned / Contained</button>
+        <button class="triage-chip" id="chip-filter-host" onclick="setTriageChip('HOST_LOCAL')">🖥️ Host Local</button>
+        <button class="triage-chip chip-crit" id="chip-filter-critical" onclick="setTriageChip('CRITICAL')">🔥 Critical (85+)</button>
+      </div>
+
       <!-- Triage Cockpit Grid Card -->
       <div class="card">
         <div class="card-header">
@@ -1017,35 +1125,35 @@
               ANALYST-FIRST INCIDENT MATRIX // REAL-TIME ZERO-LATENCY CONTAINMENT
             </div>
           </div>
-          <div style="display: flex; gap: 0.5rem; align-items: center;">
-            <select id="triage-severity-filter" class="cyber-input" style="width: 150px;" onchange="renderAlertsGrid()">
+          <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+            <select id="triage-severity-filter" class="cyber-input" style="width: 140px;" onchange="renderAlertsGrid()">
               <option value="ALL">All Severities</option>
-              <option value="CRITICAL">Critical (95+)</option>
-              <option value="HIGH">High (70-94)</option>
+              <option value="CRITICAL">Critical (85+)</option>
+              <option value="HIGH">High (70-84)</option>
               <option value="ANOMALY">ML / Snort Anomaly</option>
               <option value="HOST_LOCAL">Host / Local Scope</option>
             </select>
-            <select id="triage-containment-filter" class="cyber-input" style="width: 150px;" onchange="renderAlertsGrid()">
+            <select id="triage-containment-filter" class="cyber-input" style="width: 140px;" onchange="renderAlertsGrid()">
               <option value="ALL">All States</option>
               <option value="UNMITIGATED">⚠️ Unmitigated</option>
               <option value="BANNED">🔒 Banned (XDP)</option>
               <option value="CONTAINED">🛡️ Host Contained</option>
             </select>
-            <input type="text" id="triage-search-input" class="cyber-input" placeholder="Search actor, rule, MITRE, node..." style="width: 240px;" onkeyup="renderAlertsGrid()">
+            <input type="text" id="triage-search-input" class="cyber-input" placeholder="🔍 Search IP, Country, ASN, MITRE, Rule..." style="width: 250px;" onkeyup="renderAlertsGrid()">
             <button class="btn" onclick="refreshAlerts()">🔄 Refresh</button>
-            <button class="btn btn-outline" onclick="clearDismissedAlerts()">🧹 Clear Dismissed</button>
+            <button class="btn btn-outline" onclick="clearDismissedAlerts()">🧹 Clear Contained</button>
           </div>
         </div>
         <div class="table-container">
           <table>
             <thead>
               <tr>
-                <th style="width: 120px;">Severity</th>
-                <th style="width: 130px;">Time / Sensor</th>
-                <th style="width: 200px;">Threat Actor / Entity</th>
-                <th style="width: 230px;">Detection Vector & MITRE</th>
-                <th style="width: 140px;">Containment State</th>
-                <th>One-Click Analyst Actions</th>
+                <th style="width: 125px;">Severity</th>
+                <th style="width: 140px;">Time / Sensor</th>
+                <th style="width: 220px;">Threat Actor / Entity</th>
+                <th style="width: 240px;">Detection Vector & MITRE</th>
+                <th style="width: 150px;">Containment State</th>
+                <th>Unified Action Control Strip</th>
               </tr>
             </thead>
             <tbody id="alerts-tbody">
@@ -1646,6 +1754,8 @@
     </div>
   </div>
 
+  <div id="svg-map-tooltip" class="svg-map-tooltip"></div>
+
   <script>
     // State Store
     let ws = null;
@@ -1890,12 +2000,67 @@
       return `${Math.floor(diffHr / 24)}d ago`;
     }
 
-    function addActiveAlert(ev) {
-      if (ev.id && activeAlerts.some(a => a.id === ev.id)) {
-        return;
+    let currentTriageChip = 'ALL';
+
+    function setTriageChip(chip) {
+      currentTriageChip = chip;
+      document.querySelectorAll('.triage-chip').forEach(c => c.classList.remove('active'));
+      const activeEl = document.getElementById(`chip-filter-${chip.toLowerCase()}`);
+      if (activeEl) activeEl.classList.add('active');
+
+      const sevSelect = document.getElementById('triage-severity-filter');
+      const stateSelect = document.getElementById('triage-containment-filter');
+      if (sevSelect && stateSelect) {
+        if (chip === 'ALL') {
+          sevSelect.value = 'ALL';
+          stateSelect.value = 'ALL';
+        } else if (chip === 'UNMITIGATED') {
+          sevSelect.value = 'ALL';
+          stateSelect.value = 'UNMITIGATED';
+        } else if (chip === 'CONTAINED') {
+          sevSelect.value = 'ALL';
+          stateSelect.value = 'CONTAINED';
+        } else if (chip === 'HOST_LOCAL') {
+          sevSelect.value = 'HOST_LOCAL';
+          stateSelect.value = 'ALL';
+        } else if (chip === 'CRITICAL') {
+          sevSelect.value = 'CRITICAL';
+          stateSelect.value = 'ALL';
+        }
       }
-      activeAlerts.unshift(ev);
-      if (activeAlerts.length > 200) activeAlerts.pop();
+      renderAlertsGrid();
+    }
+
+    function addActiveAlert(ev) {
+      if (!ev) return;
+      const cleanIP = ev.client_ip || '';
+      const rule = ev.rule_id || '';
+      const now = Date.now();
+
+      // Sliding-window alert deduplication & event grouping (5-minute window)
+      const existingIdx = activeAlerts.findIndex(a => 
+        (cleanIP !== '' && a.client_ip === cleanIP && a.rule_id === rule) || (a.id && ev.id && a.id === ev.id)
+      );
+
+      if (existingIdx !== -1) {
+        const existing = activeAlerts[existingIdx];
+        existing.repeat_count = (existing.repeat_count || 1) + 1;
+        existing.timestamp_ms = ev.timestamp_ms || now;
+        existing.threat_score = Math.max(existing.threat_score || 0, ev.threat_score || 0);
+        existing.raw_line = ev.raw_line || existing.raw_line;
+        if (ev.containment_state) existing.containment_state = ev.containment_state;
+        
+        // Move to top of active alerts list
+        activeAlerts.splice(existingIdx, 1);
+        activeAlerts.unshift(existing);
+      } else {
+        ev.repeat_count = ev.repeat_count || 1;
+        ev.first_seen_ms = ev.first_seen_ms || ev.timestamp_ms || now;
+        ev.last_seen_ms = ev.last_seen_ms || ev.timestamp_ms || now;
+        ev.peak_score = ev.peak_score || ev.threat_score || 0;
+        activeAlerts.unshift(ev);
+        if (activeAlerts.length > 250) activeAlerts.pop();
+      }
 
       updateTriageStats();
       renderAlertsGrid();
@@ -1917,7 +2082,7 @@
       activeAlerts.forEach(a => {
         const score = a.threat_score || 0;
         const rule = (a.rule_id || '').toLowerCase();
-        if (score >= 95) critCount++;
+        if (score >= 85) critCount++;
         else if (score >= 70) highCount++;
 
         if (a.ml_anomaly || a.snort_ml) mlCount++;
@@ -1979,23 +2144,26 @@
         const ip = (a.client_ip || '').toLowerCase();
         const node = (a.node_id || '').toLowerCase();
         const mitre = (a.mitre_technique_id || '').toLowerCase();
+        const country = (a.country_name || a.country_code || '').toLowerCase();
+        const asn = (a.asn || '').toLowerCase();
         const raw = (a.raw_line || '').toLowerCase();
         const state = getContainmentState(a);
 
         // Severity filter
-        if (sevFilter === 'CRITICAL' && score < 95) return false;
-        if (sevFilter === 'HIGH' && (score < 70 || score >= 95)) return false;
+        if (sevFilter === 'CRITICAL' && score < 85) return false;
+        if (sevFilter === 'HIGH' && (score < 70 || score >= 85)) return false;
         if (sevFilter === 'ANOMALY' && !a.ml_anomaly && !a.snort_ml) return false;
-        if (sevFilter === 'HOST_LOCAL' && state !== 'HOST CONTAINED') return false;
+        if (sevFilter === 'HOST_LOCAL' && state !== 'HOST CONTAINED' && a.client_ip !== '127.0.0.1' && a.client_ip !== 'local') return false;
 
         // Containment filter
         if (stateFilter === 'UNMITIGATED' && state !== 'UNMITIGATED') return false;
         if (stateFilter === 'BANNED' && state !== 'BANNED (XDP)') return false;
-        if (stateFilter === 'CONTAINED' && state !== 'HOST CONTAINED') return false;
+        if (stateFilter === 'CONTAINED' && state !== 'HOST CONTAINED' && state !== 'BANNED (XDP)') return false;
 
-        // Search filter
+        // Live Regex / String Search filter
         if (searchStr) {
-          const match = ip.includes(searchStr) || rule.includes(searchStr) || node.includes(searchStr) || mitre.includes(searchStr) || raw.includes(searchStr);
+          const match = ip.includes(searchStr) || rule.includes(searchStr) || node.includes(searchStr) ||
+            mitre.includes(searchStr) || country.includes(searchStr) || asn.includes(searchStr) || raw.includes(searchStr);
           if (!match) return false;
         }
 
@@ -2013,10 +2181,17 @@
         const relTime = formatRelativeTime(a.timestamp_ms);
         const nodeLabel = a.node_id || 'controller';
         const isHost = state === 'HOST CONTAINED' || a.client_ip === '127.0.0.1' || a.client_ip === 'local';
+        const isCrit = score >= 85;
+
+        // Repeat multiplier badge
+        let repeatBadge = '';
+        if (a.repeat_count && a.repeat_count > 1) {
+          repeatBadge = `<span class="repeat-count-pill" title="${a.repeat_count} deduplicated events within 5-min sliding window">🔥 ${a.repeat_count}x Events</span>`;
+        }
 
         // 1. Severity Badge
         let sevBadge = '';
-        if (score >= 95) {
+        if (score >= 85) {
           sevBadge = `<span class="badge badge-critical" style="background: rgba(244, 63, 94, 0.25); color: #f43f5e; border: 1px solid #f43f5e; font-weight: 800; animation: pulse 1.5s infinite;">CRITICAL (${score})</span>`;
         } else if (score >= 70) {
           sevBadge = `<span class="badge badge-high" style="background: rgba(249, 115, 22, 0.25); color: #f97316; border: 1px solid #f97316; font-weight: 700;">HIGH (${score})</span>`;
@@ -2033,8 +2208,8 @@
           actorHtml = `<span class="badge" style="background: rgba(59, 130, 246, 0.2); color: #60a5fa; border: 1px solid #3b82f6; font-weight: 700;">🖥️ HOST / LOCAL</span>`;
         } else {
           const flag = a.flag_emoji || '🌐';
-          const asn = a.asn ? `<span class="chip chip-proto" style="margin-left: 0.3rem;">${escapeHtml(a.asn)}</span>` : '';
-          actorHtml = `<span class="ip-chip">${escapeHtml(flag)} ${escapeHtml(a.client_ip || '-')}</span>${asn}`;
+          const asn = a.asn ? `<span class="chip chip-proto" style="margin-left: 0.3rem;" title="${escapeHtml(a.asn)}">${escapeHtml(a.asn.length > 22 ? a.asn.substring(0, 22) + '...' : a.asn)}</span>` : '';
+          actorHtml = `<span class="ip-chip" onclick="openPayloadDrawerById(${a.id || 0})" style="cursor: pointer;" title="Inspect incident payload">${escapeHtml(flag)} ${escapeHtml(a.client_ip || '-')}${repeatBadge}</span>${asn}`;
         }
 
         // 3. Detection Vector & MITRE ID
@@ -2061,17 +2236,18 @@
           containmentBadge = `<span class="badge badge-critical" style="background: rgba(239, 68, 68, 0.25); color: #ef4444; border: 1px solid #ef4444; font-weight: 700; animation: pulse 1.5s infinite;">⚠️ UNMITIGATED</span>`;
         }
 
-        // 5. One-Click Analyst Actions
+        // 5. Unified Action Control Strip
         let actionButtons = '';
         if (!isHost && a.client_ip && a.client_ip !== '-') {
-          actionButtons += `<button class="btn-triage-xs btn-triage-ban" onclick="triageQuickBan('${escapeHtml(a.client_ip)}')">⚡ Ban Fleet</button>`;
-          actionButtons += `<button class="btn-triage-xs btn-triage-tarpit" onclick="triageSendTarpit('${escapeHtml(a.client_ip)}')">🕳️ Tarpit</button>`;
+          actionButtons += `<button class="btn-triage-xs btn-triage-ban" onclick="triageQuickBan('${escapeHtml(a.client_ip)}')">⚡ XDP Ban Fleet</button>`;
+          actionButtons += `<button class="btn-triage-xs btn-triage-tarpit" onclick="triageSendTarpit('${escapeHtml(a.client_ip)}')">🕳️ Trap in Tarpit</button>`;
         }
-        actionButtons += `<button class="btn-triage-xs btn-triage-report" onclick="triageAIReport(${idx})">📄 AI Report</button>`;
-        actionButtons += `<button class="btn-triage-xs btn-triage-dismiss" onclick="triageDismiss(${idx}, '${escapeHtml(a.client_ip)}')">✅ Resolve</button>`;
+        actionButtons += `<button class="btn-triage-xs btn-triage-report" onclick="triageAIReport(${idx})">🧠 AI Forensics</button>`;
+        actionButtons += `<button class="btn-triage-xs btn-triage-dismiss" onclick="triageDismiss(${idx}, '${escapeHtml(a.client_ip)}', this)">✅ Resolve / FP</button>`;
 
+        const rowClasses = `incident-row ${isCrit ? 'row-crit row-critical-pulsing' : (score >= 70 ? 'row-high' : 'row-med')}`;
         return `
-          <tr class="incident-row ${score >= 80 ? 'row-crit' : (score >= 50 ? 'row-high' : 'row-med')}">
+          <tr id="triage-row-${idx}" class="${rowClasses}">
             <td>${sevBadge}</td>
             <td>
               <div style="font-family: var(--font-mono); font-size: 0.78rem; font-weight: 700; color: #cbd5e1;">${escapeHtml(relTime)}</div>
@@ -2142,12 +2318,20 @@
       openAIReportModal(alert.client_ip, alert.rule_id, alert.mitre_technique_id, alert.threat_score, alert.id);
     }
 
-    function triageDismiss(index, ip) {
-      if (index >= 0 && index < activeAlerts.length) {
-        activeAlerts.splice(index, 1);
-        updateTriageStats();
-        renderAlertsGrid();
+    function triageDismiss(index, ip, btnEl) {
+      const row = btnEl ? btnEl.closest('tr') : document.getElementById(`triage-row-${index}`);
+      if (row) {
+        row.classList.add('row-resolving');
       }
+
+      setTimeout(() => {
+        if (index >= 0 && index < activeAlerts.length) {
+          activeAlerts.splice(index, 1);
+          updateTriageStats();
+          renderAlertsGrid();
+        }
+      }, 350);
+
       if (ip && ip !== '127.0.0.1' && ip !== 'local') {
         fetch('/api/alerts/triage', {
           method: 'POST',
@@ -2155,7 +2339,7 @@
           body: JSON.stringify({ action: 'dismiss', ip: ip })
         }).catch(() => {});
       }
-      showToast('Alert dismissed and entity threat decayed', 'info', 'Triage Complete');
+      showToast('Incident resolved and entity threat score decayed', 'info', 'Triage Complete');
     }
 
     function clearDismissedAlerts() {
@@ -2534,22 +2718,54 @@
 
     // GeoIP Attack Origin Radar / World Density Matrix
     const COUNTRY_COORDS = {
-      'US': { lat: 38.8951, lon: -77.0364 },
-      'CA': { lat: 45.5017, lon: -73.5673 },
-      'DE': { lat: 50.1109, lon: 8.6821 },
-      'FR': { lat: 48.8566, lon: 2.3522 },
-      'GB': { lat: 51.5074, lon: -0.1278 },
-      'NL': { lat: 52.3676, lon: 4.9041 },
-      'RU': { lat: 55.7558, lon: 37.6173 },
-      'TR': { lat: 41.0082, lon: 28.9784 },
-      'CN': { lat: 39.9042, lon: 116.4074 },
-      'JP': { lat: 35.6762, lon: 139.6503 },
-      'IN': { lat: 19.0760, lon: 72.8777 },
-      'BR': { lat: -22.9068, lon: -43.1729 },
-      'AU': { lat: -33.8688, lon: 151.2093 },
-      'SG': { lat: 1.3521, lon: 103.8198 },
-      'FI': { lat: 60.1699, lon: 24.9384 }
+      'US': { lat: 38.8951, lon: -77.0364, name: 'United States' },
+      'CA': { lat: 45.5017, lon: -73.5673, name: 'Canada' },
+      'DE': { lat: 50.1109, lon: 8.6821, name: 'Germany' },
+      'FR': { lat: 48.8566, lon: 2.3522, name: 'France' },
+      'GB': { lat: 51.5074, lon: -0.1278, name: 'United Kingdom' },
+      'NL': { lat: 52.3676, lon: 4.9041, name: 'The Netherlands' },
+      'RU': { lat: 55.7558, lon: 37.6173, name: 'Russia' },
+      'TR': { lat: 41.0082, lon: 28.9784, name: 'Turkey' },
+      'CN': { lat: 39.9042, lon: 116.4074, name: 'China' },
+      'JP': { lat: 35.6762, lon: 139.6503, name: 'Japan' },
+      'IN': { lat: 19.0760, lon: 72.8777, name: 'India' },
+      'BR': { lat: -22.9068, lon: -43.1729, name: 'Brazil' },
+      'AU': { lat: -33.8688, lon: 151.2093, name: 'Australia' },
+      'SG': { lat: 1.3521, lon: 103.8198, name: 'Singapore' },
+      'FI': { lat: 60.1699, lon: 24.9384, name: 'Finland' },
+      'SE': { lat: 59.3293, lon: 18.0686, name: 'Sweden' },
+      'UA': { lat: 50.4501, lon: 30.5234, name: 'Ukraine' },
+      'KR': { lat: 37.5665, lon: 126.9780, name: 'South Korea' },
+      'IT': { lat: 41.9028, lon: 12.4964, name: 'Italy' },
+      'ES': { lat: 40.4168, lon: -3.7038, name: 'Spain' },
+      'PL': { lat: 52.2297, lon: 21.0122, name: 'Poland' },
+      'IR': { lat: 35.6892, lon: 51.3890, name: 'Iran' },
+      'IL': { lat: 31.7683, lon: 35.2137, name: 'Israel' },
+      'ZA': { lat: -33.9249, lon: 18.4241, name: 'South Africa' },
+      'RO': { lat: 44.4268, lon: 26.1025, name: 'Romania' },
+      'BG': { lat: 42.6977, lon: 23.3219, name: 'Bulgaria' },
+      'CZ': { lat: 50.0755, lon: 14.4378, name: 'Czechia' },
+      'AT': { lat: 48.2082, lon: 16.3738, name: 'Austria' },
+      'CH': { lat: 46.9480, lon: 7.4474, name: 'Switzerland' }
     };
+
+    function showMapTooltip(e, country, code, hits, flag, ip, org) {
+      const tt = document.getElementById('svg-map-tooltip');
+      if (!tt) return;
+      let content = `<strong>${flag} ${country || code}</strong>`;
+      if (ip) content += `<br/><span style="color:var(--cyan)">IP: ${ip}</span>`;
+      if (org) content += `<br/><span style="color:#94a3b8">ASN: ${org}</span>`;
+      content += `<br/><span style="color:#f43f5e; font-weight: 700;">Threat Density: ${hits} hits</span>`;
+      tt.innerHTML = content;
+      tt.style.display = 'block';
+      tt.style.left = (e.pageX + 15) + 'px';
+      tt.style.top = (e.pageY - 25) + 'px';
+    }
+
+    function hideMapTooltip() {
+      const tt = document.getElementById('svg-map-tooltip');
+      if (tt) tt.style.display = 'none';
+    }
 
     function renderGeoStats(stats) {
       const container = document.getElementById('geo-stats-container');
@@ -2561,55 +2777,125 @@
       let maxHits = 1;
       stats.forEach(s => { if (s.attack_count > maxHits) maxHits = s.attack_count; });
 
-      // Generate SVG World Map threat pins
-      const pinsSvg = stats.map(s => {
-        const coords = COUNTRY_COORDS[s.country_code];
-        if (!coords) return '';
-        const cx = Math.round(((coords.lon + 180) / 360) * 320);
-        const cy = Math.round(((90 - coords.lat) / 180) * 160);
-        return `
-          <g>
-            <circle cx="${cx}" cy="${cy}" r="3" fill="#ff0055" filter="url(#glow)">
-              <animate attributeName="r" values="2.5;5;2.5" dur="2s" repeatCount="indefinite"/>
-              <animate attributeName="opacity" values="0.7;1;0.7" dur="2s" repeatCount="indefinite"/>
+      // Target Sensor Coordinates: Frankfurt / Central Defense VDS (lat: 50.1109, lon: 8.6821)
+      const targetSensorLon = 8.6821;
+      const targetSensorLat = 50.1109;
+      const targetSX = Math.round(((targetSensorLon + 180) / 360) * 1000);
+      const targetSY = Math.round(((90 - targetSensorLat) / 180) * 500);
+
+      // Render threat pins and curved trajectory arcs on equirectangular 1000x500
+      let arcsSvg = '';
+      let pinsSvg = '';
+
+      stats.forEach(s => {
+        let lat = s.latitude;
+        let lon = s.longitude;
+        if (!lat && !lon) {
+          const coords = COUNTRY_COORDS[s.country_code];
+          if (coords) {
+            lat = coords.lat;
+            lon = coords.lon;
+          }
+        }
+        if (lat === undefined || lon === undefined || lat === null || lon === null) return;
+
+        // Equirectangular coordinate formula on 1000x500
+        const cx = Math.round(((lon + 180) / 360) * 1000);
+        const cy = Math.round(((90 - lat) / 180) * 500);
+
+        // Quadratic Bezier control point for trajectory arc
+        const midX = (cx + targetSX) / 2;
+        const midY = Math.min(cy, targetSY) - 35 - Math.abs(cx - targetSX) * 0.08;
+
+        // Curved Threat Trajectory Arc towards Central Defense Sensor
+        arcsSvg += `
+          <path d="M ${cx} ${cy} Q ${midX} ${midY} ${targetSX} ${targetSY}"
+                class="threat-arc"
+                fill="none"
+                stroke="#ff0055"
+                stroke-width="1.3"
+                opacity="0.65" />
+        `;
+
+        // Pulsing Attacker Source Pin with Radiating Ripples
+        const safeCountry = escapeHtml(s.country_name || s.country_code);
+        const safeFlag = escapeHtml(s.flag_emoji || '🌐');
+        pinsSvg += `
+          <g class="threat-pin"
+             style="cursor: pointer;"
+             onmousemove="showMapTooltip(event, '${safeCountry}', '${s.country_code}', ${s.attack_count}, '${safeFlag}', '', '')"
+             onmouseleave="hideMapTooltip()">
+            <circle cx="${cx}" cy="${cy}" r="4" fill="#ff0055" filter="url(#glow-red)">
+              <animate attributeName="r" values="3.5;6;3.5" dur="1.8s" repeatCount="indefinite"/>
+              <animate attributeName="opacity" values="0.8;1;0.8" dur="1.8s" repeatCount="indefinite"/>
             </circle>
-            <circle cx="${cx}" cy="${cy}" r="7" fill="none" stroke="#ff0055" stroke-width="0.75" opacity="0.4">
-              <animate attributeName="r" values="3;9;3" dur="2s" repeatCount="indefinite"/>
+            <circle cx="${cx}" cy="${cy}" r="11" fill="none" stroke="#ff0055" stroke-width="0.9" opacity="0.5">
+              <animate attributeName="r" values="4;18;4" dur="1.8s" repeatCount="indefinite"/>
+              <animate attributeName="opacity" values="0.7;0;0.7" dur="1.8s" repeatCount="indefinite"/>
             </circle>
           </g>
         `;
-      }).join('');
+      });
 
       const mapHtml = `
-        <div style="background: #090e1c; border: 1px solid var(--border-color); border-radius: 6px; padding: 0.4rem; margin-bottom: 0.75rem; position: relative;">
-          <svg viewBox="0 0 320 160" style="width: 100%; height: auto; display: block;">
+        <div style="background: #070b16; border: 1px solid var(--border-color); border-radius: 8px; padding: 0.5rem; margin-bottom: 0.75rem; position: relative; overflow: hidden;">
+          <svg viewBox="0 0 1000 500" style="width: 100%; height: auto; display: block;">
             <defs>
-              <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
-                <feGaussianBlur stdDeviation="2" result="blur" />
+              <filter id="glow-red" x="-30%" y="-30%" width="160%" height="160%">
+                <feGaussianBlur stdDeviation="3" result="blur" />
+                <feMerge>
+                  <feMergeNode in="blur" />
+                  <feMergeNode in="SourceGraphic" />
+                </feMerge>
+              </filter>
+              <filter id="glow-cyan" x="-30%" y="-30%" width="160%" height="160%">
+                <feGaussianBlur stdDeviation="3" result="blur" />
                 <feMerge>
                   <feMergeNode in="blur" />
                   <feMergeNode in="SourceGraphic" />
                 </feMerge>
               </filter>
             </defs>
-            <!-- Grid Lines -->
-            <line x1="0" y1="80" x2="320" y2="80" stroke="rgba(0, 243, 255, 0.1)" stroke-width="0.5" stroke-dasharray="2,2"/>
-            <line x1="160" y1="0" x2="160" y2="160" stroke="rgba(0, 243, 255, 0.1)" stroke-width="0.5" stroke-dasharray="2,2"/>
-            <!-- Stylized Continents -->
+
+            <!-- Latitude & Longitude Coordinate Grid Lines -->
+            <line x1="0" y1="125" x2="1000" y2="125" stroke="rgba(0, 243, 255, 0.08)" stroke-width="0.7" stroke-dasharray="3,3"/>
+            <line x1="0" y1="250" x2="1000" y2="250" stroke="rgba(0, 243, 255, 0.18)" stroke-width="0.8"/>
+            <line x1="0" y1="375" x2="1000" y2="375" stroke="rgba(0, 243, 255, 0.08)" stroke-width="0.7" stroke-dasharray="3,3"/>
+            <line x1="250" y1="0" x2="250" y2="500" stroke="rgba(0, 243, 255, 0.08)" stroke-width="0.7" stroke-dasharray="3,3"/>
+            <line x1="500" y1="0" x2="500" y2="500" stroke="rgba(0, 243, 255, 0.18)" stroke-width="0.8"/>
+            <line x1="750" y1="0" x2="750" y2="500" stroke="rgba(0, 243, 255, 0.08)" stroke-width="0.7" stroke-dasharray="3,3"/>
+
+            <!-- Continents Geometry (1000x500 Equirectangular Projection) -->
             <!-- North America -->
-            <path d="M40 30 Q70 20 90 40 T75 80 T40 60 Z" fill="rgba(0, 243, 255, 0.08)" stroke="rgba(0, 243, 255, 0.25)" stroke-width="0.75"/>
+            <path d="M 120 70 Q 180 40 280 55 Q 320 80 300 130 Q 280 180 250 240 Q 210 240 180 190 Q 130 160 110 110 Z" fill="rgba(0, 243, 255, 0.06)" stroke="rgba(0, 243, 255, 0.28)" stroke-width="1"/>
+            <!-- Greenland -->
+            <path d="M 330 35 Q 400 30 390 75 Q 350 85 330 65 Z" fill="rgba(0, 243, 255, 0.06)" stroke="rgba(0, 243, 255, 0.25)" stroke-width="0.8"/>
             <!-- South America -->
-            <path d="M75 90 Q95 95 90 125 T75 145 T65 110 Z" fill="rgba(0, 243, 255, 0.08)" stroke="rgba(0, 243, 255, 0.25)" stroke-width="0.75"/>
+            <path d="M 270 255 Q 350 285 340 370 Q 310 460 280 480 Q 250 410 250 310 Z" fill="rgba(0, 243, 255, 0.06)" stroke="rgba(0, 243, 255, 0.28)" stroke-width="1"/>
             <!-- Europe -->
-            <path d="M145 35 Q170 30 180 50 T160 65 T140 50 Z" fill="rgba(0, 243, 255, 0.08)" stroke="rgba(0, 243, 255, 0.25)" stroke-width="0.75"/>
+            <path d="M 460 85 Q 560 70 580 115 Q 540 165 470 145 Q 445 110 460 85 Z" fill="rgba(0, 243, 255, 0.06)" stroke="rgba(0, 243, 255, 0.28)" stroke-width="1"/>
             <!-- Africa -->
-            <path d="M145 70 Q180 75 175 115 T155 135 T135 95 Z" fill="rgba(0, 243, 255, 0.08)" stroke="rgba(0, 243, 255, 0.25)" stroke-width="0.75"/>
+            <path d="M 470 170 Q 580 175 585 280 Q 550 400 510 405 Q 460 320 450 220 Z" fill="rgba(0, 243, 255, 0.06)" stroke="rgba(0, 243, 255, 0.28)" stroke-width="1"/>
             <!-- Asia -->
-            <path d="M185 30 Q250 25 265 65 T220 90 T185 55 Z" fill="rgba(0, 243, 255, 0.08)" stroke="rgba(0, 243, 255, 0.25)" stroke-width="0.75"/>
-            <!-- Australia -->
-            <path d="M255 115 Q285 115 280 135 T255 140 Z" fill="rgba(0, 243, 255, 0.08)" stroke="rgba(0, 243, 255, 0.25)" stroke-width="0.75"/>
+            <path d="M 580 75 Q 780 60 880 130 Q 840 250 720 260 Q 640 240 590 160 Z" fill="rgba(0, 243, 255, 0.06)" stroke="rgba(0, 243, 255, 0.28)" stroke-width="1"/>
+            <!-- Australia & Oceania -->
+            <path d="M 780 340 Q 890 330 880 420 Q 820 435 780 380 Z" fill="rgba(0, 243, 255, 0.06)" stroke="rgba(0, 243, 255, 0.28)" stroke-width="1"/>
+
+            <!-- Threat Trajectory Arcs -->
+            ${arcsSvg}
+
             <!-- Threat Attack Pins -->
             ${pinsSvg}
+
+            <!-- Central Defense Node Reticle -->
+            <g class="sensor-node" transform="translate(${targetSX}, ${targetSY})">
+              <circle r="4.5" fill="#00f3ff" filter="url(#glow-cyan)"/>
+              <circle r="11" fill="none" stroke="#00f3ff" stroke-width="0.9" opacity="0.6">
+                <animate attributeName="r" values="4;14;4" dur="2.5s" repeatCount="indefinite"/>
+                <animate attributeName="opacity" values="0.8;0;0.8" dur="2.5s" repeatCount="indefinite"/>
+              </circle>
+              <text x="14" y="4" fill="#00f3ff" font-size="9.5" font-weight="700" font-family="monospace" letter-spacing="1">DEFENSE SENSOR</text>
+            </g>
           </svg>
         </div>
       `;

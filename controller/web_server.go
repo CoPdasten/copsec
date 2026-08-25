@@ -956,6 +956,10 @@ type SOCAlertDTO struct {
 	Scope            sigma.RuleScope `json:"scope"`             // SCOPE_NETWORK, SCOPE_HOST_LOCAL
 	IsHostLocal      bool            `json:"is_host_local"`
 	RelativeTime     string          `json:"relative_time"`
+	RepeatCount      int             `json:"repeat_count"` // Deduplicated event occurrences within window
+	FirstSeenMs      int64           `json:"first_seen_ms"`
+	LastSeenMs       int64           `json:"last_seen_ms"`
+	PeakScore        int             `json:"peak_score"`
 }
 
 func (ws *WebSOCServer) handleAlerts(w http.ResponseWriter, r *http.Request) {
@@ -985,7 +989,12 @@ func (ws *WebSOCServer) handleAlerts(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	var alerts []*SOCAlertDTO
+	type alertKey struct {
+		IP     string
+		RuleID string
+	}
+	grouped := make(map[alertKey]*SOCAlertDTO)
+	var orderedKeys []alertKey
 	nowMs := time.Now().UnixMilli()
 
 	for _, ev := range events {
@@ -1009,6 +1018,30 @@ func (ws *WebSOCServer) handleAlerts(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
+		key := alertKey{IP: ev.ClientIP, RuleID: ev.RuleID}
+		if existing, exists := grouped[key]; exists {
+			// If within 5-minute sliding window, aggregate
+			diff := existing.LastSeenMs - ev.TimestampMs
+			if diff < 0 {
+				diff = -diff
+			}
+			if diff <= 5*60*1000 {
+				existing.RepeatCount++
+				if ev.TimestampMs > existing.LastSeenMs {
+					existing.LastSeenMs = ev.TimestampMs
+					existing.TimestampMs = ev.TimestampMs
+				}
+				if ev.TimestampMs < existing.FirstSeenMs {
+					existing.FirstSeenMs = ev.TimestampMs
+				}
+				if ev.ThreatScore > existing.PeakScore {
+					existing.PeakScore = ev.ThreatScore
+					existing.ThreatScore = ev.ThreatScore
+				}
+				continue
+			}
+		}
+
 		isHostLocal := scope == sigma.ScopeHostLocal || ev.ClientIP == "127.0.0.1" || ev.ClientIP == "local" || isProtectedIP(ev.ClientIP)
 
 		containment := "UNMITIGATED"
@@ -1028,15 +1061,25 @@ func (ws *WebSOCServer) handleAlerts(w http.ResponseWriter, r *http.Request) {
 			relTime = fmt.Sprintf("%ds ago", diffSec)
 		}
 
-		alerts = append(alerts, &SOCAlertDTO{
+		dto := &SOCAlertDTO{
 			StoredEvent:      ev,
 			ContainmentState: containment,
 			Scope:            scope,
 			IsHostLocal:      isHostLocal,
 			RelativeTime:     relTime,
-		})
+			RepeatCount:      1,
+			FirstSeenMs:      ev.TimestampMs,
+			LastSeenMs:       ev.TimestampMs,
+			PeakScore:        ev.ThreatScore,
+		}
+		grouped[key] = dto
+		orderedKeys = append(orderedKeys, key)
 	}
 
+	var alerts []*SOCAlertDTO
+	for _, k := range orderedKeys {
+		alerts = append(alerts, grouped[k])
+	}
 	if alerts == nil {
 		alerts = []*SOCAlertDTO{}
 	}
