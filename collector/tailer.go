@@ -409,6 +409,11 @@ func parseSuricataLine(line string) (*copsecproto.LogEvent, bool) {
 		return nil, false
 	}
 
+	// Filter out periodic Suricata heartbeat / stats telemetry from incident stream
+	if s.EventType == "stats" || s.EventType == "heartbeat" {
+		return nil, false
+	}
+
 	threatScore := int32(0)
 	ruleID := "suricata_flow"
 	mitreID := ""

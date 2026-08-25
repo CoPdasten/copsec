@@ -83,7 +83,7 @@ func NewWebSOCServer(
 	rateLimiter *TokenBucketRateLimiter,
 	honeypotSSH *HoneypotSSHServer,
 ) *WebSOCServer {
-	return &WebSOCServer{
+	ws := &WebSOCServer{
 		listenAddr:      listenAddr,
 		server:          server,
 		storage:         storage,
@@ -101,6 +101,8 @@ func NewWebSOCServer(
 		dnsSinkhole:     dns.GetDefaultSinkhole(),
 		fimHealing:      healing.GetDefaultFIMEngine(),
 	}
+	ws.applyRuntimeConfig(ws.loadSystemConfig())
+	return ws
 }
 
 // SetP2PMesh links the decentralized collective defense swarm.
@@ -266,6 +268,7 @@ func (ws *WebSOCServer) loadSystemConfig() *SystemConfigDTO {
 		GRPCAddr:         "0.0.0.0:8443",
 		HoneypotSSHAddr:  ":2222",
 		AutoBanThreshold: 50,
+		IPInfoToken:      ipinfo.DefaultIPInfoToken,
 		LLMModel:         "gemini-2.5-flash",
 		LLMProvider:      "local",
 		Configured:       false,
@@ -292,7 +295,7 @@ func (ws *WebSOCServer) loadSystemConfig() *SystemConfigDTO {
 	if v, ok := cfgMap["discord_webhook"]; ok {
 		dto.DiscordWebhook = v
 	}
-	if v, ok := cfgMap["ipinfo_token"]; ok {
+	if v, ok := cfgMap["ipinfo_token"]; ok && v != "" {
 		dto.IPInfoToken = v
 	}
 	if v, ok := cfgMap["llm_api_key"]; ok {
@@ -327,12 +330,17 @@ func (ws *WebSOCServer) saveSystemConfig(cfg *SystemConfigDTO) error {
 		return nil
 	}
 
+	tok := cfg.IPInfoToken
+	if tok == "" {
+		tok = ipinfo.DefaultIPInfoToken
+	}
+
 	cfgMap := map[string]string{
 		"grpc_addr":          cfg.GRPCAddr,
 		"telegram_token":     cfg.TelegramToken,
 		"telegram_chat":      cfg.TelegramChat,
 		"discord_webhook":    cfg.DiscordWebhook,
-		"ipinfo_token":       cfg.IPInfoToken,
+		"ipinfo_token":       tok,
 		"llm_api_key":        cfg.LLMAPIKey,
 		"llm_model":          cfg.LLMModel,
 		"llm_provider":       cfg.LLMProvider,
@@ -369,9 +377,16 @@ func (ws *WebSOCServer) applyRuntimeConfig(cfg *SystemConfigDTO) {
 		}
 
 		// Reconfigure IPinfo Token dynamically
-		if cfg.IPInfoToken != "" {
-			ipinfo.GetDefaultClient().SetToken(cfg.IPInfoToken)
-			log.Printf("[CONFIG] IPinfo Token dynamically updated")
+		tok := cfg.IPInfoToken
+		if tok == "" {
+			tok = ipinfo.DefaultIPInfoToken
+		}
+		ipinfo.GetDefaultClient().SetToken(tok)
+		log.Printf("[CONFIG] IPinfo Token dynamically updated (Token: %s)", tok)
+
+		// Reconfigure LLM AI Agent dynamically
+		if ws.aiAgent != nil && (cfg.LLMAPIKey != "" || cfg.LLMModel != "" || cfg.LLMProvider != "") {
+			ws.aiAgent.UpdateConfig(cfg.LLMAPIKey, cfg.LLMModel, cfg.LLMProvider)
 		}
 	}
 }
@@ -974,8 +989,13 @@ func (ws *WebSOCServer) handleAlerts(w http.ResponseWriter, r *http.Request) {
 	nowMs := time.Now().UnixMilli()
 
 	for _, ev := range events {
+		// Sudo execution de-noising: routine successful sudo executions (score < 70) stay in Incident Stream, only elevate failed/unauthorized anomalies to Critical Alerts
+		if ev.RuleID == "sudo_execution" || (strings.Contains(strings.ToLower(ev.RuleID), "sudo") && ev.ThreatScore < 70) {
+			continue
+		}
+
 		scope := sigma.DetermineRuleScope(ev.RuleID, "", "", "", nil)
-		isHostLocalRule := scope == sigma.ScopeHostLocal || ev.RuleID == "sudo_execution" || strings.Contains(strings.ToLower(ev.RuleID), "sudo") || strings.Contains(strings.ToLower(ev.RuleID), "cron")
+		isHostLocalRule := scope == sigma.ScopeHostLocal || strings.Contains(strings.ToLower(ev.RuleID), "cron")
 		isSigma := strings.HasPrefix(strings.ToLower(ev.RuleID), "sigma")
 		isML := (ev.MLAnomaly && ev.MLConfidencePct >= 80) || (ev.SnortML && ev.SnortConfidence >= 0.80)
 		isCritical := ev.ThreatScore >= 70

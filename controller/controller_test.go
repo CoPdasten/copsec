@@ -460,7 +460,7 @@ func TestSOCAlertsTriageAPI(t *testing.T) {
 		TimestampMs:      time.Now().UnixMilli(),
 	})
 
-	// 2. Host-local Sudo execution (Score 20)
+	// 2. Routine Host-local Sudo execution (Score 20 - should be de-noised from active alerts)
 	_ = store.InsertEvent(&StoredEvent{
 		NodeID:           "node-1",
 		Source:           "auth",
@@ -472,7 +472,19 @@ func TestSOCAlertsTriageAPI(t *testing.T) {
 		TimestampMs:      time.Now().UnixMilli(),
 	})
 
-	// 3. Pure-Go ML Anomaly (Score 80, Confidence 88%)
+	// 3. High-Severity Sudo Privilege Escalation Anomaly (Score 85 - actionable alert)
+	_ = store.InsertEvent(&StoredEvent{
+		NodeID:           "node-1",
+		Source:           "auth",
+		RawLine:          `sudo: attacker : 3 incorrect password attempts ; COMMAND=/bin/su`,
+		ClientIP:         "127.0.0.1",
+		ThreatScore:      85,
+		RuleID:           "sigma-sudo-privilege-escalation",
+		MitreTechniqueID: "T1548.003",
+		TimestampMs:      time.Now().UnixMilli(),
+	})
+
+	// 4. Pure-Go ML Anomaly (Score 80, Confidence 88%)
 	_ = store.InsertEvent(&StoredEvent{
 		NodeID:           "node-1",
 		Source:           "nginx",
@@ -486,7 +498,7 @@ func TestSOCAlertsTriageAPI(t *testing.T) {
 		TimestampMs:      time.Now().UnixMilli(),
 	})
 
-	// 4. Low-priority noise (Score 10, should be excluded from actionable alerts)
+	// 5. Low-priority noise (Score 10, should be excluded from actionable alerts)
 	_ = store.InsertEvent(&StoredEvent{
 		NodeID:           "node-1",
 		Source:           "nginx",
@@ -512,15 +524,18 @@ func TestSOCAlertsTriageAPI(t *testing.T) {
 	}
 
 	if len(alerts) != 3 {
-		t.Fatalf("Expected exactly 3 actionable alerts (SQLi, Sudo, ML anomaly), got %d", len(alerts))
+		t.Fatalf("Expected exactly 3 actionable alerts (SQLi, Sudo Escalation, ML anomaly), got %d", len(alerts))
 	}
 
 	// Verify containment state for host-local
 	for _, a := range alerts {
-		if a.RuleID == "sudo_execution" {
+		if a.RuleID == "sigma-sudo-privilege-escalation" {
 			if a.ContainmentState != "HOST CONTAINED" || !a.IsHostLocal {
-				t.Errorf("Expected sudo_execution to have containment 'HOST CONTAINED', got %s", a.ContainmentState)
+				t.Errorf("Expected sudo escalation to have containment 'HOST CONTAINED', got %s", a.ContainmentState)
 			}
+		}
+		if a.RuleID == "sudo_execution" {
+			t.Errorf("Routine sudo_execution should be de-noised and excluded from /api/alerts")
 		}
 	}
 

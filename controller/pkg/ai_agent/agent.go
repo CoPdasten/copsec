@@ -165,6 +165,28 @@ func NewAgent(cfg Config) *Agent {
 	}
 }
 
+// UpdateConfig dynamically updates AI model, provider, and API key.
+func (a *Agent) UpdateConfig(apiKey, model, provider string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if apiKey != "" {
+		a.cfg.APIKey = apiKey
+	}
+	if model != "" {
+		a.cfg.Model = model
+	}
+	if provider != "" {
+		a.cfg.Provider = provider
+	} else if apiKey != "" {
+		if strings.HasPrefix(apiKey, "AIza") {
+			a.cfg.Provider = "gemini"
+		} else {
+			a.cfg.Provider = "openai"
+		}
+	}
+	log.Printf("[CONFIG] Autonomous LLM SOC Analyst updated (Provider: %s, Model: %s)", a.cfg.Provider, a.cfg.Model)
+}
+
 // ShouldAnalyze checks whether an event qualifies for autonomous AI triage (score >= 85 or critical scope, debounced per IP).
 func (a *Agent) ShouldAnalyze(threatScore int, clientIP, ruleID string) bool {
 	isCriticalRule := strings.Contains(strings.ToLower(ruleID), "rce") ||

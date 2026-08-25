@@ -291,6 +291,16 @@ func (s *CentralServer) StreamEvents(stream copsecproto.CopsecStreamService_Stre
 }
 
 func (s *CentralServer) processEvent(nodeID string, event *copsecproto.LogEvent) {
+	// Filter out Suricata heartbeat & internal statistics telemetry from incident stream
+	if event.Source == "suricata" || strings.Contains(event.RawLine, `"event_type"`) {
+		if strings.Contains(event.RawLine, `"event_type":"stats"`) ||
+			strings.Contains(event.RawLine, `"event_type": "stats"`) ||
+			strings.Contains(event.RawLine, `"event_type":"heartbeat"`) ||
+			strings.Contains(event.RawLine, `"event_type": "heartbeat"`) {
+			return
+		}
+	}
+
 	atomic.AddUint64(&s.totalEventsProcessed, 1)
 	atomic.AddUint64(&s.epsEventsThisSec, 1)
 

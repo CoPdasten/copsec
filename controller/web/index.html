@@ -1865,8 +1865,13 @@
       const rule = (ev.rule_id || '').toLowerCase();
       const raw = (ev.raw_line || '').toLowerCase();
 
+      // De-noise routine successful sudo execution (score < 70): keep in Incident Stream, do not elevate to Critical Alerts
+      if (rule === 'sudo_execution' || (rule.includes('sudo') && score < 70)) {
+        return false;
+      }
+
       const isCritical = score >= 70;
-      const isSigma = rule.startsWith('sigma') || rule === 'sudo_execution' || rule.includes('revshell') || rule.includes('sqli') || rule.includes('rce') || rule.includes('c2') || rule.includes('evasion') || rule.includes('persistence');
+      const isSigma = rule.startsWith('sigma') || rule.includes('revshell') || rule.includes('sqli') || rule.includes('rce') || rule.includes('c2') || rule.includes('evasion') || rule.includes('persistence');
       const isML = (ev.ml_anomaly && (ev.ml_confidence_pct >= 80 || ev.ml_confidence_pct >= 0.8)) || (ev.snort_ml && (ev.snort_confidence >= 0.8 || ev.snort_confidence >= 80));
       const isKernelFIM = rule.includes('rootkit') || rule.includes('fim') || rule.includes('integrity') || rule.includes('ptrace') || rule.includes('lkm') || raw.includes('fim_healing');
 
