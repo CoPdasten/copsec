@@ -169,3 +169,47 @@ func TestAsyncLookupWorker(t *testing.T) {
 		t.Fatalf("Timed out waiting for async enrichment")
 	}
 }
+
+func TestLiveIPInfoNetherlandsKerkradeMapping(t *testing.T) {
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{
+			"ip": "45.154.255.88",
+			"city": "Kerkrade",
+			"region": "Limburg",
+			"country": "NL",
+			"loc": "50.8658,6.0625",
+			"org": "AS215790 Limited Network LTD",
+			"postal": "6461",
+			"timezone": "Europe/Amsterdam"
+		}`))
+	}))
+	defer mockServer.Close()
+
+	client := NewClient("5d61b28f40a2d8")
+	client.SetBaseURL(mockServer.URL)
+
+	resp, err := client.Lookup(context.Background(), "45.154.255.88")
+	if err != nil {
+		t.Fatalf("Lookup failed: %v", err)
+	}
+
+	if resp.Country != "NL" || resp.CountryName != "The Netherlands" {
+		t.Errorf("Expected NL / The Netherlands, got %s / %s", resp.Country, resp.CountryName)
+	}
+	if resp.City != "Kerkrade" || resp.Region != "Limburg" {
+		t.Errorf("Expected Kerkrade / Limburg, got %s / %s", resp.City, resp.Region)
+	}
+	if resp.Org != "AS215790 Limited Network LTD" {
+		t.Errorf("Expected AS215790 Limited Network LTD, got %s", resp.Org)
+	}
+	if resp.Latitude != 50.8658 || resp.Longitude != 6.0625 {
+		t.Errorf("Expected coords 50.8658, 6.0625, got %f, %f", resp.Latitude, resp.Longitude)
+	}
+	if !resp.IsHosting {
+		t.Errorf("Expected Limited Network to be flagged as Hosting")
+	}
+	if resp.FlagEmoji != "🇳🇱" {
+		t.Errorf("Expected flag 🇳🇱, got %s", resp.FlagEmoji)
+	}
+}

@@ -6,6 +6,8 @@ import (
 	"net"
 	"strings"
 	"sync"
+
+	"github.com/copsec/controller/pkg/ipinfo"
 )
 
 // GeoLocation represents enriched threat intelligence location and network classification metadata.
@@ -164,7 +166,42 @@ func (e *Engine) Lookup(ipStr string) *GeoLocation {
 		return loc
 	}
 
-	// 2. Check Custom / Known Threat & Cloud Subnet Ranges
+	// 2. Check Live IPinfo LRU Cache (Highest Priority Live Threat Intel)
+	if ipinfoResp, ok := ipinfo.GetDefaultClient().GetCached(ipStr); ok && ipinfoResp != nil {
+		loc := &GeoLocation{
+			IP:             ipStr,
+			CountryCode:    ipinfoResp.Country,
+			CountryName:    ipinfoResp.CountryName,
+			City:           ipinfoResp.City,
+			Region:         ipinfoResp.Region,
+			Postal:         ipinfoResp.Postal,
+			Hostname:       ipinfoResp.Hostname,
+			ASN:            ipinfoResp.Org,
+			Latitude:       ipinfoResp.Latitude,
+			Longitude:      ipinfoResp.Longitude,
+			FlagEmoji:      ipinfoResp.FlagEmoji,
+			IsPrivate:      false,
+			IsHosting:      ipinfoResp.IsHosting,
+			IsVPN:          ipinfoResp.IsVPN,
+			IsProxy:        ipinfoResp.IsProxy,
+			IsTor:          ipinfoResp.IsTor,
+			Classification: ipinfoResp.Classification,
+		}
+		if loc.CountryName == "" {
+			loc.CountryName = ipinfo.CountryCodeToName(loc.CountryCode)
+		}
+		if loc.FlagEmoji == "" {
+			loc.FlagEmoji = CountryCodeToEmoji(loc.CountryCode)
+		}
+		e.recordHit(loc.CountryCode)
+		e.cacheResult(ipStr, loc)
+		return loc
+	}
+
+	// Trigger non-blocking async IPinfo resolution for fresh lookups
+	ipinfo.GetDefaultClient().LookupAsync(ipStr)
+
+	// 3. Check Custom / Known Threat & Cloud Subnet Ranges
 	for _, r := range e.customRanges {
 		if r.Net.Contains(parsedIP) {
 			loc := &GeoLocation{
@@ -184,7 +221,7 @@ func (e *Engine) Lookup(ipStr string) *GeoLocation {
 		}
 	}
 
-	// 3. Deterministic High-Coverage Regional Hash Resolution (Fallback for unmapped IPs)
+	// 4. Deterministic High-Coverage Regional Hash Resolution (Fallback for unmapped IPs)
 	loc := e.resolveSyntheticGeo(parsedIP, ipStr)
 	e.recordHit(loc.CountryCode)
 	e.cacheResult(ipStr, loc)

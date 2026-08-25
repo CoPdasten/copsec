@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/copsec/controller/pkg/ipinfo"
 )
 
 // ThreatAction defines the recommended mitigation action from the engine.
@@ -246,6 +248,16 @@ func (se *ScoringEngine) Evaluate(
 		state.IsDatacenterASN = IsDatacenterASN(asnInfo)
 	}
 
+	// Check Live IPinfo Intelligence (Hosting / VPN / Tor exit node indicators)
+	if ipinfoResp, ok := ipinfo.GetDefaultClient().GetCached(ipStr); ok && ipinfoResp != nil {
+		if ipinfoResp.IsHosting || ipinfoResp.IsVPN || ipinfoResp.IsProxy || ipinfoResp.IsTor {
+			state.IsDatacenterASN = true
+		}
+		if ipinfoResp.Org != "" {
+			state.LastASNInfo = ipinfoResp.Org
+		}
+	}
+
 	// 2. Exponential Half-Life Score Decay (Auto-Forgiveness)
 	// S_t = S_0 * 0.5^(deltaT / 180s)
 	deltaSeconds := float64(now-state.LastSeenMs) / 1000.0
@@ -274,7 +286,13 @@ func (se *ScoringEngine) Evaluate(
 	var tier string
 	var breakdownDetails []string
 
-	// Multiplier for datacenter/cloud hosting / Tor
+	// Apply +15 base threat intelligence risk when entity is identified as Hosting / VPN / Tor / Proxy
+	if state.IsDatacenterASN {
+		baseIncrement += 15.0
+		breakdownDetails = append(breakdownDetails, "IPinfo Threat Intel: Hosting/VPN/Tor Entity (+15 Base Risk)")
+	}
+
+	// Multiplier for datacenter/cloud hosting / Tor / VPN
 	riskMultiplier := 1.0
 	if state.IsDatacenterASN {
 		riskMultiplier = 1.3

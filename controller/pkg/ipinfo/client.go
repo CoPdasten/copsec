@@ -16,6 +16,9 @@ import (
 	"time"
 )
 
+// DefaultIPInfoToken is the fallback pre-configured token for live IPinfo.io lookups.
+const DefaultIPInfoToken = "5d61b28f40a2d8"
+
 // ASNInfo contains Autonomous System Number metadata from IPinfo.
 type ASNInfo struct {
 	ASN    string `json:"asn,omitempty"`
@@ -50,8 +53,9 @@ type IPInfoResponse struct {
 	City           string       `json:"city,omitempty"`
 	Region         string       `json:"region,omitempty"`
 	Country        string       `json:"country,omitempty"`
+	CountryName    string       `json:"country_name,omitempty"`
 	Loc            string       `json:"loc,omitempty"` // "lat,lon"
-	Org            string       `json:"org,omitempty"` // "AS14061 DigitalOcean, LLC"
+	Org            string       `json:"org,omitempty"` // "AS215790 Limited Network LTD"
 	Postal         string       `json:"postal,omitempty"`
 	Timezone       string       `json:"timezone,omitempty"`
 	ASN            *ASNInfo     `json:"asn,omitempty"`
@@ -193,6 +197,9 @@ func GetDefaultClient() *Client {
 		if token == "" {
 			token = os.Getenv("COPSEC_IPINFO_TOKEN")
 		}
+		if token == "" {
+			token = DefaultIPInfoToken
+		}
 		defaultClient = NewClient(token)
 	})
 	return defaultClient
@@ -200,8 +207,18 @@ func GetDefaultClient() *Client {
 
 // NewClient initializes the IPinfo intelligence client with a background worker pool.
 func NewClient(token string) *Client {
+	if token == "" {
+		token = os.Getenv("IPINFO_TOKEN")
+		if token == "" {
+			token = os.Getenv("COPSEC_IPINFO_TOKEN")
+		}
+		if token == "" {
+			token = DefaultIPInfoToken
+		}
+	}
+
 	c := &Client{
-		token:      token,
+		token:      strings.TrimSpace(token),
 		baseURL:    "https://ipinfo.io",
 		httpClient: &http.Client{Timeout: 5 * time.Second},
 		cache:      NewLRUCache(10000, 24*time.Hour),
@@ -213,8 +230,17 @@ func NewClient(token string) *Client {
 		go c.worker()
 	}
 
-	log.Printf("[INFO] IPinfo Threat Intelligence Client initialized (Token Configured: %v)", token != "")
+	log.Printf("[INFO] IPinfo Threat Intelligence Client initialized (Token Configured: %v)", c.token != "")
 	return c
+}
+
+// GetCached returns the cached IPInfoResponse if present and valid.
+func (c *Client) GetCached(ip string) (*IPInfoResponse, bool) {
+	cleanIP := cleanIPAddress(ip)
+	if isPrivateOrExcluded(cleanIP) {
+		return nil, false
+	}
+	return c.cache.Get(cleanIP)
 }
 
 // SetToken updates the IPinfo API token dynamically.
@@ -366,8 +392,9 @@ func (c *Client) Lookup(ctx context.Context, ipStr string) (*IPInfoResponse, err
 		}
 	}
 
-	// Set flag emoji
+	// Set flag emoji & country name
 	ipinfoResp.FlagEmoji = countryCodeToEmoji(ipinfoResp.Country)
+	ipinfoResp.CountryName = CountryCodeToName(ipinfoResp.Country)
 	ipinfoResp.CachedAtMs = time.Now().UnixMilli()
 	ipinfoResp.Source = "ipinfo_live"
 
@@ -383,6 +410,10 @@ func (c *Client) Lookup(ctx context.Context, ipStr string) (*IPInfoResponse, err
 func (c *Client) deriveSecurityContext(resp *IPInfoResponse) {
 	orgLower := strings.ToLower(resp.Org)
 	hostLower := strings.ToLower(resp.Hostname)
+
+	if resp.CountryName == "" {
+		resp.CountryName = CountryCodeToName(resp.Country)
+	}
 
 	// Check Privacy object if available (IPinfo paid plans)
 	if resp.Privacy != nil {
@@ -410,14 +441,20 @@ func (c *Client) deriveSecurityContext(resp *IPInfoResponse) {
 		strings.Contains(orgLower, "leaseweb") || strings.Contains(orgLower, "scaleway") ||
 		strings.Contains(orgLower, "alibaba") || strings.Contains(orgLower, "oracle") ||
 		strings.Contains(orgLower, "hosting") || strings.Contains(orgLower, "datacenter") ||
-		strings.Contains(orgLower, "serverius") || strings.Contains(orgLower, "choopa") {
+		strings.Contains(orgLower, "serverius") || strings.Contains(orgLower, "choopa") ||
+		strings.Contains(orgLower, "limited network") || strings.Contains(orgLower, "m247") ||
+		strings.Contains(orgLower, "hostkey") || strings.Contains(orgLower, "contabo") ||
+		strings.Contains(orgLower, "worldstream") || strings.Contains(orgLower, "cogent") {
 		resp.IsHosting = true
 	}
 
 	// Check Tor / Proxy indicators in hostname
 	if strings.Contains(hostLower, "tor-exit") || strings.Contains(hostLower, "tor.relay") ||
-		strings.Contains(orgLower, "tor exit") {
-		resp.IsTor = true
+		strings.Contains(orgLower, "tor exit") || strings.Contains(hostLower, "vpn") ||
+		strings.Contains(orgLower, "vpn") || strings.Contains(hostLower, "proxy") {
+		if strings.Contains(hostLower, "tor-exit") || strings.Contains(orgLower, "tor exit") {
+			resp.IsTor = true
+		}
 		resp.IsProxy = true
 	}
 
@@ -484,4 +521,62 @@ func countryCodeToEmoji(code string) string {
 	r1 := rune(code[0]-'A') + 0x1F1E6
 	r2 := rune(code[1]-'A') + 0x1F1E6
 	return string([]rune{r1, r2})
+}
+
+// CountryCodeToName maps ISO 3166-1 alpha-2 codes to clean English country names.
+func CountryCodeToName(code string) string {
+	code = strings.ToUpper(strings.TrimSpace(code))
+	names := map[string]string{
+		"NL": "The Netherlands",
+		"DE": "Germany",
+		"US": "United States",
+		"GB": "United Kingdom",
+		"FR": "France",
+		"TR": "Turkey",
+		"RU": "Russian Federation",
+		"CN": "China",
+		"IN": "India",
+		"BR": "Brazil",
+		"JP": "Japan",
+		"SG": "Singapore",
+		"CA": "Canada",
+		"AU": "Australia",
+		"ES": "Spain",
+		"IT": "Italy",
+		"PL": "Poland",
+		"UA": "Ukraine",
+		"SE": "Sweden",
+		"CH": "Switzerland",
+		"RO": "Romania",
+		"BG": "Bulgaria",
+		"IR": "Iran",
+		"KP": "North Korea",
+		"VN": "Vietnam",
+		"ID": "Indonesia",
+		"KR": "South Korea",
+		"HK": "Hong Kong",
+		"TW": "Taiwan",
+		"FI": "Finland",
+		"NO": "Norway",
+		"DK": "Denmark",
+		"BE": "Belgium",
+		"AT": "Austria",
+		"CZ": "Czech Republic",
+		"IL": "Israel",
+		"ZA": "South Africa",
+		"MX": "Mexico",
+		"AR": "Argentina",
+		"CL": "Chile",
+		"CO": "Colombia",
+		"NZ": "New Zealand",
+		"LOC": "Local Host",
+		"LAN": "Local Network",
+	}
+	if name, ok := names[code]; ok {
+		return name
+	}
+	if len(code) == 2 {
+		return code
+	}
+	return "Unknown Origin"
 }

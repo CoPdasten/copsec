@@ -2734,16 +2734,23 @@
           .then(res => res.json())
           .then(data => {
             if (data && !data.error) {
-              ipinfoOrg.textContent = data.org || data.asn?.name || ev.asn || 'Unknown ISP';
+              const exactOrg = data.org || (data.asn && data.asn.name) || ev.asn || 'Unknown ISP';
+              ipinfoOrg.textContent = exactOrg;
               ipinfoType.textContent = data.classification || (data.is_hosting ? 'Hosting / Datacenter' : 'Standard ISP');
               
-              const locParts = [data.city, data.region, data.country].filter(Boolean).join(', ');
-              const coords = data.latitude && data.longitude ? ` (${data.latitude.toFixed(4)}, ${data.longitude.toFixed(4)})` : '';
+              const cName = data.country_name || (data.country === 'NL' ? 'The Netherlands' : (data.country || ev.country_name || ''));
+              const locParts = [data.city, data.region, cName].filter(Boolean).join(', ');
+              const coords = data.latitude && data.longitude ? ` (${data.latitude.toFixed(4)}, ${data.longitude.toFixed(4)})` : (data.loc ? ` (${data.loc})` : '');
               ipinfoLoc.textContent = (locParts ? locParts : 'Unknown Location') + coords;
               ipinfoHost.textContent = data.hostname || '-';
 
-              ipinfoSrc.textContent = data.source === 'lru_cache' ? '⚡ LRU CACHED' : (data.source === 'ipinfo_live' ? 'LIVE IPINFO' : 'FALLBACK');
-              ipinfoSrc.className = data.source === 'lru_cache' ? 'badge badge-medium' : 'badge badge-success';
+              const flag = data.flag_emoji || ev.flag_emoji || '🌐';
+              if (geoEl && (data.country || cName)) {
+                geoEl.textContent = `${flag} ${cName}${exactOrg ? ' • ' + exactOrg : ''}`;
+              }
+
+              ipinfoSrc.textContent = data.source === 'ipinfo_live' ? '🛡️ IPinfo Verified (Live)' : (data.source === 'lru_cache' ? '🛡️ IPinfo Verified (Cached)' : 'GeoIP Fallback');
+              ipinfoSrc.className = 'badge badge-success';
 
               let badgesHtml = '';
               if (data.is_hosting) badgesHtml += '<span class="badge badge-high" style="font-size: 0.6rem;">HOSTING</span>';
