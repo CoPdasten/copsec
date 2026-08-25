@@ -771,7 +771,7 @@
       position: fixed;
       top: 0; right: 0; bottom: 0;
       width: 92%;
-      max-width: 840px;
+      max-width: 860px;
       background: #0a0f1d;
       border-left: 1px solid var(--border-color);
       box-shadow: -10px 0 40px rgba(0,0,0,0.85);
@@ -780,18 +780,155 @@
       transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
       display: flex;
       flex-direction: column;
+      will-change: transform;
     }
     .drawer-overlay.open .drawer {
       transform: translateX(0);
     }
     .drawer-header {
-      padding: 1.25rem 1.5rem;
+      padding: 0.9rem 1.4rem;
       border-bottom: 1px solid var(--border-color);
       display: flex;
       justify-content: space-between;
       align-items: center;
-      background: var(--bg-card-header);
+      background: rgba(10, 15, 29, 0.95);
+      backdrop-filter: blur(12px);
+      position: sticky;
+      top: 0;
+      z-index: 10;
     }
+    .drawer-sticky-actions {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+
+    /* Packet Flow & Lineage Card */
+    .flow-trajectory-card {
+      background: linear-gradient(90deg, rgba(244, 63, 94, 0.08), rgba(15, 23, 42, 0.95), rgba(0, 243, 255, 0.08));
+      border: 1px solid rgba(0, 243, 255, 0.25);
+      border-radius: 8px;
+      padding: 0.75rem 1rem;
+      margin-bottom: 0.9rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.75rem;
+    }
+    .flow-step {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 0.15rem;
+    }
+    .flow-label {
+      font-size: 0.62rem;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .flow-val {
+      font-size: 0.82rem;
+      font-family: var(--font-mono);
+      font-weight: 700;
+      color: #fff;
+      word-break: break-all;
+    }
+    .flow-sub {
+      font-size: 0.68rem;
+      color: #94a3b8;
+    }
+    .flow-arrow-box {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.2rem;
+      padding: 0 0.5rem;
+    }
+    .flow-protocol-badge {
+      font-size: 0.62rem;
+      font-family: var(--font-mono);
+      font-weight: 800;
+      color: var(--amber);
+      background: rgba(245, 158, 11, 0.15);
+      border: 1px solid rgba(245, 158, 11, 0.4);
+      border-radius: 4px;
+      padding: 0.1rem 0.35rem;
+    }
+    .flow-arrow-line {
+      width: 70px;
+      height: 2px;
+      background: linear-gradient(90deg, #f43f5e, var(--cyan));
+      position: relative;
+      margin: 0.25rem 0;
+    }
+    .flow-arrow-pulse {
+      position: absolute;
+      width: 6px;
+      height: 6px;
+      background: #fff;
+      border-radius: 50%;
+      top: -2px;
+      box-shadow: 0 0 8px #fff;
+      animation: flowPulseAnim 2s infinite ease-in-out;
+    }
+    @keyframes flowPulseAnim {
+      0% { left: 0%; opacity: 0.2; }
+      50% { opacity: 1; }
+      100% { left: 95%; opacity: 0.2; }
+    }
+    .flow-status-badge {
+      font-size: 0.62rem;
+      font-family: var(--font-mono);
+      font-weight: 700;
+      color: var(--cyan);
+    }
+
+    /* Active Keyboard Row Highlight */
+    tr.active-keyboard-row {
+      background: rgba(0, 243, 255, 0.12) !important;
+      outline: 1px solid var(--cyan) !important;
+      box-shadow: 0 0 15px rgba(0, 243, 255, 0.25) inset !important;
+    }
+
+    /* Fixed Keyboard Shortcuts Footer Banner */
+    .soc-shortcuts-footer {
+      position: fixed;
+      bottom: 0.65rem;
+      right: 1.25rem;
+      background: rgba(4, 7, 14, 0.92);
+      border: 1px solid rgba(0, 243, 255, 0.3);
+      backdrop-filter: blur(10px);
+      border-radius: 20px;
+      padding: 0.35rem 0.85rem;
+      display: flex;
+      align-items: center;
+      gap: 0.65rem;
+      font-size: 0.68rem;
+      color: #94a3b8;
+      font-family: var(--font-mono);
+      z-index: 100;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
+      transition: opacity 0.3s ease;
+    }
+    .shortcut-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+    }
+    .shortcut-pill kbd {
+      background: #111827;
+      border: 1px solid #374151;
+      color: var(--cyan);
+      font-weight: 700;
+      font-size: 0.65rem;
+      padding: 0.1rem 0.35rem;
+      border-radius: 4px;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.5);
+    }
+
     .drawer-body {
       padding: 1.25rem 1.5rem;
       flex: 1;
@@ -1792,7 +1929,12 @@
           <h3 style="font-size: 1rem; font-weight: 700; color: #fff;">🔍 Incident Payload Inspector</h3>
           <p style="font-size: 0.7rem; color: var(--text-muted); font-family: var(--font-mono);" id="drawer-event-id">-</p>
         </div>
-        <button class="toast-close" onclick="closePayloadDrawer()">✖</button>
+        <div class="drawer-sticky-actions">
+          <button class="btn-triage-xs btn-triage-ban" onclick="drawerQuickBan()" title="Instant Ban (Key: B)">⚡ Ban Actor</button>
+          <button class="btn-triage-xs btn-triage-tarpit" onclick="drawerSendTarpit()" title="Route to Tarpit (Key: T)">🕳️ Tarpit</button>
+          <button class="btn-triage-xs btn-triage-report" onclick="drawerResolve()" title="Resolve Alert">✅ Resolve</button>
+          <button class="toast-close" onclick="closePayloadDrawer()" style="margin-left: 0.35rem;">✖</button>
+        </div>
       </div>
         <div class="drawer-meta-grid" style="grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));">
           <div class="meta-box"><label>Timestamp</label><span id="drawer-time">-</span></div>
@@ -1800,6 +1942,27 @@
           <div class="meta-box"><label>Client IP</label><span id="drawer-ip" style="color: var(--cyan);">-</span></div>
           <div class="meta-box"><label>Threat Score</label><span id="drawer-score">-</span></div>
           <div class="meta-box" style="grid-column: span 2;"><label>Origin Country & ASN</label><span id="drawer-geo">-</span></div>
+        </div>
+
+        <!-- Flow Trajectory & Packet Lineage Card -->
+        <div class="flow-trajectory-card" id="drawer-flow-card">
+          <div class="flow-step">
+            <div class="flow-label">SOURCE ACTOR</div>
+            <div class="flow-val" id="flow-actor-ip" style="color: var(--magenta);">-</div>
+            <div class="flow-sub" id="flow-actor-loc">-</div>
+          </div>
+          <div class="flow-arrow-box">
+            <div class="flow-protocol-badge" id="flow-proto-badge">TCP / 443</div>
+            <div class="flow-arrow-line">
+              <span class="flow-arrow-pulse"></span>
+            </div>
+            <div class="flow-status-badge" id="flow-status-badge">INSPECTING</div>
+          </div>
+          <div class="flow-step" style="text-align: right;">
+            <div class="flow-label">TARGET SENSOR</div>
+            <div class="flow-val" id="flow-target-node" style="color: var(--cyan);">-</div>
+            <div class="flow-sub" id="flow-target-service">CoPSeC Edge Guard</div>
+          </div>
         </div>
 
         <!-- 1. Root Cause & Evidence Analysis Panel -->
@@ -1903,9 +2066,15 @@
           </div>
         </div>
 
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
-          <label style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; font-family: var(--font-mono); font-weight: 700;">Formatted Telemetry / EVE Log</label>
-          <button class="btn btn-inspect" onclick="copyDrawerJSON()">📋 Copy Raw Payload</button>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; gap: 0.5rem; flex-wrap: wrap;">
+          <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <label style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; font-family: var(--font-mono); font-weight: 700;">Formatted Telemetry / EVE Log</label>
+            <span id="drawer-json-matches" style="font-size: 0.68rem; color: var(--cyan); font-family: var(--font-mono);"></span>
+          </div>
+          <div style="display: flex; gap: 0.35rem; align-items: center;">
+            <input type="text" id="drawer-json-search" placeholder="🔍 Filter JSON..." oninput="filterDrawerJSON(this.value)" style="background: #060913; border: 1px solid #1e293b; color: #fff; font-size: 0.7rem; font-family: var(--font-mono); padding: 0.25rem 0.5rem; border-radius: 4px; width: 140px;">
+            <button class="btn btn-inspect" onclick="copyDrawerJSON()" style="padding: 0.25rem 0.55rem; font-size: 0.7rem;">📋 Copy</button>
+          </div>
         </div>
 
         <div class="json-inspector-box" id="drawer-json-content"></div>
@@ -1999,6 +2168,15 @@
         </button>
       </form>
     </div>
+  </div>
+
+  <!-- Fixed Keyboard Shortcuts Footer Banner -->
+  <div class="soc-shortcuts-footer" id="soc-shortcuts-footer">
+    <span class="shortcut-pill"><kbd>J</kbd> / <kbd>K</kbd> Navigate</span>
+    <span class="shortcut-pill"><kbd>Enter</kbd> Inspect</span>
+    <span class="shortcut-pill"><kbd>B</kbd> Quick Ban</span>
+    <span class="shortcut-pill"><kbd>T</kbd> Tarpit</span>
+    <span class="shortcut-pill"><kbd>Esc</kbd> Close</span>
   </div>
 
   <div id="svg-map-tooltip" class="svg-map-tooltip"></div>
@@ -2424,13 +2602,16 @@
         return;
       }
 
-      tbody.innerHTML = filtered.map((a, idx) => {
+      const visibleAlerts = filtered.slice(0, 150);
+
+      tbody.innerHTML = visibleAlerts.map((a, idx) => {
         const score = a.threat_score || 0;
         const state = getContainmentState(a);
         const relTime = formatRelativeTime(a.timestamp_ms);
         const nodeLabel = a.node_id || 'controller';
         const isHost = state === 'HOST CONTAINED' || a.client_ip === '127.0.0.1' || a.client_ip === 'local';
         const isCrit = score >= 85;
+        const isSelected = idx === activeSelectedAlertIndex;
 
         // Repeat multiplier badge
         let repeatBadge = '';
@@ -2494,9 +2675,9 @@
         actionButtons += `<button class="btn-triage-xs btn-triage-report" onclick="triageAIReport(${idx})">🧠 AI Forensics</button>`;
         actionButtons += `<button class="btn-triage-xs btn-triage-dismiss" onclick="triageDismiss(${idx}, '${escapeHtml(a.client_ip)}', this)">✅ Resolve / FP</button>`;
 
-        const rowClasses = `incident-row ${isCrit ? 'row-crit row-critical-pulsing' : (score >= 70 ? 'row-high' : 'row-med')}`;
+        const rowClasses = `incident-row ${isCrit ? 'row-crit row-critical-pulsing' : (score >= 70 ? 'row-high' : 'row-med')} ${isSelected ? 'active-keyboard-row' : ''}`;
         return `
-          <tr id="triage-row-${idx}" class="${rowClasses}">
+          <tr id="triage-row-${idx}" class="${rowClasses}" onclick="selectActiveAlertRow(${idx})" ondblclick="openPayloadDrawerById(${a.id || 0})" style="cursor: pointer;">
             <td>${sevBadge}</td>
             <td>
               <div style="font-family: var(--font-mono); font-size: 0.78rem; font-weight: 700; color: #cbd5e1;">${escapeHtml(relTime)}</div>
@@ -2505,10 +2686,16 @@
             <td>${actorHtml}</td>
             <td>${vectorHtml}</td>
             <td>${containmentBadge}</td>
-            <td><div class="triage-actions-cell">${actionButtons}</div></td>
+            <td><div class="triage-actions-cell" onclick="event.stopPropagation()">${actionButtons}</div></td>
           </tr>
         `;
       }).join('');
+    }
+
+    function selectActiveAlertRow(idx) {
+      activeSelectedAlertIndex = idx;
+      const rows = document.querySelectorAll('#alerts-tbody tr.incident-row');
+      highlightActiveKeyboardRow(rows);
     }
 
     function refreshAlerts() {
@@ -2998,22 +3185,46 @@
       'CH': { lat: 46.9480, lon: 7.4474, name: 'Switzerland' }
     };
 
-    function showMapTooltip(e, country, code, hits, flag, ip, org) {
+    function showMapTooltip(e, country, code, hits, flag, ip, org, city, region) {
       const tt = document.getElementById('svg-map-tooltip');
       if (!tt) return;
-      let content = `<strong>${flag} ${country || code}</strong>`;
-      if (ip) content += `<br/><span style="color:var(--cyan)">IP: ${ip}</span>`;
-      if (org) content += `<br/><span style="color:#94a3b8">ASN: ${org}</span>`;
-      content += `<br/><span style="color:#f43f5e; font-weight: 700;">Threat Density: ${hits} hits</span>`;
+      
+      let threatBadge = hits >= 20 ? '<span class="badge badge-critical" style="font-size:0.6rem;">CRITICAL</span>' : (hits >= 10 ? '<span class="badge badge-high" style="font-size:0.6rem;">HIGH</span>' : '<span class="badge badge-medium" style="font-size:0.6rem;">MEDIUM</span>');
+      
+      const locParts = [city, region, country || code].filter(Boolean).join(', ');
+      let content = `
+        <div style="display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; margin-bottom: 0.35rem; border-bottom: 1px solid rgba(0,243,255,0.25); padding-bottom: 0.25rem;">
+          <strong style="color: #fff;">${flag || '🌐'} ${escapeHtml(country || code)}</strong>
+          ${threatBadge}
+        </div>
+      `;
+      if (locParts && locParts !== (country || code)) {
+        content += `<div style="font-size: 0.68rem; color: #cbd5e1; margin-bottom: 0.2rem;">📍 ${escapeHtml(locParts)}</div>`;
+      }
+      if (ip) content += `<div style="color:var(--cyan); font-size: 0.68rem;">IP: ${escapeHtml(ip)}</div>`;
+      if (org) content += `<div style="color:#94a3b8; font-size: 0.68rem;">ASN: ${escapeHtml(org)}</div>`;
+      content += `<div style="color:#f43f5e; font-weight: 700; font-size: 0.72rem; margin-top: 0.25rem;">⚡ Attack Density: ${hits} hits</div>`;
+
       tt.innerHTML = content;
       tt.style.display = 'block';
-      tt.style.left = (e.pageX + 15) + 'px';
-      tt.style.top = (e.pageY - 25) + 'px';
+
+      // Viewport boundary detection
+      const ttWidth = 220;
+      const ttHeight = 110;
+      let left = e.pageX + 15;
+      let top = e.pageY - 25;
+      if (left + ttWidth > window.innerWidth) left = e.pageX - ttWidth - 15;
+      if (top + ttHeight > window.innerHeight) top = e.pageY - ttHeight;
+      if (top < 10) top = 10;
+
+      tt.style.left = left + 'px';
+      tt.style.top = top + 'px';
     }
 
     function hideMapTooltip() {
       const tt = document.getElementById('svg-map-tooltip');
-      if (tt) tt.style.display = 'none';
+      if (!tt) return;
+      tt.style.display = 'none';
     }
 
     function renderGeoStats(stats) {
@@ -3069,10 +3280,13 @@
         // Pulsing Attacker Source Pin with Radiating Ripples
         const safeCountry = escapeHtml(s.country_name || s.country_code);
         const safeFlag = escapeHtml(s.flag_emoji || '🌐');
+        const safeCity = escapeHtml(s.city || '');
+        const safeRegion = escapeHtml(s.region || '');
+        const safeOrg = escapeHtml(s.org || s.asn || '');
         pinsSvg += `
           <g class="threat-pin"
              style="cursor: pointer;"
-             onmousemove="showMapTooltip(event, '${safeCountry}', '${s.country_code}', ${s.attack_count}, '${safeFlag}', '', '')"
+             onmousemove="showMapTooltip(event, '${safeCountry}', '${s.country_code}', ${s.attack_count}, '${safeFlag}', '', '${safeOrg}', '${safeCity}', '${safeRegion}')"
              onmouseleave="hideMapTooltip()">
             <circle cx="${cx}" cy="${cy}" r="4" fill="#ff0055" filter="url(#glow-red)">
               <animate attributeName="r" values="3.5;6;3.5" dur="1.8s" repeatCount="indefinite"/>
@@ -3168,7 +3382,25 @@
       container.innerHTML = mapHtml + listHtml;
     }
 
-    // MITRE Radar Heatmap
+    // MITRE Radar Heatmap & ATT&CK Matrix Directory
+    const MITRE_NAMES = {
+      'T1190': 'Exploit Public-Facing Application',
+      'T1110': 'Brute Force & Credential Guessing',
+      'T1059': 'Command & Scripting Interpreter',
+      'T1078': 'Valid Accounts & SSH Abuse',
+      'T1071': 'Application Layer Protocol / C2',
+      'T1014': 'Rootkit & Kernel Hook Tampering',
+      'T1048': 'Exfiltration Over Alternative Protocol',
+      'T1568': 'Dynamic Resolution / Fast Flux DNS',
+      'T1055': 'Process Injection & Memory Tampering',
+      'T1505': 'Server Software Component / Web Shell',
+      'T1021': 'Remote Services & Lateral Movement',
+      'T1068': 'Exploitation for Privilege Escalation',
+      'T1203': 'Exploitation for Client Execution',
+      'T1083': 'File and Directory Discovery',
+      'T1046': 'Network Service Discovery / Port Scan'
+    };
+
     function renderMITREStats(stats) {
       const container = document.getElementById('mitre-stats-container');
       if (!stats || stats.length === 0) {
@@ -3179,23 +3411,103 @@
       let maxHits = 1;
       stats.forEach(s => { if (s.count > maxHits) maxHits = s.count; });
 
-      container.innerHTML = stats.slice(0, 6).map(s => {
+      container.innerHTML = stats.slice(0, 7).map(s => {
         const pct = Math.min(100, Math.round((s.count / maxHits) * 100));
+        const techId = escapeHtml(s.technique_id);
+        const cleanTech = (s.technique_id || '').split('.')[0];
+        const techName = escapeHtml(MITRE_NAMES[s.technique_id] || MITRE_NAMES[cleanTech] || 'Adversary Technique');
+        const mitreUrl = `https://attack.mitre.org/techniques/${encodeURIComponent(cleanTech)}/`;
+
         return `
-          <div class="mitre-pill" style="margin-bottom: 0.45rem;">
-            <div class="mitre-pill-top">
-              <span class="mitre-pill-tech">${escapeHtml(s.technique_id)}</span>
-              <span class="mitre-pill-count">${s.count} hits</span>
+          <div class="mitre-pill" style="margin-bottom: 0.55rem; padding: 0.55rem 0.75rem; background: #060a17; border: 1px solid #1e293b; border-radius: 6px; transition: border-color 0.2s;" onmouseenter="this.style.borderColor='var(--cyan)'" onmouseleave="this.style.borderColor='#1e293b'">
+            <div class="mitre-pill-top" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
+              <div style="display: flex; align-items: center; gap: 0.45rem;">
+                <a href="${mitreUrl}" target="_blank" rel="noopener" class="tag-mitre" style="text-decoration: none; font-size: 0.68rem; font-weight: 800;" title="Open MITRE ATT&CK definition">🔗 ${techId}</a>
+                <span style="font-size: 0.74rem; color: #e2e8f0; font-weight: 600;">${techName}</span>
+              </div>
+              <span class="mitre-pill-count" style="font-family: var(--font-mono); color: var(--cyan); font-size: 0.72rem; font-weight: 700;">${s.count} hits</span>
             </div>
-            <div class="mitre-bar-bg">
-              <div class="mitre-bar-fill" style="width: ${pct}%;"></div>
+            <div class="mitre-bar-bg" style="height: 4px; background: rgba(255,255,255,0.06); border-radius: 2px; overflow: hidden;">
+              <div class="mitre-bar-fill" style="width: ${pct}%; height: 100%; background: linear-gradient(90deg, var(--cyan), var(--magenta)); border-radius: 2px;"></div>
             </div>
           </div>
         `;
       }).join('');
     }
 
-    // Payload Drawer Inspector
+    // Payload Drawer Inspector & Interactive Actions
+    let currentDrawerJSONObj = null;
+
+    function drawerQuickBan() {
+      if (!currentDrawerEvent || !currentDrawerEvent.client_ip) {
+        showToast('No external IP target associated with this incident', 'warning');
+        return;
+      }
+      triageQuickBan(currentDrawerEvent.client_ip);
+    }
+
+    function drawerSendTarpit() {
+      if (!currentDrawerEvent || !currentDrawerEvent.client_ip) {
+        showToast('No external IP target associated with this incident', 'warning');
+        return;
+      }
+      triageSendTarpit(currentDrawerEvent.client_ip);
+    }
+
+    function drawerResolve() {
+      if (!currentDrawerEvent) return;
+      const incidentId = currentDrawerEvent.id;
+      const ip = currentDrawerEvent.client_ip;
+      closePayloadDrawer();
+      if (incidentId) {
+        const idx = activeAlerts.findIndex(a => a.id === incidentId);
+        if (idx !== -1) {
+          triageDismiss(idx, ip);
+          return;
+        }
+      }
+      if (ip && ip !== '127.0.0.1' && ip !== 'local') {
+        fetch('/api/alerts/triage', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'dismiss', ip: ip })
+        }).catch(() => {});
+      }
+      showToast('Incident resolved and marked complete', 'info', 'Triage Complete');
+    }
+
+    function filterDrawerJSON(query) {
+      const jsonContainer = document.getElementById('drawer-json-content');
+      const matchCountEl = document.getElementById('drawer-json-matches');
+      if (!jsonContainer || !currentDrawerJSONObj) return;
+
+      query = (query || '').trim().toLowerCase();
+      if (!query) {
+        jsonContainer.innerHTML = syntaxHighlightJSON(currentDrawerJSONObj);
+        if (matchCountEl) matchCountEl.textContent = '';
+        return;
+      }
+
+      let matchCount = 0;
+      let filteredObj = {};
+      for (const [k, v] of Object.entries(currentDrawerJSONObj)) {
+        const kStr = String(k).toLowerCase();
+        const vStr = typeof v === 'object' ? JSON.stringify(v).toLowerCase() : String(v).toLowerCase();
+        if (kStr.includes(query) || vStr.includes(query)) {
+          filteredObj[k] = v;
+          matchCount++;
+        }
+      }
+
+      if (matchCount === 0) {
+        jsonContainer.innerHTML = `<span style="color: var(--text-muted); font-size: 0.75rem;">No JSON keys or values matched "<strong>${escapeHtml(query)}</strong>"</span>`;
+        if (matchCountEl) matchCountEl.textContent = '0 matches';
+      } else {
+        jsonContainer.innerHTML = syntaxHighlightJSON(filteredObj);
+        if (matchCountEl) matchCountEl.textContent = `${matchCount} match${matchCount > 1 ? 'es' : ''}`;
+      }
+    }
+
     function openPayloadDrawerById(id) {
       const alert = activeAlerts.find(a => a.id === id) || eventsLog.find(e => e.id === id);
       if (alert) {
@@ -3216,6 +3528,34 @@
       document.getElementById('drawer-node').textContent = ev.node_id || 'controller';
       document.getElementById('drawer-ip').textContent = ev.client_ip || '-';
       document.getElementById('drawer-score').innerHTML = getScoreBadge(ev.threat_score, ev.score_breakdown);
+
+      // Populate Packet Flow Trajectory Card
+      const flowActorIP = document.getElementById('flow-actor-ip');
+      const flowActorLoc = document.getElementById('flow-actor-loc');
+      const flowProtoBadge = document.getElementById('flow-proto-badge');
+      const flowStatusBadge = document.getElementById('flow-status-badge');
+      const flowTargetNode = document.getElementById('flow-target-node');
+      const flowTargetService = document.getElementById('flow-target-service');
+
+      if (flowActorIP) {
+        flowActorIP.textContent = (ev.flag_emoji ? ev.flag_emoji + ' ' : '') + (ev.client_ip || '127.0.0.1');
+        const locs = [ev.city, ev.country_name || ev.country_code, ev.asn].filter(Boolean).join(' • ');
+        flowActorLoc.textContent = locs || (ev.client_ip === '127.0.0.1' || ev.client_ip === 'local' ? 'Local Host Execution' : 'External WAN Origin');
+        
+        let proto = 'TCP/443';
+        const rawLower = (ev.raw_line || '').toLowerCase();
+        if (rawLower.includes('udp') || rawLower.includes('dns')) proto = 'UDP/53';
+        else if (rawLower.includes('ssh') || rawLower.includes('port 22')) proto = 'TCP/22';
+        else if (rawLower.includes('http/')) proto = 'TCP/80';
+        flowProtoBadge.textContent = proto;
+
+        const status = ev.status_code || 0;
+        flowStatusBadge.textContent = status > 0 ? `HTTP ${status}` : (ev.threat_score >= 85 ? 'BLOCKED / XDP' : 'INSPECTED');
+        flowStatusBadge.style.color = status >= 400 || ev.threat_score >= 85 ? 'var(--magenta)' : 'var(--cyan)';
+
+        flowTargetNode.textContent = ev.node_id || 'controller';
+        flowTargetService.textContent = ev.source ? `Sensor: ${ev.source.toUpperCase()}` : 'CoPSeC Edge Guard';
+      }
 
       // 1. Populate Root Cause & Evidence Analysis
       populateDrawerEvidence(ev);
@@ -3328,6 +3668,10 @@
       }
 
       const jsonContainer = document.getElementById('drawer-json-content');
+      const searchBox = document.getElementById('drawer-json-search');
+      const matchCountEl = document.getElementById('drawer-json-matches');
+      if (searchBox) searchBox.value = '';
+      if (matchCountEl) matchCountEl.textContent = '';
 
       let parsed = null;
       if (ev.raw_line) {
@@ -3341,10 +3685,11 @@
       }
 
       if (parsed) {
+        currentDrawerJSONObj = parsed;
         jsonContainer.innerHTML = syntaxHighlightJSON(parsed);
       } else {
         // Construct structured telemetry object
-        const telemetryObj = {
+        currentDrawerJSONObj = {
           id: ev.id,
           node_id: ev.node_id,
           source: ev.source,
@@ -3359,7 +3704,7 @@
           analyst_notes: ev.analyst_notes,
           raw_line: ev.raw_line
         };
-        jsonContainer.innerHTML = syntaxHighlightJSON(telemetryObj);
+        jsonContainer.innerHTML = syntaxHighlightJSON(currentDrawerJSONObj);
       }
 
       const aiContainer = document.getElementById('drawer-ai-container');
@@ -4298,12 +4643,112 @@
         .replace(/'/g, '&#039;');
     }
 
-    // Keyboard navigation (Esc closes drawer/modals)
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') {
+    // -------------------------------------------------------------
+    // SOC Analyst Ergonomic Keyboard Navigation & Shortcuts System
+    // -------------------------------------------------------------
+    let activeSelectedAlertIndex = 0;
+
+    function highlightActiveKeyboardRow(rows) {
+      if (!rows) {
+        rows = document.querySelectorAll('#alerts-tbody tr.incident-row');
+      }
+      if (!rows || rows.length === 0) return;
+      rows.forEach((r, i) => {
+        if (i === activeSelectedAlertIndex) {
+          r.classList.add('active-keyboard-row');
+          r.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        } else {
+          r.classList.remove('active-keyboard-row');
+        }
+      });
+    }
+
+    window.addEventListener('keydown', (e) => {
+      // Ignore if inside an active form input/textarea/select
+      const tag = (e.target.tagName || '').toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || tag === 'select' || e.target.isContentEditable) {
+        if (e.key === 'Escape') {
+          e.target.blur();
+        }
+        return;
+      }
+
+      const key = e.key;
+
+      // Esc: Close open drawer or modals
+      if (key === 'Escape') {
         closePayloadDrawer();
         closeBanModal();
         closeSigmaModal();
+        return;
+      }
+
+      const rows = document.querySelectorAll('#alerts-tbody tr.incident-row');
+
+      // J: Move down through alerts
+      if (key === 'j' || key === 'J' || key === 'ArrowDown') {
+        e.preventDefault();
+        if (!activeAlerts || activeAlerts.length === 0) return;
+        activeSelectedAlertIndex = Math.min(activeAlerts.length - 1, activeSelectedAlertIndex + 1);
+        highlightActiveKeyboardRow(rows);
+        return;
+      }
+
+      // K: Move up through alerts
+      if (key === 'k' || key === 'K' || key === 'ArrowUp') {
+        e.preventDefault();
+        if (!activeAlerts || activeAlerts.length === 0) return;
+        activeSelectedAlertIndex = Math.max(0, activeSelectedAlertIndex - 1);
+        highlightActiveKeyboardRow(rows);
+        return;
+      }
+
+      // Enter or Space: Open Payload Inspector for selected row
+      if (key === 'Enter' || key === ' ') {
+        e.preventDefault();
+        const alert = activeAlerts[activeSelectedAlertIndex];
+        if (alert) openPayloadDrawer(alert);
+        return;
+      }
+
+      // B: Quick Ban active incident
+      if (key === 'b' || key === 'B') {
+        e.preventDefault();
+        const alert = currentDrawerEvent || (activeAlerts && activeAlerts[activeSelectedAlertIndex]);
+        if (alert && alert.client_ip && alert.client_ip !== '127.0.0.1' && alert.client_ip !== 'local') {
+          triageQuickBan(alert.client_ip);
+        } else {
+          showToast('No external IP selected for Quick Ban', 'warning', 'SOAR Guard');
+        }
+        return;
+      }
+
+      // T: Route active incident to Tarpit
+      if (key === 't' || key === 'T') {
+        e.preventDefault();
+        const alert = currentDrawerEvent || (activeAlerts && activeAlerts[activeSelectedAlertIndex]);
+        if (alert && alert.client_ip && alert.client_ip !== '127.0.0.1' && alert.client_ip !== 'local') {
+          triageSendTarpit(alert.client_ip);
+        } else {
+          showToast('No external IP selected for Tarpit', 'warning', 'SOAR Guard');
+        }
+        return;
+      }
+
+      // Number keys 1-7: Switch tabs quickly
+      if (['1', '2', '3', '4', '5', '6', '7'].includes(key)) {
+        const tabMap = {
+          '1': 'tab-live',
+          '2': 'tab-alerts',
+          '3': 'tab-nodes',
+          '4': 'tab-p2p',
+          '5': 'tab-advanced-defenses',
+          '6': 'tab-soar',
+          '7': 'tab-sigma'
+        };
+        if (tabMap[key]) {
+          switchTab(tabMap[key]);
+        }
       }
     });
 
