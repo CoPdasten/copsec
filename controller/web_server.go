@@ -18,6 +18,7 @@ import (
 	"github.com/copsec/controller/pkg/healing"
 	"github.com/copsec/controller/pkg/ml"
 	"github.com/copsec/controller/pkg/p2p"
+	"github.com/copsec/controller/pkg/sigma"
 	"github.com/copsec/controller/pkg/tarpit"
 	"github.com/copsec/controller/pkg/threat"
 	"github.com/copsec/controller/pkg/yara"
@@ -105,6 +106,8 @@ func (ws *WebSOCServer) Start() error {
 	mux.HandleFunc("/api/config", ws.handleConfig)
 	mux.HandleFunc("/api/stats", ws.handleStats)
 	mux.HandleFunc("/api/events", ws.handleEvents)
+	mux.HandleFunc("/api/alerts", ws.handleAlerts)
+	mux.HandleFunc("/api/alerts/triage", ws.handleAlertsTriage)
 	mux.HandleFunc("/api/bans", ws.handleBans)
 	mux.HandleFunc("/api/soar/ban", ws.handleSOARBan)
 	mux.HandleFunc("/api/soar/unban", ws.handleSOARUnban)
@@ -876,4 +879,145 @@ func (ws *WebSOCServer) handleThreatInspect(w http.ResponseWriter, r *http.Reque
 func (ws *WebSOCServer) handleMLStats(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(ml.GetDefaultEngine().GetStats())
+}
+
+// SOCAlertDTO represents an analyst-triaged high-priority alert.
+type SOCAlertDTO struct {
+	*StoredEvent
+	ContainmentState string          `json:"containment_state"` // BANNED (XDP), TARPITTED, HOST CONTAINED, UNMITIGATED
+	Scope            sigma.RuleScope `json:"scope"`             // SCOPE_NETWORK, SCOPE_HOST_LOCAL
+	IsHostLocal      bool            `json:"is_host_local"`
+	RelativeTime     string          `json:"relative_time"`
+}
+
+func (ws *WebSOCServer) handleAlerts(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if ws.storage == nil {
+		json.NewEncoder(w).Encode([]*SOCAlertDTO{})
+		return
+	}
+
+	limitStr := r.URL.Query().Get("limit")
+	limit := 100
+	if l, err := strconv.Atoi(limitStr); err == nil && l > 0 && l <= 500 {
+		limit = l
+	}
+
+	events, err := ws.storage.GetRecentEvents(limit)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	activeBansMap := make(map[string]bool)
+	if ws.ttlManager != nil {
+		for _, b := range ws.ttlManager.GetActiveBans() {
+			activeBansMap[b.IP] = true
+		}
+	}
+
+	var alerts []*SOCAlertDTO
+	nowMs := time.Now().UnixMilli()
+
+	for _, ev := range events {
+		scope := sigma.DetermineRuleScope(ev.RuleID, "", "", "", nil)
+		isHostLocalRule := scope == sigma.ScopeHostLocal || ev.RuleID == "sudo_execution" || strings.Contains(strings.ToLower(ev.RuleID), "sudo") || strings.Contains(strings.ToLower(ev.RuleID), "cron")
+		isSigma := strings.HasPrefix(strings.ToLower(ev.RuleID), "sigma")
+		isML := (ev.MLAnomaly && ev.MLConfidencePct >= 80) || (ev.SnortML && ev.SnortConfidence >= 0.80)
+		isCritical := ev.ThreatScore >= 70
+		isKernelOrFIM := strings.Contains(strings.ToLower(ev.RuleID), "rootkit") ||
+			strings.Contains(strings.ToLower(ev.RuleID), "fim") ||
+			strings.Contains(strings.ToLower(ev.RuleID), "integrity") ||
+			strings.Contains(strings.ToLower(ev.RuleID), "ptrace") ||
+			strings.Contains(strings.ToLower(ev.RuleID), "lkm")
+
+		if !isCritical && !isSigma && !isML && !isKernelOrFIM && !isHostLocalRule {
+			continue
+		}
+
+		isHostLocal := scope == sigma.ScopeHostLocal || ev.ClientIP == "127.0.0.1" || ev.ClientIP == "local" || isProtectedIP(ev.ClientIP)
+
+		containment := "UNMITIGATED"
+		if isHostLocal {
+			containment = "HOST CONTAINED"
+		} else if activeBansMap[ev.ClientIP] {
+			containment = "BANNED (XDP)"
+		}
+
+		diffSec := (nowMs - ev.TimestampMs) / 1000
+		relTime := "just now"
+		if diffSec >= 3600 {
+			relTime = fmt.Sprintf("%dh ago", diffSec/3600)
+		} else if diffSec >= 60 {
+			relTime = fmt.Sprintf("%dm ago", diffSec/60)
+		} else if diffSec > 5 {
+			relTime = fmt.Sprintf("%ds ago", diffSec)
+		}
+
+		alerts = append(alerts, &SOCAlertDTO{
+			StoredEvent:      ev,
+			ContainmentState: containment,
+			Scope:            scope,
+			IsHostLocal:      isHostLocal,
+			RelativeTime:     relTime,
+		})
+	}
+
+	if alerts == nil {
+		alerts = []*SOCAlertDTO{}
+	}
+
+	json.NewEncoder(w).Encode(alerts)
+}
+
+func (ws *WebSOCServer) handleAlertsTriage(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		Action  string `json:"action"` // ban, tarpit, dismiss, whitelist
+		IP      string `json:"ip"`
+		EventID int64  `json:"event_id"`
+		Reason  string `json:"reason"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	cleanIP := strings.TrimSpace(req.IP)
+	switch req.Action {
+	case "ban":
+		if cleanIP != "" && !isProtectedIP(cleanIP) && ws.ttlManager != nil {
+			reason := req.Reason
+			if reason == "" {
+				reason = "Analyst Triage Quick Ban (XDP Drop)"
+			}
+			_, _ = ws.ttlManager.BanIP(cleanIP, reason, 86400, TierExtendedQuarantine)
+		}
+	case "tarpit":
+		if cleanIP != "" && !isProtectedIP(cleanIP) {
+			if ws.ttlManager != nil {
+				_, _ = ws.ttlManager.BanIP(cleanIP, "Analyst Triage: Zero-Window Tarpit Trap", 3600, TierTempIsolation)
+			}
+		}
+	case "whitelist", "dismiss":
+		if cleanIP != "" && ws.ttlManager != nil {
+			_ = ws.ttlManager.UnbanIP(cleanIP)
+		}
+		if ws.server != nil && ws.server.threatEngine != nil && cleanIP != "" {
+			_ = ws.server.threatEngine.AddWhitelistCIDR(cleanIP)
+		}
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"action":  req.Action,
+		"ip":      cleanIP,
+	})
 }

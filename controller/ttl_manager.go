@@ -94,6 +94,11 @@ func (tm *TTLBanManager) restoreActiveBans() {
 
 	for _, b := range bans {
 		if b.Status == "ACTIVE" {
+			cleanIP := strings.TrimSpace(b.IP)
+			if isProtectedIP(cleanIP) || strings.Contains(strings.ToLower(b.Reason), "sudo") {
+				_ = tm.storage.RemoveBan(b.IP)
+				continue
+			}
 			// Check if already expired while offline
 			if b.DurationSeconds > 0 && b.ExpireTimeMs > 0 && b.ExpireTimeMs <= nowMs {
 				// Expired during downtime

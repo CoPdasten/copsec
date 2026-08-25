@@ -322,6 +322,16 @@ func (t *Tailer) readLines(reader *bufio.Reader, file *os.File, currentOffset in
 
 // extractIPFromLine extracts client IP from Nginx, SSH, or Syslog raw lines.
 func extractIPFromLine(rawLine, source string) string {
+	lower := strings.ToLower(rawLine)
+	// Internal OS / host-local execution commands must NEVER bind to arbitrary network IPs
+	if strings.Contains(lower, "sudo:") ||
+		strings.Contains(lower, "cron[") ||
+		strings.Contains(lower, "systemd[") ||
+		strings.Contains(lower, "pam_unix(sudo") ||
+		strings.Contains(lower, "pam_unix(cron") {
+		return "127.0.0.1"
+	}
+
 	fields := strings.Fields(rawLine)
 	if len(fields) == 0 {
 		return ""
@@ -336,19 +346,28 @@ func extractIPFromLine(rawLine, source string) string {
 		}
 	}
 
-	// 2. SSH / Auth Log: "from <IP> port" or "for <user> from <IP>"
+	// 2. SSH / Auth Log: "from <IP> port" or "for <user> from <IP>" or "rhost=<IP>"
 	if source == "ssh" || source == "auth" {
 		for i, w := range fields {
 			if strings.EqualFold(w, "from") && i+1 < len(fields) {
-				cand := strings.Trim(fields[i+1], `",[]`)
+				cand := strings.Trim(fields[i+1], `",[]:;()`)
+				if net.ParseIP(cand) != nil {
+					return cand
+				}
+			}
+			if strings.HasPrefix(strings.ToLower(w), "rhost=") {
+				cand := strings.TrimPrefix(w, "rhost=")
+				cand = strings.Trim(cand, `",[]:;()`)
 				if net.ParseIP(cand) != nil {
 					return cand
 				}
 			}
 		}
+		// Host-local authentication without remote IP
+		return "127.0.0.1"
 	}
 
-	// 3. Fallback Generic IPv4/IPv6 Scanner
+	// 3. Fallback Generic IPv4/IPv6 Scanner (only for non-auth network logs)
 	for _, f := range fields {
 		cleaned := strings.Trim(f, `",[]:;()`)
 		if ip := net.ParseIP(cleaned); ip != nil {
@@ -444,6 +463,7 @@ func parseAuthLine(line string) (*copsecproto.LogEvent, bool) {
 		threatScore = 20
 		ruleID = "sudo_execution"
 		mitreID = "T1078"
+		ip = "127.0.0.1"
 	}
 
 	return &copsecproto.LogEvent{
@@ -507,6 +527,7 @@ func parseLogLine(sourceName, raw string) *copsecproto.LogEvent {
 		threatScore := int32(0)
 		ruleID := "auth_event"
 		mitreID := ""
+		ip := extractIPFromLine(raw, "auth")
 		if strings.Contains(raw, "Failed password") || strings.Contains(raw, "authentication failure") || strings.Contains(raw, "Invalid user") {
 			threatScore = 70
 			ruleID = "ssh_failed_password"
@@ -518,11 +539,12 @@ func parseLogLine(sourceName, raw string) *copsecproto.LogEvent {
 			threatScore = 20
 			ruleID = "sudo_execution"
 			mitreID = "T1078"
+			ip = "127.0.0.1"
 		}
 		return &copsecproto.LogEvent{
 			Source:           "auth",
 			RawLine:          raw,
-			ClientIp:         extractIPFromLine(raw, "auth"),
+			ClientIp:         ip,
 			ThreatScore:      threatScore,
 			RuleId:           ruleID,
 			MitreTechniqueId: mitreID,

@@ -121,11 +121,60 @@
       color: var(--cyan);
       box-shadow: 0 0 12px var(--cyan-glow);
     }
+    .alert-badge-count {
+      background: var(--magenta);
+      color: #fff;
+      font-size: 0.65rem;
+      font-weight: 800;
+      padding: 0.1rem 0.45rem;
+      border-radius: 10px;
+      margin-left: 0.25rem;
+      box-shadow: 0 0 8px rgba(255, 0, 85, 0.7);
+      animation: pulse 1.5s infinite;
+    }
+
+    /* Pulsating Neon Border Animation for SOC Header */
+    @keyframes neonPulse {
+      0%, 100% {
+        border-color: var(--border-color);
+        box-shadow: none;
+      }
+      50% {
+        border-color: var(--magenta);
+        box-shadow: 0 0 25px rgba(255, 0, 85, 0.7), inset 0 0 15px rgba(255, 0, 85, 0.35);
+      }
+    }
+    header.neon-pulse-active {
+      animation: neonPulse 1s ease-in-out 4;
+    }
 
     .header-actions {
       display: flex;
       align-items: center;
-      gap: 1rem;
+      gap: 0.75rem;
+    }
+    .audio-toggle-btn {
+      background: rgba(15, 23, 42, 0.8);
+      border: 1px solid var(--border-color);
+      color: var(--cyan);
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      padding: 0.35rem 0.75rem;
+      border-radius: 6px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+      transition: all 0.2s ease;
+      font-weight: 600;
+    }
+    .audio-toggle-btn:hover {
+      border-color: var(--cyan);
+      box-shadow: 0 0 10px var(--cyan-glow);
+    }
+    .audio-toggle-btn.muted {
+      color: var(--text-muted);
+      border-color: rgba(255,255,255,0.1);
     }
     .ws-indicator {
       display: flex;
@@ -153,6 +202,90 @@
     @keyframes pulse {
       0%, 100% { opacity: 1; }
       50% { opacity: 0.3; }
+    }
+
+    /* Triage Cockpit Styles */
+    .triage-stats-bar {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 0.75rem;
+      margin-bottom: 1rem;
+    }
+    .triage-stat-item {
+      background: rgba(15, 23, 42, 0.6);
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      padding: 0.6rem 0.9rem;
+      display: flex;
+      flex-direction: column;
+    }
+    .triage-stat-label {
+      font-size: 0.68rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+    .triage-stat-val {
+      font-size: 1.3rem;
+      font-weight: 800;
+      font-family: var(--font-mono);
+    }
+    .triage-actions-cell {
+      display: flex;
+      gap: 0.35rem;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .btn-triage-xs {
+      padding: 0.25rem 0.55rem;
+      font-size: 0.7rem;
+      font-weight: 700;
+      border-radius: 4px;
+      cursor: pointer;
+      border: 1px solid transparent;
+      transition: all 0.15s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+    }
+    .btn-triage-ban {
+      background: rgba(244, 63, 94, 0.2);
+      color: #f43f5e;
+      border-color: #f43f5e;
+    }
+    .btn-triage-ban:hover {
+      background: #f43f5e;
+      color: #000;
+      box-shadow: 0 0 10px rgba(244, 63, 94, 0.6);
+    }
+    .btn-triage-tarpit {
+      background: rgba(6, 182, 212, 0.2);
+      color: var(--cyan);
+      border-color: var(--cyan);
+    }
+    .btn-triage-tarpit:hover {
+      background: var(--cyan);
+      color: #000;
+      box-shadow: 0 0 10px var(--cyan-glow);
+    }
+    .btn-triage-report {
+      background: rgba(168, 85, 247, 0.2);
+      color: #c084fc;
+      border-color: #c084fc;
+    }
+    .btn-triage-report:hover {
+      background: #c084fc;
+      color: #000;
+      box-shadow: 0 0 10px rgba(168, 85, 247, 0.6);
+    }
+    .btn-triage-dismiss {
+      background: rgba(100, 116, 139, 0.2);
+      color: #94a3b8;
+      border-color: #64748b;
+    }
+    .btn-triage-dismiss:hover {
+      background: #64748b;
+      color: #fff;
     }
 
     /* Main Container */
@@ -745,6 +878,7 @@
 
     <nav class="nav-tabs">
       <button class="nav-tab active" onclick="switchTab('tab-telemetry')">📡 Incident Stream</button>
+      <button class="nav-tab" id="nav-tab-alerts" onclick="switchTab('tab-alerts')">🚨 Active Alerts <span id="alerts-badge-count" class="alert-badge-count" style="display: none;">0</span></button>
       <button class="nav-tab" onclick="switchTab('tab-nodes')">🌐 Fleet Sensors</button>
       <button class="nav-tab" onclick="switchTab('tab-p2p')">🔗 P2P Defense Mesh</button>
       <button class="nav-tab" onclick="switchTab('tab-advanced-defenses')">🛡️ Advanced Defenses</button>
@@ -755,6 +889,7 @@
     </nav>
 
     <div class="header-actions">
+      <button id="audio-toggle-btn" class="audio-toggle-btn" onclick="toggleAudioAlerts()" title="Toggle Sci-Fi Alert Chime">🔊 Audio: ON</button>
       <div class="ws-indicator">
         <div class="dot" id="ws-dot"></div>
         <span id="ws-status">STREAM ACTIVE</span>
@@ -842,7 +977,78 @@
             <div style="padding: 1rem;" id="mitre-stats-container">
               <div style="color: var(--text-muted); font-size: 0.78rem;">Aggregating technique distributions...</div>
             </div>
+    </div>
+
+    <!-- TAB: 🚨 High-Priority SOC Alerts & Triaging Hub -->
+    <div id="tab-alerts" class="tab-panel">
+      <!-- Triage Stats Bar -->
+      <div class="triage-stats-bar">
+        <div class="triage-stat-item">
+          <span class="triage-stat-label">🚨 Critical Threats (95+)</span>
+          <span class="triage-stat-val" id="triage-stat-crit" style="color: #f43f5e;">0</span>
+        </div>
+        <div class="triage-stat-item">
+          <span class="triage-stat-label">⚠️ High Severity (70-94)</span>
+          <span class="triage-stat-val" id="triage-stat-high" style="color: #f97316;">0</span>
+        </div>
+        <div class="triage-stat-item">
+          <span class="triage-stat-label">🤖 ML / Snort 3 Anomalies</span>
+          <span class="triage-stat-val" id="triage-stat-ml" style="color: #c084fc;">0</span>
+        </div>
+        <div class="triage-stat-item">
+          <span class="triage-stat-label">🖥️ Host-Local Incursions</span>
+          <span class="triage-stat-val" id="triage-stat-host" style="color: #60a5fa;">0</span>
+        </div>
+        <div class="triage-stat-item">
+          <span class="triage-stat-label">🛡️ Containment Ratio</span>
+          <span class="triage-stat-val" id="triage-stat-containment" style="color: var(--emerald);">100%</span>
+        </div>
+      </div>
+
+      <!-- Triage Cockpit Grid Card -->
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">🚨 High-Priority Security Alerts & Triaging Cockpit</div>
+            <div style="font-size: 0.72rem; color: var(--text-muted); font-family: var(--font-mono); margin-top: 0.15rem;">
+              ANALYST-FIRST INCIDENT MATRIX // REAL-TIME ZERO-LATENCY CONTAINMENT
+            </div>
           </div>
+          <div style="display: flex; gap: 0.5rem; align-items: center;">
+            <select id="triage-severity-filter" class="cyber-input" style="width: 150px;" onchange="renderAlertsGrid()">
+              <option value="ALL">All Severities</option>
+              <option value="CRITICAL">Critical (95+)</option>
+              <option value="HIGH">High (70-94)</option>
+              <option value="ANOMALY">ML / Snort Anomaly</option>
+              <option value="HOST_LOCAL">Host / Local Scope</option>
+            </select>
+            <select id="triage-containment-filter" class="cyber-input" style="width: 150px;" onchange="renderAlertsGrid()">
+              <option value="ALL">All States</option>
+              <option value="UNMITIGATED">⚠️ Unmitigated</option>
+              <option value="BANNED">🔒 Banned (XDP)</option>
+              <option value="CONTAINED">🛡️ Host Contained</option>
+            </select>
+            <input type="text" id="triage-search-input" class="cyber-input" placeholder="Search actor, rule, MITRE, node..." style="width: 240px;" onkeyup="renderAlertsGrid()">
+            <button class="btn" onclick="refreshAlerts()">🔄 Refresh</button>
+            <button class="btn btn-outline" onclick="clearDismissedAlerts()">🧹 Clear Dismissed</button>
+          </div>
+        </div>
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th style="width: 120px;">Severity</th>
+                <th style="width: 130px;">Time / Sensor</th>
+                <th style="width: 200px;">Threat Actor / Entity</th>
+                <th style="width: 230px;">Detection Vector & MITRE</th>
+                <th style="width: 140px;">Containment State</th>
+                <th>One-Click Analyst Actions</th>
+              </tr>
+            </thead>
+            <tbody id="alerts-tbody">
+              <tr><td colspan="6" style="text-align: center; color: var(--text-muted); padding: 2.5rem;">No active high-priority security alerts pending triage. Swarm integrity clean.</td></tr>
+            </tbody>
+          </table>
         </div>
       </div>
     </div>
@@ -1459,6 +1665,398 @@
       }
     }
 
+    // Global State for Triaging Hub & HUD
+    let activeAlerts = [];
+    let audioAlertsMuted = localStorage.getItem('copsec_audio_muted') === 'true';
+    let audioCtx = null;
+
+    function initAudio() {
+      if (!audioCtx) {
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        if (AudioContext) {
+          audioCtx = new AudioContext();
+        }
+      }
+    }
+
+    function toggleAudioAlerts() {
+      audioAlertsMuted = !audioAlertsMuted;
+      localStorage.setItem('copsec_audio_muted', audioAlertsMuted ? 'true' : 'false');
+      updateAudioButtonState();
+      if (!audioAlertsMuted) {
+        playSciFiAlertChime();
+        showToast('Sci-Fi Alert Audio Chimes Active', 'success', 'Audio System');
+      } else {
+        showToast('Alert Audio Chimes Muted', 'info', 'Audio System');
+      }
+    }
+
+    function updateAudioButtonState() {
+      const btn = document.getElementById('audio-toggle-btn');
+      if (!btn) return;
+      if (audioAlertsMuted) {
+        btn.className = 'audio-toggle-btn muted';
+        btn.innerHTML = '🔇 Audio: OFF';
+      } else {
+        btn.className = 'audio-toggle-btn';
+        btn.innerHTML = '🔊 Audio: ON';
+      }
+    }
+
+    // Pure-Web Audio API futuristic synthesizer chime (No external audio files needed)
+    function playSciFiAlertChime() {
+      if (audioAlertsMuted) return;
+      try {
+        initAudio();
+        if (!audioCtx) return;
+        if (audioCtx.state === 'suspended') {
+          audioCtx.resume();
+        }
+
+        const now = audioCtx.currentTime;
+        const osc1 = audioCtx.createOscillator();
+        const osc2 = audioCtx.createOscillator();
+        const gainNode = audioCtx.createGain();
+
+        // 880Hz (A5) ramping up to 1320Hz (E6)
+        osc1.type = 'sine';
+        osc1.frequency.setValueAtTime(880, now);
+        osc1.frequency.exponentialRampToValueAtTime(1320, now + 0.12);
+
+        osc2.type = 'triangle';
+        osc2.frequency.setValueAtTime(440, now);
+        osc2.frequency.exponentialRampToValueAtTime(660, now + 0.15);
+
+        gainNode.gain.setValueAtTime(0.001, now);
+        gainNode.gain.exponentialRampToValueAtTime(0.18, now + 0.02);
+        gainNode.gain.exponentialRampToValueAtTime(0.0001, now + 0.28);
+
+        osc1.connect(gainNode);
+        osc2.connect(gainNode);
+        gainNode.connect(audioCtx.destination);
+
+        osc1.start(now);
+        osc2.start(now);
+        osc1.stop(now + 0.3);
+        osc2.stop(now + 0.3);
+      } catch (err) {
+        console.debug('Audio chime error', err);
+      }
+    }
+
+    function triggerNeonHUDAlert() {
+      const header = document.querySelector('header');
+      if (header) {
+        header.classList.remove('neon-pulse-active');
+        void header.offsetWidth;
+        header.classList.add('neon-pulse-active');
+        setTimeout(() => {
+          header.classList.remove('neon-pulse-active');
+        }, 4500);
+      }
+    }
+
+    function isAlertActionable(ev) {
+      if (!ev) return false;
+      const score = ev.threat_score || 0;
+      const rule = (ev.rule_id || '').toLowerCase();
+      const raw = (ev.raw_line || '').toLowerCase();
+
+      const isCritical = score >= 70;
+      const isSigma = rule.startsWith('sigma') || rule === 'sudo_execution' || rule.includes('revshell') || rule.includes('sqli') || rule.includes('rce') || rule.includes('c2') || rule.includes('evasion') || rule.includes('persistence');
+      const isML = (ev.ml_anomaly && (ev.ml_confidence_pct >= 80 || ev.ml_confidence_pct >= 0.8)) || (ev.snort_ml && (ev.snort_confidence >= 0.8 || ev.snort_confidence >= 80));
+      const isKernelFIM = rule.includes('rootkit') || rule.includes('fim') || rule.includes('integrity') || rule.includes('ptrace') || rule.includes('lkm') || raw.includes('fim_healing');
+
+      return isCritical || isSigma || isML || isKernelFIM;
+    }
+
+    function formatRelativeTime(timestampMs) {
+      if (!timestampMs) return 'just now';
+      const diffSec = Math.floor((Date.now() - timestampMs) / 1000);
+      if (diffSec < 5) return 'just now';
+      if (diffSec < 60) return `${diffSec}s ago`;
+      const diffMin = Math.floor(diffSec / 60);
+      if (diffMin < 60) return `${diffMin}m ago`;
+      const diffHr = Math.floor(diffMin / 60);
+      if (diffHr < 24) return `${diffHr}h ago`;
+      return `${Math.floor(diffHr / 24)}d ago`;
+    }
+
+    function addActiveAlert(ev) {
+      if (ev.id && activeAlerts.some(a => a.id === ev.id)) {
+        return;
+      }
+      activeAlerts.unshift(ev);
+      if (activeAlerts.length > 200) activeAlerts.pop();
+
+      updateTriageStats();
+      renderAlertsGrid();
+
+      // Trigger Visual HUD pulse and Sci-Fi Chime for high severity
+      if (ev.threat_score >= 85 || (ev.rule_id && (ev.rule_id.includes('rce') || ev.rule_id.includes('revshell') || ev.rule_id.includes('rootkit')))) {
+        triggerNeonHUDAlert();
+        playSciFiAlertChime();
+      }
+    }
+
+    function updateTriageStats() {
+      let critCount = 0;
+      let highCount = 0;
+      let mlCount = 0;
+      let hostCount = 0;
+      let mitigatedCount = 0;
+
+      activeAlerts.forEach(a => {
+        const score = a.threat_score || 0;
+        const rule = (a.rule_id || '').toLowerCase();
+        if (score >= 95) critCount++;
+        else if (score >= 70) highCount++;
+
+        if (a.ml_anomaly || a.snort_ml) mlCount++;
+
+        const isHost = a.is_host_local || a.client_ip === '127.0.0.1' || a.client_ip === 'local' || rule === 'sudo_execution' || rule.includes('fim') || rule.includes('rootkit') || rule.includes('persistence') || rule.includes('evasion');
+        if (isHost) hostCount++;
+
+        const state = getContainmentState(a);
+        if (state !== 'UNMITIGATED') mitigatedCount++;
+      });
+
+      const elCrit = document.getElementById('triage-stat-crit');
+      if (elCrit) elCrit.textContent = critCount;
+      const elHigh = document.getElementById('triage-stat-high');
+      if (elHigh) elHigh.textContent = highCount;
+      const elMl = document.getElementById('triage-stat-ml');
+      if (elMl) elMl.textContent = mlCount;
+      const elHost = document.getElementById('triage-stat-host');
+      if (elHost) elHost.textContent = hostCount;
+
+      const ratio = activeAlerts.length > 0 ? Math.round((mitigatedCount / activeAlerts.length) * 100) : 100;
+      const elCont = document.getElementById('triage-stat-containment');
+      if (elCont) elCont.textContent = `${ratio}%`;
+
+      const badge = document.getElementById('alerts-badge-count');
+      if (badge) {
+        if (activeAlerts.length > 0) {
+          badge.textContent = activeAlerts.length;
+          badge.style.display = 'inline-block';
+        } else {
+          badge.style.display = 'none';
+        }
+      }
+    }
+
+    function getContainmentState(ev) {
+      if (ev.containment_state) return ev.containment_state;
+      const rule = (ev.rule_id || '').toLowerCase();
+      const isHost = ev.is_host_local || ev.client_ip === '127.0.0.1' || ev.client_ip === 'local' || rule === 'sudo_execution' || rule.includes('fim') || rule.includes('rootkit');
+      if (isHost) return 'HOST CONTAINED';
+
+      const banned = bansCache && bansCache.some(b => b.ip === ev.client_ip && b.status === 'ACTIVE');
+      if (banned) return 'BANNED (XDP)';
+
+      return 'UNMITIGATED';
+    }
+
+    function renderAlertsGrid() {
+      const tbody = document.getElementById('alerts-tbody');
+      if (!tbody) return;
+
+      const sevFilter = document.getElementById('triage-severity-filter')?.value || 'ALL';
+      const stateFilter = document.getElementById('triage-containment-filter')?.value || 'ALL';
+      const searchStr = (document.getElementById('triage-search-input')?.value || '').toLowerCase().trim();
+
+      const filtered = activeAlerts.filter(a => {
+        const score = a.threat_score || 0;
+        const rule = (a.rule_id || '').toLowerCase();
+        const ip = (a.client_ip || '').toLowerCase();
+        const node = (a.node_id || '').toLowerCase();
+        const mitre = (a.mitre_technique_id || '').toLowerCase();
+        const raw = (a.raw_line || '').toLowerCase();
+        const state = getContainmentState(a);
+
+        // Severity filter
+        if (sevFilter === 'CRITICAL' && score < 95) return false;
+        if (sevFilter === 'HIGH' && (score < 70 || score >= 95)) return false;
+        if (sevFilter === 'ANOMALY' && !a.ml_anomaly && !a.snort_ml) return false;
+        if (sevFilter === 'HOST_LOCAL' && state !== 'HOST CONTAINED') return false;
+
+        // Containment filter
+        if (stateFilter === 'UNMITIGATED' && state !== 'UNMITIGATED') return false;
+        if (stateFilter === 'BANNED' && state !== 'BANNED (XDP)') return false;
+        if (stateFilter === 'CONTAINED' && state !== 'HOST CONTAINED') return false;
+
+        // Search filter
+        if (searchStr) {
+          const match = ip.includes(searchStr) || rule.includes(searchStr) || node.includes(searchStr) || mitre.includes(searchStr) || raw.includes(searchStr);
+          if (!match) return false;
+        }
+
+        return true;
+      });
+
+      if (filtered.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--text-muted); padding: 2.5rem;">No alerts match the selected triage filters.</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = filtered.map((a, idx) => {
+        const score = a.threat_score || 0;
+        const state = getContainmentState(a);
+        const relTime = formatRelativeTime(a.timestamp_ms);
+        const nodeLabel = a.node_id || 'controller';
+        const isHost = state === 'HOST CONTAINED' || a.client_ip === '127.0.0.1' || a.client_ip === 'local';
+
+        // 1. Severity Badge
+        let sevBadge = '';
+        if (score >= 95) {
+          sevBadge = `<span class="badge badge-critical" style="background: rgba(244, 63, 94, 0.25); color: #f43f5e; border: 1px solid #f43f5e; font-weight: 800; animation: pulse 1.5s infinite;">CRITICAL (${score})</span>`;
+        } else if (score >= 70) {
+          sevBadge = `<span class="badge badge-high" style="background: rgba(249, 115, 22, 0.25); color: #f97316; border: 1px solid #f97316; font-weight: 700;">HIGH (${score})</span>`;
+        } else if (a.ml_anomaly || a.snort_ml) {
+          const conf = a.ml_confidence_pct || (a.snort_confidence ? a.snort_confidence * 100 : 85);
+          sevBadge = `<span class="badge" style="background: rgba(168, 85, 247, 0.25); color: #c084fc; border: 1px solid #c084fc; font-weight: 700;">🤖 ANOMALY (${conf.toFixed(0)}%)</span>`;
+        } else {
+          sevBadge = `<span class="badge badge-medium" style="font-weight: 600;">SUSP (${score})</span>`;
+        }
+
+        // 2. Threat Actor / Entity
+        let actorHtml = '';
+        if (isHost) {
+          actorHtml = `<span class="badge" style="background: rgba(59, 130, 246, 0.2); color: #60a5fa; border: 1px solid #3b82f6; font-weight: 700;">🖥️ HOST / LOCAL</span>`;
+        } else {
+          const flag = a.flag_emoji || '🌐';
+          const asn = a.asn ? `<span class="chip chip-proto" style="margin-left: 0.3rem;">${escapeHtml(a.asn)}</span>` : '';
+          actorHtml = `<span class="ip-chip">${escapeHtml(flag)} ${escapeHtml(a.client_ip || '-')}</span>${asn}`;
+        }
+
+        // 3. Detection Vector & MITRE ID
+        let vectorHtml = '';
+        const ruleID = a.rule_id || 'threat_signature';
+        const mitreID = a.mitre_technique_id || 'T1190';
+        let prefix = '[Sigma]';
+        if (a.snort_ml) prefix = '[Snort 3 ML]';
+        else if (a.ml_anomaly) prefix = '[Pure-Go ML]';
+        else if (ruleID.includes('rootkit') || ruleID.includes('ebpf')) prefix = '[eBPF Rootkit]';
+        else if (ruleID.includes('fim')) prefix = '[FIM Healing]';
+
+        vectorHtml = `<span style="font-weight: 700; color: #fff;">${escapeHtml(prefix)} ${escapeHtml(ruleID)}</span> <span class="tag-mitre" style="margin-left: 0.35rem;">${escapeHtml(mitreID)}</span>`;
+
+        // 4. Containment State
+        let containmentBadge = '';
+        if (state === 'BANNED (XDP)') {
+          containmentBadge = `<span class="badge" style="background: rgba(16, 185, 129, 0.25); color: #10b981; border: 1px solid #10b981; font-weight: 700;">🔒 BANNED (XDP)</span>`;
+        } else if (state === 'TARPITTED') {
+          containmentBadge = `<span class="badge" style="background: rgba(6, 182, 212, 0.25); color: #06b6d4; border: 1px solid #06b6d4; font-weight: 700;">🕳️ TARPITTED</span>`;
+        } else if (state === 'HOST CONTAINED') {
+          containmentBadge = `<span class="badge" style="background: rgba(139, 92, 246, 0.25); color: #a78bfa; border: 1px solid #8b5cf6; font-weight: 700;">🛡️ HOST CONTAINED</span>`;
+        } else {
+          containmentBadge = `<span class="badge badge-critical" style="background: rgba(239, 68, 68, 0.25); color: #ef4444; border: 1px solid #ef4444; font-weight: 700; animation: pulse 1.5s infinite;">⚠️ UNMITIGATED</span>`;
+        }
+
+        // 5. One-Click Analyst Actions
+        let actionButtons = '';
+        if (!isHost && a.client_ip && a.client_ip !== '-') {
+          actionButtons += `<button class="btn-triage-xs btn-triage-ban" onclick="triageQuickBan('${escapeHtml(a.client_ip)}')">⚡ Quick Ban</button>`;
+          actionButtons += `<button class="btn-triage-xs btn-triage-tarpit" onclick="triageSendTarpit('${escapeHtml(a.client_ip)}')">🕳️ Send Tarpit</button>`;
+        }
+        actionButtons += `<button class="btn-triage-xs btn-triage-report" onclick="triageAIReport(${idx})">📄 AI Report</button>`;
+        actionButtons += `<button class="btn-triage-xs btn-triage-dismiss" onclick="triageDismiss(${idx}, '${escapeHtml(a.client_ip)}')">✅ Dismiss / Whitelist</button>`;
+
+        return `
+          <tr class="incident-row ${score >= 80 ? 'row-crit' : (score >= 50 ? 'row-high' : 'row-med')}">
+            <td>${sevBadge}</td>
+            <td>
+              <div style="font-family: var(--font-mono); font-size: 0.78rem; font-weight: 700; color: #cbd5e1;">${escapeHtml(relTime)}</div>
+              <div style="font-size: 0.7rem; color: var(--text-muted);"><span class="tag-node">${escapeHtml(nodeLabel)}</span></div>
+            </td>
+            <td>${actorHtml}</td>
+            <td>${vectorHtml}</td>
+            <td>${containmentBadge}</td>
+            <td><div class="triage-actions-cell">${actionButtons}</div></td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function refreshAlerts() {
+      fetch('/api/alerts?limit=100')
+        .then(res => res.json())
+        .then(data => {
+          if (Array.isArray(data)) {
+            activeAlerts = data;
+            updateTriageStats();
+            renderAlertsGrid();
+          }
+        })
+        .catch(err => console.error('Failed to fetch alerts', err));
+    }
+
+    function triageQuickBan(ip) {
+      if (!ip || ip === '127.0.0.1' || ip === 'local') {
+        showToast('Cannot ban host-local or loopback entity', 'warning', 'SOAR Guard');
+        return;
+      }
+      fetch('/api/soar/ban', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ip: ip, duration_seconds: 86400, reason: 'Analyst Triage Quick Ban (XDP Drop)' })
+      })
+      .then(res => res.json())
+      .then(data => {
+        showToast(`Instant Swarm-wide XDP Ban enforced for ${ip}`, 'success', 'SOAR Mitigation');
+        refreshBans();
+        refreshAlerts();
+      })
+      .catch(err => showToast(`Ban failed: ${err}`, 'danger', 'Error'));
+    }
+
+    function triageSendTarpit(ip) {
+      if (!ip || ip === '127.0.0.1' || ip === 'local') {
+        showToast('Cannot tarpit host-local entity', 'warning', 'Tarpit Guard');
+        return;
+      }
+      fetch('/api/alerts/triage', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'tarpit', ip: ip, reason: 'Trapped in Zero-Window Tarpit' })
+      })
+      .then(res => res.json())
+      .then(data => {
+        showToast(`Attacker socket ${ip} trapped in Zero-Window Tarpit`, 'success', 'Tarpit Activated');
+        refreshAlerts();
+      })
+      .catch(err => showToast(`Tarpit failed: ${err}`, 'danger', 'Error'));
+    }
+
+    function triageAIReport(index) {
+      const alert = activeAlerts[index];
+      if (!alert) return;
+      openAIReportModal(alert.client_ip, alert.rule_id, alert.mitre_technique_id, alert.threat_score, alert.id);
+    }
+
+    function triageDismiss(index, ip) {
+      if (index >= 0 && index < activeAlerts.length) {
+        activeAlerts.splice(index, 1);
+        updateTriageStats();
+        renderAlertsGrid();
+      }
+      if (ip && ip !== '127.0.0.1' && ip !== 'local') {
+        fetch('/api/alerts/triage', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'dismiss', ip: ip })
+        }).catch(() => {});
+      }
+      showToast('Alert dismissed and entity threat decayed', 'info', 'Triage Complete');
+    }
+
+    function clearDismissedAlerts() {
+      activeAlerts = activeAlerts.filter(a => getContainmentState(a) === 'UNMITIGATED');
+      updateTriageStats();
+      renderAlertsGrid();
+      showToast('Cleared contained and mitigated alerts from cockpit', 'info', 'Grid Refreshed');
+    }
+
     // Navigation Switcher
     function switchTab(tabId) {
       document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
@@ -1469,6 +2067,7 @@
       const panel = document.getElementById(tabId);
       if (panel) panel.classList.add('active');
 
+      if (tabId === 'tab-alerts') refreshAlerts();
       if (tabId === 'tab-nodes') refreshFleetNodes();
       if (tabId === 'tab-p2p') refreshP2PTopology();
       if (tabId === 'tab-advanced-defenses') refreshAdvancedDefenses();
@@ -1511,10 +2110,14 @@
     function handleWebSocketMessage(msg) {
       if (msg.type === 'event') {
         prependEventRow(msg.payload);
+        if (isAlertActionable(msg.payload)) {
+          addActiveAlert(msg.payload);
+        }
       } else if (msg.type === 'stats') {
         updateStats(msg.payload);
       } else if (msg.type === 'ban_change') {
         refreshBans();
+        refreshAlerts();
         if (msg.payload && msg.payload.ban) {
           showToast(`Quarantine updated for ${msg.payload.ban.ip} (${msg.payload.action})`, 'warning', 'SOAR Event');
         }
@@ -2634,7 +3237,9 @@
     // Auto-init
     window.addEventListener('DOMContentLoaded', () => {
       initWebSocket();
+      updateAudioButtonState();
       checkFirstBootOnboarding();
+      refreshAlerts();
       refreshBans();
       refreshSigmaRules();
       refreshFleetNodes();
@@ -2650,6 +3255,10 @@
       }, 3000);
 
       setInterval(() => {
+        const alertsPanel = document.getElementById('tab-alerts');
+        if (alertsPanel && alertsPanel.classList.contains('active')) {
+          refreshAlerts();
+        }
         const nodesPanel = document.getElementById('tab-nodes');
         if (nodesPanel && nodesPanel.classList.contains('active')) {
           refreshFleetNodes();

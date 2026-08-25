@@ -1,12 +1,17 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"testing"
 	"time"
 
 	copsecproto "github.com/copsec/collector/proto"
+	"github.com/copsec/controller/pkg/sigma"
 	"google.golang.org/grpc/metadata"
 )
 
@@ -345,5 +350,198 @@ func TestSystemConfigStorage(t *testing.T) {
 
 	if loaded["grpc_addr"] != "127.0.0.1:9443" || loaded["autoban_threshold"] != "65" {
 		t.Errorf("Config mismatch: %+v", loaded)
+	}
+}
+
+func TestHostLocalRuleDecouplingAndBanInhibition(t *testing.T) {
+	tmpDir := t.TempDir()
+	store, _ := NewStorageEngine(filepath.Join(tmpDir, "test.db"))
+	defer store.Close()
+
+	analyzer := NewRuleEngine("")
+	server := NewCentralServer(store, analyzer)
+	sigmaEng := NewSigmaEngine("")
+	server.SetSigmaEngine(sigmaEng)
+
+	// 1. Verify Scope Classification
+	if sigma.DetermineRuleScope("sudo_execution", "", "", "", nil) != sigma.ScopeHostLocal {
+		t.Fatalf("Expected sudo_execution to be classified as ScopeHostLocal")
+	}
+	if sigma.DetermineRuleScope("cron_tamper", "", "", "", nil) != sigma.ScopeHostLocal {
+		t.Fatalf("Expected cron_tamper to be classified as ScopeHostLocal")
+	}
+	if sigma.DetermineRuleScope("sigma-linux-persistence", "process_creation", "linux", "", nil) != sigma.ScopeHostLocal {
+		t.Fatalf("Expected sigma-linux-persistence to be classified as ScopeHostLocal")
+	}
+	if sigma.DetermineRuleScope("sigma-web-sqli", "webserver", "nginx", "", nil) != sigma.ScopeNetwork {
+		t.Fatalf("Expected sigma-web-sqli to be classified as ScopeNetwork")
+	}
+
+	// 2. Test Sudo execution log processing (Should sanitize IP to 127.0.0.1 and inhibit auto-ban)
+	sudoEvent := &copsecproto.LogEvent{
+		Source:           "auth",
+		RawLine:          "Aug 25 12:00:00 vps sudo:   ubuntu : TTY=pts/0 ; PWD=/home/ubuntu ; USER=root ; COMMAND=/usr/bin/curl 8.8.8.8",
+		ClientIp:         "",
+		ThreatScore:      95,
+		RuleId:           "sudo_execution",
+		MitreTechniqueId: "T1078",
+		TimestampMs:      time.Now().UnixMilli(),
+	}
+
+	server.processEvent("node-vps-1", sudoEvent)
+
+	// Verify that the event in DB has ClientIP = "127.0.0.1" and NO auto-bans occurred
+	events, err := store.GetRecentEvents(5)
+	if err != nil || len(events) != 1 {
+		t.Fatalf("Expected 1 stored event, got %d (err: %v)", len(events), err)
+	}
+	if events[0].ClientIP != "127.0.0.1" {
+		t.Errorf("Expected ClientIP to be sanitized to 127.0.0.1 for host-local sudo rule, got %s", events[0].ClientIP)
+	}
+
+	bans, err := store.GetActiveBans()
+	if err != nil || len(bans) != 0 {
+		t.Fatalf("Expected 0 active bans for host-local sudo event, got %+v", bans)
+	}
+}
+
+func TestStorageFlushInvalidQuarantines(t *testing.T) {
+	tmpDir := t.TempDir()
+	store, _ := NewStorageEngine(filepath.Join(tmpDir, "test.db"))
+	defer store.Close()
+
+	// Insert invalid historical quarantines
+	_ = store.RecordBan("127.0.0.1", "False positive local ban", 86400)
+	_ = store.RecordBan("local", "Invalid local host entry", 86400)
+	_ = store.RecordBan("198.51.100.99", "sudo_execution false positive", 86400)
+	_ = store.RecordBan("203.0.113.55", "Real SQLi attack", 86400)
+
+	// Flush invalid quarantines
+	evicted, err := store.FlushInvalidQuarantines()
+	if err != nil {
+		t.Fatalf("FlushInvalidQuarantines failed: %v", err)
+	}
+	if evicted < 3 {
+		t.Errorf("Expected at least 3 evicted invalid bans, got %d", evicted)
+	}
+
+	// Verify only valid WAN ban remains
+	bans, err := store.GetActiveBans()
+	if err != nil || len(bans) != 1 || bans[0].IP != "203.0.113.55" {
+		t.Fatalf("Expected only 203.0.113.55 to remain in active bans, got %+v", bans)
+	}
+}
+
+func TestSOCAlertsTriageAPI(t *testing.T) {
+	tmpDir := t.TempDir()
+	store, _ := NewStorageEngine(filepath.Join(tmpDir, "test.db"))
+	defer store.Close()
+
+	analyzer := NewRuleEngine("")
+	server := NewCentralServer(store, analyzer)
+	ttlMgr := NewTTLBanManager(store, server)
+	defer ttlMgr.Stop()
+	sigmaEng := NewSigmaEngine("")
+	server.SetSigmaEngine(sigmaEng)
+	hub := NewWSHub()
+
+	webSoc := NewWebSOCServer("127.0.0.1:0", server, store, ttlMgr, sigmaEng, hub, nil, nil, nil)
+
+	// Insert test incidents
+	// 1. Critical SQLi (ThreatScore 95)
+	_ = store.InsertEvent(&StoredEvent{
+		NodeID:           "node-1",
+		Source:           "nginx",
+		RawLine:          `GET /login?user=admin' UNION SELECT 1,2-- HTTP/1.1`,
+		ClientIP:         "198.51.100.44",
+		ThreatScore:      95,
+		RuleID:           "sigma-web-sqli",
+		MitreTechniqueID: "T1190",
+		TimestampMs:      time.Now().UnixMilli(),
+	})
+
+	// 2. Host-local Sudo execution (Score 20)
+	_ = store.InsertEvent(&StoredEvent{
+		NodeID:           "node-1",
+		Source:           "auth",
+		RawLine:          `sudo: ubuntu : COMMAND=/bin/bash`,
+		ClientIP:         "127.0.0.1",
+		ThreatScore:      20,
+		RuleID:           "sudo_execution",
+		MitreTechniqueID: "T1078",
+		TimestampMs:      time.Now().UnixMilli(),
+	})
+
+	// 3. Pure-Go ML Anomaly (Score 80, Confidence 88%)
+	_ = store.InsertEvent(&StoredEvent{
+		NodeID:           "node-1",
+		Source:           "nginx",
+		RawLine:          `GET /api/v1/stream HTTP/1.1 500`,
+		ClientIP:         "198.51.100.88",
+		ThreatScore:      80,
+		RuleID:           "ml_flow_anomaly",
+		MitreTechniqueID: "T1071",
+		MLAnomaly:        true,
+		MLConfidencePct:  88.0,
+		TimestampMs:      time.Now().UnixMilli(),
+	})
+
+	// 4. Low-priority noise (Score 10, should be excluded from actionable alerts)
+	_ = store.InsertEvent(&StoredEvent{
+		NodeID:           "node-1",
+		Source:           "nginx",
+		RawLine:          `GET /favicon.ico HTTP/1.1 200`,
+		ClientIP:         "198.51.100.10",
+		ThreatScore:      10,
+		RuleID:           "normal_traffic",
+		TimestampMs:      time.Now().UnixMilli(),
+	})
+
+	// GET /api/alerts
+	req := httptest.NewRequest("GET", "/api/alerts?limit=50", nil)
+	rec := httptest.NewRecorder()
+	webSoc.handleAlerts(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected status 200 from /api/alerts, got %d", rec.Code)
+	}
+
+	var alerts []*SOCAlertDTO
+	if err := json.Unmarshal(rec.Body.Bytes(), &alerts); err != nil {
+		t.Fatalf("Failed to parse /api/alerts response: %v", err)
+	}
+
+	if len(alerts) != 3 {
+		t.Fatalf("Expected exactly 3 actionable alerts (SQLi, Sudo, ML anomaly), got %d", len(alerts))
+	}
+
+	// Verify containment state for host-local
+	for _, a := range alerts {
+		if a.RuleID == "sudo_execution" {
+			if a.ContainmentState != "HOST CONTAINED" || !a.IsHostLocal {
+				t.Errorf("Expected sudo_execution to have containment 'HOST CONTAINED', got %s", a.ContainmentState)
+			}
+		}
+	}
+
+	// Test Triage Action: Quick Ban 198.51.100.44
+	triageBody, _ := json.Marshal(map[string]interface{}{
+		"action": "ban",
+		"ip":     "198.51.100.44",
+		"reason": "Analyst Triage Quick Ban",
+	})
+	triageReq := httptest.NewRequest("POST", "/api/alerts/triage", bytes.NewBuffer(triageBody))
+	triageReq.Header.Set("Content-Type", "application/json")
+	triageRec := httptest.NewRecorder()
+	webSoc.handleAlertsTriage(triageRec, triageReq)
+
+	if triageRec.Code != http.StatusOK {
+		t.Fatalf("Expected status 200 from /api/alerts/triage, got %d", triageRec.Code)
+	}
+
+	// Verify ban was enforced
+	bans := ttlMgr.GetActiveBans()
+	if len(bans) != 1 || bans[0].IP != "198.51.100.44" {
+		t.Fatalf("Expected 198.51.100.44 to be active in TTL manager, got %+v", bans)
 	}
 }

@@ -78,15 +78,99 @@ func ResolveField(fields map[string]string, targetField string) (string, bool) {
 	return "", false
 }
 
+// RuleScope categorizes rules into network-originating vs host-local executions.
+type RuleScope string
+
+const (
+	ScopeNetwork   RuleScope = "SCOPE_NETWORK"    // Network-level triggers with authentic remote SourceIP (permits network SOAR quarantines)
+	ScopeHostLocal RuleScope = "SCOPE_HOST_LOCAL" // Host-local OS events without remote socket (inhibits network-level quarantines)
+)
+
+// DetermineRuleScope classifies a rule based on its ID, logsource, or tags.
+func DetermineRuleScope(ruleID, category, product, service string, tags []string) RuleScope {
+	idLower := strings.ToLower(ruleID)
+	catLower := strings.ToLower(category)
+	prodLower := strings.ToLower(product)
+	svcLower := strings.ToLower(service)
+
+	// Explicit tag checks
+	for _, tag := range tags {
+		tLower := strings.ToLower(tag)
+		if tLower == "scope.host_local" || tLower == "scope.host" || tLower == "scope.local" {
+			return ScopeHostLocal
+		}
+		if tLower == "scope.network" || tLower == "scope.net" {
+			return ScopeNetwork
+		}
+	}
+
+	// Host-local known IDs
+	if idLower == "sudo_execution" ||
+		idLower == "cron_tamper" ||
+		idLower == "cron_persistence" ||
+		idLower == "fim_drift" ||
+		idLower == "fim_tampering" ||
+		idLower == "rootkit_lkm" ||
+		idLower == "ebpf_rootkit" ||
+		idLower == "process_injection" ||
+		idLower == "sigma-linux-persistence" ||
+		idLower == "sigma-linux-evasion" ||
+		idLower == "sigma-linux-revshell" ||
+		idLower == "sigma-credential-dumping" ||
+		idLower == "sigma-impair-defenses" ||
+		strings.HasPrefix(idLower, "t1070") ||
+		strings.HasPrefix(idLower, "t1562") ||
+		strings.HasPrefix(idLower, "t1003") ||
+		strings.HasPrefix(idLower, "t1053") ||
+		strings.HasPrefix(idLower, "t1548") ||
+		strings.HasPrefix(idLower, "t1082") ||
+		strings.HasPrefix(idLower, "t1087") {
+		return ScopeHostLocal
+	}
+
+	// Network known log sources and categories
+	if catLower == "webserver" ||
+		catLower == "firewall" ||
+		catLower == "ids" ||
+		catLower == "network" ||
+		catLower == "proxy" ||
+		svcLower == "sshd" ||
+		svcLower == "suricata" ||
+		svcLower == "snort" ||
+		svcLower == "nginx" ||
+		svcLower == "apache" ||
+		strings.Contains(idLower, "sqli") ||
+		strings.Contains(idLower, "rce") ||
+		strings.Contains(idLower, "bruteforce") ||
+		strings.Contains(idLower, "scanner") ||
+		strings.Contains(idLower, "oast") ||
+		strings.Contains(idLower, "web") {
+		return ScopeNetwork
+	}
+
+	// Host-local log sources
+	if catLower == "process_creation" ||
+		catLower == "file_change" ||
+		catLower == "kernel" ||
+		catLower == "audit" ||
+		catLower == "syslog" ||
+		prodLower == "linux" {
+		return ScopeHostLocal
+	}
+
+	return ScopeNetwork
+}
+
 // RuleMetadata holds high-level summary info of a compiled Sigma rule.
 type RuleMetadata struct {
-	ID          string   `json:"id"`
-	Title       string   `json:"title"`
-	Description string   `json:"description"`
-	Level       string   `json:"level"`
-	ThreatScore int      `json:"threat_score"`
-	MitreID     string   `json:"mitre_id"`
-	Tags        []string `json:"tags"`
+	ID          string    `json:"id"`
+	Title       string    `json:"title"`
+	Description string    `json:"description"`
+	Level       string    `json:"level"`
+	ThreatScore int       `json:"threat_score"`
+	MitreID     string    `json:"mitre_id"`
+	Tags        []string  `json:"tags"`
+	Scope       RuleScope `json:"scope"`
 }
 
 // CuratedCatalog keeps an in-memory catalog of all built-in curated detection rules.
@@ -113,6 +197,7 @@ func GetDefaultCatalog() *CuratedCatalog {
 					ThreatScore: 95,
 					MitreID:     "T1059.004",
 					Tags:        []string{"attack.execution", "attack.t1059.004", "attack.t1071"},
+					Scope:       ScopeHostLocal,
 				},
 				{
 					ID:          "sigma-linux-evasion",
@@ -122,6 +207,7 @@ func GetDefaultCatalog() *CuratedCatalog {
 					ThreatScore: 95,
 					MitreID:     "T1070",
 					Tags:        []string{"attack.defense_evasion", "attack.t1070", "attack.t1562"},
+					Scope:       ScopeHostLocal,
 				},
 				{
 					ID:          "sigma-linux-persistence",
@@ -131,6 +217,7 @@ func GetDefaultCatalog() *CuratedCatalog {
 					ThreatScore: 85,
 					MitreID:     "T1053",
 					Tags:        []string{"attack.persistence", "attack.privilege_escalation", "attack.t1053", "attack.t1548.003"},
+					Scope:       ScopeHostLocal,
 				},
 				{
 					ID:          "sigma-web-advanced",
@@ -140,6 +227,7 @@ func GetDefaultCatalog() *CuratedCatalog {
 					ThreatScore: 95,
 					MitreID:     "T1190",
 					Tags:        []string{"attack.initial_access", "attack.t1190", "attack.persistence", "attack.t1505.003"},
+					Scope:       ScopeNetwork,
 				},
 			},
 		}

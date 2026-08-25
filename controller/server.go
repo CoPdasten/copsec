@@ -15,6 +15,7 @@ import (
 	copsecproto "github.com/copsec/collector/proto"
 	"github.com/copsec/controller/pkg/geoip"
 	"github.com/copsec/controller/pkg/ml"
+	"github.com/copsec/controller/pkg/sigma"
 	"github.com/copsec/controller/pkg/snort"
 	"github.com/copsec/controller/pkg/threat"
 	"google.golang.org/grpc"
@@ -285,17 +286,17 @@ func (s *CentralServer) processEvent(nodeID string, event *copsecproto.LogEvent)
 
 	// 1. In-Memory Sigma Detection Engine (Detection-as-Code) Evaluation
 	s.mu.RLock()
-	sigma := s.sigmaEngine
+	sigmaEng := s.sigmaEngine
 	s.mu.RUnlock()
 
-	if sigma != nil {
+	if sigmaEng != nil {
 		fields := map[string]string{
 			"source":    event.Source,
 			"client_ip": event.ClientIp,
 			"status":    fmt.Sprintf("%d", event.StatusCode),
 			"raw":       event.RawLine,
 		}
-		if matchedSigmaRule, matched := sigma.EvaluateEvent(event.RawLine, fields); matched {
+		if matchedSigmaRule, matched := sigmaEng.EvaluateEvent(event.RawLine, fields); matched {
 			if ruleID == "" {
 				ruleID = matchedSigmaRule.ID
 			}
@@ -321,6 +322,15 @@ func (s *CentralServer) processEvent(nodeID string, event *copsecproto.LogEvent)
 			if threatScore < matchedScore {
 				threatScore = matchedScore
 			}
+		}
+	}
+
+	// Strict Host-Local vs Network Scope Classification & IP Sanitization
+	ruleScope := sigma.DetermineRuleScope(ruleID, "", "", "", nil)
+	if ruleScope == sigma.ScopeHostLocal || ruleID == "sudo_execution" || strings.Contains(strings.ToLower(event.RawLine), "sudo:") {
+		// Host-local event: ClientIP must explicitly be 127.0.0.1 or local, never bind random WAN IP
+		if event.ClientIp == "" || !strings.Contains(event.RawLine, " from ") {
+			event.ClientIp = "127.0.0.1"
 		}
 	}
 
@@ -486,6 +496,12 @@ func (s *CentralServer) processEvent(nodeID string, event *copsecproto.LogEvent)
 
 // checkAutonomousBanPolicy evaluates static critical scores (>=50) and correlation spike windows.
 func (s *CentralServer) checkAutonomousBanPolicy(event *StoredEvent) {
+	// Inhibit network quarantine (Auto-Ban) for SCOPE_HOST_LOCAL rules
+	scope := sigma.DetermineRuleScope(event.RuleID, "", "", "", nil)
+	if scope == sigma.ScopeHostLocal || event.RuleID == "sudo_execution" || strings.Contains(strings.ToLower(event.RawLine), "sudo:") {
+		return
+	}
+
 	ip := strings.TrimSpace(event.ClientIP)
 	if ip == "" || isProtectedIP(ip) {
 		return

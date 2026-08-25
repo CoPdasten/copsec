@@ -31,6 +31,7 @@ type SigmaRuleRaw struct {
 	Detection      map[string]interface{} `yaml:"detection"`
 	Falsepositives []string               `yaml:"falsepositives"`
 	Level          string                 `yaml:"level"`
+	Scope          string                 `yaml:"scope"`
 }
 
 // SigmaLogsource captures service, category, and product scope.
@@ -161,20 +162,21 @@ func (se *SelectionEvaluator) Evaluate(fields map[string]string, rawLine string)
 
 // CompiledSigmaRule is the optimized in-memory compiled representation of a Sigma HQ rule.
 type CompiledSigmaRule struct {
-	ID                 string                 `json:"id"`
-	Title              string                 `json:"title"`
-	Description        string                 `json:"description"`
-	Level              string                 `json:"level"`
-	ThreatScore        int                    `json:"threat_score"`
-	MitreTechniqueID   string                 `json:"mitre_technique_id"`
-	MitreTechniqueName string                 `json:"mitre_technique_name"`
-	MitreTactic        string                 `json:"mitre_tactic"`
-	Tags               []string               `json:"tags"`
-	Logsource          SigmaLogsource         `json:"logsource"`
+	ID                 string                         `json:"id"`
+	Title              string                         `json:"title"`
+	Description        string                         `json:"description"`
+	Level              string                         `json:"level"`
+	ThreatScore        int                            `json:"threat_score"`
+	MitreTechniqueID   string                         `json:"mitre_technique_id"`
+	MitreTechniqueName string                         `json:"mitre_technique_name"`
+	MitreTactic        string                         `json:"mitre_tactic"`
+	Tags               []string                       `json:"tags"`
+	Scope              sigma.RuleScope                `json:"scope"`
+	Logsource          SigmaLogsource                 `json:"logsource"`
 	Selections         map[string]*SelectionEvaluator `json:"-"`
-	ConditionExpr      string                 `json:"condition"`
-	ConditionTokens    []string               `json:"-"`
-	RawYAML            string                 `json:"raw_yaml,omitempty"`
+	ConditionExpr      string                         `json:"condition"`
+	ConditionTokens    []string                       `json:"-"`
+	RawYAML            string                         `json:"raw_yaml,omitempty"`
 }
 
 // SigmaEngine manages pure Go parsing, compilation, and high-throughput log evaluation.
@@ -229,6 +231,16 @@ func (se *SigmaEngine) ParseSigmaYAML(content string) (*CompiledSigmaRule, error
 	// Determine numeric threat score based on level
 	score := mapLevelToScore(raw.Level)
 
+	// Determine rule scope (SCOPE_NETWORK vs SCOPE_HOST_LOCAL)
+	var ruleScope sigma.RuleScope
+	if strings.EqualFold(raw.Scope, string(sigma.ScopeHostLocal)) || strings.EqualFold(raw.Scope, "host_local") || strings.EqualFold(raw.Scope, "host") || strings.EqualFold(raw.Scope, "local") {
+		ruleScope = sigma.ScopeHostLocal
+	} else if strings.EqualFold(raw.Scope, string(sigma.ScopeNetwork)) || strings.EqualFold(raw.Scope, "network") {
+		ruleScope = sigma.ScopeNetwork
+	} else {
+		ruleScope = sigma.DetermineRuleScope(ruleID, raw.Logsource.Category, raw.Logsource.Product, raw.Logsource.Service, raw.Tags)
+	}
+
 	compiled := &CompiledSigmaRule{
 		ID:                 ruleID,
 		Title:              raw.Title,
@@ -239,6 +251,7 @@ func (se *SigmaEngine) ParseSigmaYAML(content string) (*CompiledSigmaRule, error
 		MitreTechniqueName: mitreName,
 		MitreTactic:        tactic,
 		Tags:               raw.Tags,
+		Scope:              ruleScope,
 		Logsource:          raw.Logsource,
 		Selections:         make(map[string]*SelectionEvaluator),
 		RawYAML:            content,
