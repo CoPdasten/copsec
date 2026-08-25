@@ -15,6 +15,7 @@ import (
 	copsecproto "github.com/copsec/collector/proto"
 	"github.com/copsec/controller/pkg/ai_agent"
 	"github.com/copsec/controller/pkg/geoip"
+	"github.com/copsec/controller/pkg/ipinfo"
 	"github.com/copsec/controller/pkg/ml"
 	"github.com/copsec/controller/pkg/notifier"
 	"github.com/copsec/controller/pkg/sigma"
@@ -461,6 +462,11 @@ func (s *CentralServer) processEvent(nodeID string, event *copsecproto.LogEvent)
 
 	// Persist to embedded SQLite
 	_ = s.storage.InsertEvent(stored)
+
+	// Asynchronously enrich IP with IPinfo threat intelligence
+	if stored.ClientIP != "" {
+		ipinfo.GetDefaultClient().LookupAsync(stored.ClientIP)
+	}
 
 	// Check Autonomous Auto-Ban Policy & Dynamic TTL Management
 	s.checkAutonomousBanPolicy(stored)

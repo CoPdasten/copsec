@@ -8,17 +8,25 @@ import (
 	"sync"
 )
 
-// GeoLocation represents enriched threat intelligence location metadata.
+// GeoLocation represents enriched threat intelligence location and network classification metadata.
 type GeoLocation struct {
-	IP          string  `json:"ip"`
-	CountryCode string  `json:"country_code"`
-	CountryName string  `json:"country_name"`
-	City        string  `json:"city"`
-	ASN         string  `json:"asn"`
-	Latitude    float64 `json:"latitude"`
-	Longitude   float64 `json:"longitude"`
-	FlagEmoji   string  `json:"flag_emoji"`
-	IsPrivate   bool    `json:"is_private"`
+	IP             string  `json:"ip"`
+	CountryCode    string  `json:"country_code"`
+	CountryName    string  `json:"country_name"`
+	City           string  `json:"city"`
+	Region         string  `json:"region,omitempty"`
+	Postal         string  `json:"postal,omitempty"`
+	Hostname       string  `json:"hostname,omitempty"`
+	ASN            string  `json:"asn"`
+	Latitude       float64 `json:"latitude"`
+	Longitude      float64 `json:"longitude"`
+	FlagEmoji      string  `json:"flag_emoji"`
+	IsPrivate      bool    `json:"is_private"`
+	IsHosting      bool    `json:"is_hosting"`
+	IsVPN          bool    `json:"is_vpn"`
+	IsProxy        bool    `json:"is_proxy"`
+	IsTor          bool    `json:"is_tor"`
+	Classification string  `json:"classification,omitempty"`
 }
 
 // CountryAttackStat represents origin distribution counts for the Web SOC World Density Matrix.

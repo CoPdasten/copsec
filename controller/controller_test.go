@@ -617,3 +617,56 @@ func TestAIAgentAndNotifierAPIs(t *testing.T) {
 		t.Errorf("Expected threat_score 96, got %v", firstBrief["threat_score"])
 	}
 }
+
+func TestIPInfoRESTLookupAndDrawerEnrichment(t *testing.T) {
+	tmpDir := t.TempDir()
+	store, err := NewStorageEngine(filepath.Join(tmpDir, "ipinfo_test.db"))
+	if err != nil {
+		t.Fatalf("Failed to initialize storage: %v", err)
+	}
+	defer store.Close()
+
+	analyzer := NewRuleEngine("")
+	server := NewCentralServer(store, analyzer)
+	ttlMgr := NewTTLBanManager(store, server)
+	defer ttlMgr.Stop()
+	wsHub := NewWSHub()
+
+	webSoc := NewWebSOCServer(":0", server, store, ttlMgr, nil, wsHub, nil, nil, nil)
+
+	// 1. Test GET /api/ipinfo/lookup with public test IP
+	req := httptest.NewRequest("GET", "/api/ipinfo/lookup?ip=198.51.100.77", nil)
+	rec := httptest.NewRecorder()
+	webSoc.handleIPInfoLookup(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected status 200 from /api/ipinfo/lookup, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("Failed to parse IPinfo response: %v", err)
+	}
+
+	if resp["ip"] != "198.51.100.77" {
+		t.Errorf("Expected IP 198.51.100.77, got %v", resp["ip"])
+	}
+	if resp["country"] == "" && resp["country_code"] == "" {
+		t.Errorf("Expected non-empty country in IPinfo response")
+	}
+
+	// 2. Test GET /api/ipinfo/lookup with private IP
+	privReq := httptest.NewRequest("GET", "/api/ipinfo/lookup?ip=10.0.0.1", nil)
+	privRec := httptest.NewRecorder()
+	webSoc.handleIPInfoLookup(privRec, privReq)
+
+	if privRec.Code != http.StatusOK {
+		t.Fatalf("Expected status 200 for private IP, got %d", privRec.Code)
+	}
+
+	var privResp map[string]interface{}
+	_ = json.Unmarshal(privRec.Body.Bytes(), &privResp)
+	if privResp["country"] != "LOC" {
+		t.Errorf("Expected country LOC for private IP, got %v", privResp["country"])
+	}
+}

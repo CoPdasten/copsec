@@ -1440,6 +1440,27 @@
               <input type="number" id="cfg-autoban-threshold" class="cyber-input" value="50" min="1" max="100" autocomplete="off">
             </div>
             <div class="form-group">
+              <label>IPinfo.io API Token (Geolocation & ASN Enrichment)</label>
+              <div class="sensitive-wrapper">
+                <input type="text" id="cfg-ipinfo-token" class="cyber-input sensitive-masked" placeholder="IPinfo API Token (e.g. 1a2b3c4d5e6f7g)" autocomplete="off">
+                <button type="button" class="btn-reveal" onclick="toggleMask('cfg-ipinfo-token', this)">👁️</button>
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Discord Alert Webhook URL</label>
+              <div class="sensitive-wrapper">
+                <input type="text" id="cfg-discord-webhook" class="cyber-input sensitive-masked" placeholder="https://discord.com/api/webhooks/..." autocomplete="off">
+                <button type="button" class="btn-reveal" onclick="toggleMask('cfg-discord-webhook', this)">👁️</button>
+              </div>
+            </div>
+            <div class="form-group">
+              <label>LLM AI Security Analyst API Key (Gemini / OpenAI)</label>
+              <div class="sensitive-wrapper">
+                <input type="text" id="cfg-llm-key" class="cyber-input sensitive-masked" placeholder="AI API Key (e.g. AIzaSy... or sk-...)" autocomplete="off">
+                <button type="button" class="btn-reveal" onclick="toggleMask('cfg-llm-key', this)">👁️</button>
+              </div>
+            </div>
+            <div class="form-group">
               <label>Threat Intelligence API Key (AbuseIPDB / Shodan)</label>
               <div class="sensitive-wrapper">
                 <input type="text" id="cfg-intel-key" class="cyber-input sensitive-masked" placeholder="Threat Intel API Key" autocomplete="off">
@@ -1471,6 +1492,23 @@
           <div class="meta-box"><label>Client IP</label><span id="drawer-ip" style="color: var(--cyan);">-</span></div>
           <div class="meta-box"><label>Threat Score</label><span id="drawer-score">-</span></div>
           <div class="meta-box" style="grid-column: span 2;"><label>Origin Country & ASN</label><span id="drawer-geo">-</span></div>
+        </div>
+
+        <!-- IPinfo Threat Intelligence & Geolocation Enrichment Card -->
+        <div id="drawer-ipinfo-container" style="background: rgba(6, 182, 212, 0.08); border: 1px solid rgba(6, 182, 212, 0.35); border-radius: 6px; padding: 0.75rem 0.85rem; margin-bottom: 0.85rem; display: none;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.45rem;">
+            <div style="font-size: 0.74rem; color: var(--cyan); font-weight: 700; font-family: var(--font-mono); text-transform: uppercase; display: flex; align-items: center; gap: 0.4rem;">
+              <span>🌐 IPinfo Threat Intelligence</span>
+              <span id="drawer-ipinfo-src" class="badge" style="font-size: 0.6rem; background: rgba(0, 243, 255, 0.15); color: var(--cyan); border: 1px solid var(--cyan);">LIVE API</span>
+            </div>
+            <div id="drawer-ipinfo-badges" style="display: flex; gap: 0.3rem; flex-wrap: wrap;"></div>
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.5rem; font-size: 0.73rem;">
+            <div><strong style="color: #94a3b8;">ISP / Org:</strong> <span id="drawer-ipinfo-org" style="color: #fff; font-family: var(--font-mono);">-</span></div>
+            <div><strong style="color: #94a3b8;">Type:</strong> <span id="drawer-ipinfo-type" style="color: var(--amber); font-weight: 600;">-</span></div>
+            <div><strong style="color: #94a3b8;">Location:</strong> <span id="drawer-ipinfo-loc" style="color: #cbd5e1;">-</span></div>
+            <div><strong style="color: #94a3b8;">Hostname / rDNS:</strong> <span id="drawer-ipinfo-host" style="color: var(--cyan); font-family: var(--font-mono);">-</span></div>
+          </div>
         </div>
 
         <!-- Dynamic Sliding-Window Threat Scoring Breakdown -->
@@ -2674,6 +2712,58 @@
       const geoEl = document.getElementById('drawer-geo');
       if (geoEl) geoEl.textContent = geoLabel;
 
+      // IPinfo Threat Intelligence Card Handling
+      const ipinfoContainer = document.getElementById('drawer-ipinfo-container');
+      const ipinfoOrg = document.getElementById('drawer-ipinfo-org');
+      const ipinfoType = document.getElementById('drawer-ipinfo-type');
+      const ipinfoLoc = document.getElementById('drawer-ipinfo-loc');
+      const ipinfoHost = document.getElementById('drawer-ipinfo-host');
+      const ipinfoBadges = document.getElementById('drawer-ipinfo-badges');
+      const ipinfoSrc = document.getElementById('drawer-ipinfo-src');
+
+      if (ev.client_ip && ev.client_ip !== '127.0.0.1' && ev.client_ip !== 'local' && ev.client_ip !== '-' && ipinfoContainer) {
+        ipinfoContainer.style.display = 'block';
+        ipinfoOrg.textContent = 'Enriching via IPinfo...';
+        ipinfoType.textContent = 'Analyzing...';
+        ipinfoLoc.textContent = 'Resolving...';
+        ipinfoHost.textContent = '-';
+        ipinfoBadges.innerHTML = '';
+        ipinfoSrc.textContent = 'QUERYING';
+
+        fetch(`/api/ipinfo/lookup?ip=${encodeURIComponent(ev.client_ip)}`)
+          .then(res => res.json())
+          .then(data => {
+            if (data && !data.error) {
+              ipinfoOrg.textContent = data.org || data.asn?.name || ev.asn || 'Unknown ISP';
+              ipinfoType.textContent = data.classification || (data.is_hosting ? 'Hosting / Datacenter' : 'Standard ISP');
+              
+              const locParts = [data.city, data.region, data.country].filter(Boolean).join(', ');
+              const coords = data.latitude && data.longitude ? ` (${data.latitude.toFixed(4)}, ${data.longitude.toFixed(4)})` : '';
+              ipinfoLoc.textContent = (locParts ? locParts : 'Unknown Location') + coords;
+              ipinfoHost.textContent = data.hostname || '-';
+
+              ipinfoSrc.textContent = data.source === 'lru_cache' ? '⚡ LRU CACHED' : (data.source === 'ipinfo_live' ? 'LIVE IPINFO' : 'FALLBACK');
+              ipinfoSrc.className = data.source === 'lru_cache' ? 'badge badge-medium' : 'badge badge-success';
+
+              let badgesHtml = '';
+              if (data.is_hosting) badgesHtml += '<span class="badge badge-high" style="font-size: 0.6rem;">HOSTING</span>';
+              if (data.is_vpn) badgesHtml += '<span class="badge badge-critical" style="font-size: 0.6rem;">VPN</span>';
+              if (data.is_tor) badgesHtml += '<span class="badge badge-critical" style="font-size: 0.6rem;">TOR EXIT</span>';
+              if (data.is_proxy) badgesHtml += '<span class="badge badge-medium" style="font-size: 0.6rem;">PROXY</span>';
+              if (data.is_anycast || data.anycast) badgesHtml += '<span class="badge badge-low" style="font-size: 0.6rem;">ANYCAST</span>';
+              ipinfoBadges.innerHTML = badgesHtml;
+            }
+          })
+          .catch(() => {
+            ipinfoOrg.textContent = ev.asn || 'Offline Lookup';
+            ipinfoType.textContent = 'Standard Entity';
+            ipinfoLoc.textContent = (ev.country_name || ev.country_code || 'Unknown Origin');
+            ipinfoSrc.textContent = 'LOCAL GEOIP';
+          });
+      } else if (ipinfoContainer) {
+        ipinfoContainer.style.display = 'none';
+      }
+
       const jsonContainer = document.getElementById('drawer-json-content');
 
       let parsed = null;
@@ -3093,6 +3183,9 @@
           if (cfg.grpc_addr) document.getElementById('cfg-grpc-addr').value = cfg.grpc_addr;
           if (cfg.telegram_token) document.getElementById('cfg-tg-token').value = cfg.telegram_token;
           if (cfg.telegram_chat) document.getElementById('cfg-tg-chat').value = cfg.telegram_chat;
+          if (cfg.discord_webhook) document.getElementById('cfg-discord-webhook').value = cfg.discord_webhook;
+          if (cfg.ipinfo_token) document.getElementById('cfg-ipinfo-token').value = cfg.ipinfo_token;
+          if (cfg.llm_api_key) document.getElementById('cfg-llm-key').value = cfg.llm_api_key;
           if (cfg.honeypot_ssh_addr) document.getElementById('cfg-honeypot-ssh').value = cfg.honeypot_ssh_addr;
           if (cfg.autoban_threshold) document.getElementById('cfg-autoban-threshold').value = cfg.autoban_threshold;
           if (cfg.threat_intel_key) document.getElementById('cfg-intel-key').value = cfg.threat_intel_key;
@@ -3108,6 +3201,9 @@
         grpc_addr: document.getElementById('cfg-grpc-addr').value.trim(),
         telegram_token: document.getElementById('cfg-tg-token').value.trim(),
         telegram_chat: document.getElementById('cfg-tg-chat').value.trim(),
+        discord_webhook: document.getElementById('cfg-discord-webhook')?.value.trim() || '',
+        ipinfo_token: document.getElementById('cfg-ipinfo-token')?.value.trim() || '',
+        llm_api_key: document.getElementById('cfg-llm-key')?.value.trim() || '',
         honeypot_ssh_addr: document.getElementById('cfg-honeypot-ssh').value.trim(),
         autoban_threshold: parseInt(document.getElementById('cfg-autoban-threshold').value) || 50,
         threat_intel_key: document.getElementById('cfg-intel-key').value.trim(),

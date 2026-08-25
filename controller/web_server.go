@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"encoding/json"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 	"github.com/copsec/controller/pkg/ebpf"
 	"github.com/copsec/controller/pkg/geoip"
 	"github.com/copsec/controller/pkg/healing"
+	"github.com/copsec/controller/pkg/ipinfo"
 	"github.com/copsec/controller/pkg/ml"
 	"github.com/copsec/controller/pkg/notifier"
 	"github.com/copsec/controller/pkg/p2p"
@@ -59,6 +61,7 @@ type SystemConfigDTO struct {
 	TelegramToken    string `json:"telegram_token"`
 	TelegramChat     string `json:"telegram_chat"`
 	DiscordWebhook   string `json:"discord_webhook"`
+	IPInfoToken      string `json:"ipinfo_token"`
 	LLMAPIKey        string `json:"llm_api_key"`
 	LLMModel         string `json:"llm_model"`
 	LLMProvider      string `json:"llm_provider"`
@@ -127,6 +130,7 @@ func (ws *WebSOCServer) Start() error {
 	mux.HandleFunc("/api/nodes", ws.handleNodes)
 	mux.HandleFunc("/api/geoip/stats", ws.handleGeoIPStats)
 	mux.HandleFunc("/api/geoip/lookup", ws.handleGeoIPLookup)
+	mux.HandleFunc("/api/ipinfo/lookup", ws.handleIPInfoLookup)
 	mux.HandleFunc("/api/report/incident", ws.handleIncidentReport)
 	mux.HandleFunc("/api/report/export", ws.handleExportReport)
 	mux.HandleFunc("/api/ai/agent/latest", ws.handleAIAgentLatest)
@@ -288,6 +292,9 @@ func (ws *WebSOCServer) loadSystemConfig() *SystemConfigDTO {
 	if v, ok := cfgMap["discord_webhook"]; ok {
 		dto.DiscordWebhook = v
 	}
+	if v, ok := cfgMap["ipinfo_token"]; ok {
+		dto.IPInfoToken = v
+	}
 	if v, ok := cfgMap["llm_api_key"]; ok {
 		dto.LLMAPIKey = v
 	}
@@ -325,6 +332,7 @@ func (ws *WebSOCServer) saveSystemConfig(cfg *SystemConfigDTO) error {
 		"telegram_token":     cfg.TelegramToken,
 		"telegram_chat":      cfg.TelegramChat,
 		"discord_webhook":    cfg.DiscordWebhook,
+		"ipinfo_token":       cfg.IPInfoToken,
 		"llm_api_key":        cfg.LLMAPIKey,
 		"llm_model":          cfg.LLMModel,
 		"llm_provider":       cfg.LLMProvider,
@@ -358,6 +366,12 @@ func (ws *WebSOCServer) applyRuntimeConfig(cfg *SystemConfigDTO) {
 				TelegramChatID:   cfg.TelegramChat,
 				DiscordWebhook:   cfg.DiscordWebhook,
 			})
+		}
+
+		// Reconfigure IPinfo Token dynamically
+		if cfg.IPInfoToken != "" {
+			ipinfo.GetDefaultClient().SetToken(cfg.IPInfoToken)
+			log.Printf("[CONFIG] IPinfo Token dynamically updated")
 		}
 	}
 }
@@ -1153,4 +1167,41 @@ func (ws *WebSOCServer) handleAIAgentTestDispatch(w http.ResponseWriter, r *http
 		"brief":           brief,
 		"dispatch_result": dispatchRes,
 	})
+}
+
+func (ws *WebSOCServer) handleIPInfoLookup(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	ip := strings.TrimSpace(r.URL.Query().Get("ip"))
+	if ip == "" {
+		http.Error(w, `{"error": "missing ip query parameter"}`, http.StatusBadRequest)
+		return
+	}
+
+	client := ipinfo.GetDefaultClient()
+	ctx, cancel := context.WithTimeout(r.Context(), 4*time.Second)
+	defer cancel()
+
+	resp, err := client.Lookup(ctx, ip)
+	if err != nil {
+		// Fallback to local geoip engine if IPinfo call fails
+		geo := geoip.GetDefaultEngine().Lookup(ip)
+		resp = &ipinfo.IPInfoResponse{
+			IP:             geo.IP,
+			City:           geo.City,
+			Region:         geo.Region,
+			Country:        geo.CountryCode,
+			Org:            geo.ASN,
+			Latitude:       geo.Latitude,
+			Longitude:      geo.Longitude,
+			FlagEmoji:      geo.FlagEmoji,
+			Classification: geo.Classification,
+			IsHosting:      geo.IsHosting,
+			IsVPN:          geo.IsVPN,
+			IsProxy:        geo.IsProxy,
+			IsTor:          geo.IsTor,
+			Source:         "geoip_fallback",
+		}
+	}
+
+	json.NewEncoder(w).Encode(resp)
 }
