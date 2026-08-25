@@ -1428,6 +1428,85 @@
     .json-bool { color: var(--emerald); }
     .json-null { color: var(--gray); }
 
+    /* Forensic Key-Value & Terminal Inspector Styles */
+    .forensic-kv-panel {
+      background: #070c18;
+      border: 1px solid #1e293b;
+      border-radius: 6px;
+      padding: 0.75rem;
+      margin-bottom: 0.9rem;
+    }
+    .forensic-kv-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 0.6rem;
+    }
+    .forensic-kv-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 0.5rem;
+    }
+    .forensic-kv-item {
+      background: #03060f;
+      border: 1px solid #1a2333;
+      border-radius: 4px;
+      padding: 0.4rem 0.55rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.15rem;
+    }
+    .forensic-kv-item label {
+      font-size: 0.65rem;
+      color: #64748b;
+      font-family: var(--font-mono);
+      text-transform: uppercase;
+      font-weight: 700;
+    }
+    .forensic-kv-item span {
+      font-size: 0.75rem;
+      color: #e2e8f0;
+      font-family: var(--font-mono);
+      word-break: break-all;
+      font-weight: 600;
+    }
+
+    .forensic-terminal {
+      background: #050811;
+      border: 1px solid #1e293b;
+      border-radius: 6px;
+      font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, monospace;
+      overflow: hidden;
+      margin-bottom: 1rem;
+    }
+    .forensic-terminal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: #090e1a;
+      padding: 0.45rem 0.75rem;
+      border-bottom: 1px solid #1e293b;
+    }
+    .forensic-terminal-content {
+      padding: 0.85rem;
+      font-size: 0.74rem;
+      line-height: 1.55;
+      color: #10b981;
+      max-height: 380px;
+      overflow: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+      margin: 0;
+      background: transparent;
+    }
+    .forensic-highlight {
+      background: #f59e0b !important;
+      color: #000 !important;
+      font-weight: 800 !important;
+      padding: 0 2px;
+      border-radius: 2px;
+    }
+
     /* SOAR Playbooks Hub Styles */
     .soar-stepper-track {
       display: flex;
@@ -2608,18 +2687,36 @@
           <div id="drawer-ai-text" style="font-size: 0.76rem; color: #e2e8f0; line-height: 1.5; font-family: var(--font-mono); white-space: pre-wrap;"></div>
         </div>
 
-        <!-- Telemetry JSON Inspector -->
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; gap: 0.5rem; flex-wrap: wrap;">
-          <div style="display: flex; align-items: center; gap: 0.5rem;">
-            <span style="font-size: 0.8rem; font-weight: 700; color: var(--cyan); font-family: var(--font-mono);">RAW TELEMETRY PAYLOAD</span>
-            <span id="drawer-json-matches" style="font-size: 0.68rem; color: var(--amber); font-family: var(--font-mono);"></span>
+        <!-- Forensic Key-Value Metadata Grid -->
+        <div id="drawer-kv-container" class="forensic-kv-panel">
+          <div class="forensic-kv-header">
+            <div style="font-size: 0.78rem; font-weight: 800; color: var(--cyan); font-family: var(--font-mono); display: flex; align-items: center; gap: 0.4rem;">
+              <span>📊 Parsed Forensic Key-Value Matrix</span>
+            </div>
+            <span id="drawer-kv-logtype-badge" class="badge badge-low" style="font-size: 0.65rem;">LOG: AUTO-EXTRACT</span>
           </div>
-          <div style="display: flex; gap: 0.4rem; align-items: center;">
-            <input type="text" id="drawer-json-search" placeholder="Search JSON (e.g. uri, ip, 404)..." style="background: #03060d; border: 1px solid #1e293b; color: #fff; font-size: 0.72rem; padding: 0.25rem 0.55rem; border-radius: 4px; font-family: var(--font-mono); width: 170px;" oninput="filterDrawerJSON(this.value)">
-            <button class="btn btn-xs" onclick="copyDrawerJSON()" style="font-size: 0.68rem; padding: 0.2rem 0.5rem;">📋 Copy</button>
+          <div class="forensic-kv-grid" id="drawer-kv-grid">
+            <!-- Dynamic Key-Value Chips -->
           </div>
         </div>
-        <div class="json-inspector-box" id="drawer-json-content"></div>
+
+        <!-- Forensic Raw Log Console & Terminal Controls -->
+        <div class="forensic-terminal">
+          <div class="forensic-terminal-header">
+            <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+              <span style="font-size: 0.75rem; font-weight: 800; color: #10b981; font-family: var(--font-mono); display: flex; align-items: center; gap: 0.35rem;">
+                <span>📟 RAW PAYLOAD TERMINAL</span>
+              </span>
+              <span id="drawer-raw-matches" style="font-size: 0.65rem; color: var(--amber); font-family: var(--font-mono);"></span>
+            </div>
+            <div style="display: flex; gap: 0.35rem; align-items: center; flex-wrap: wrap;">
+              <input type="text" id="drawer-raw-search" placeholder="Filter / Highlight text..." style="background: #03060d; border: 1px solid #1e293b; color: #fff; font-size: 0.7rem; padding: 0.2rem 0.5rem; border-radius: 4px; font-family: var(--font-mono); width: 150px;" oninput="filterDrawerRaw(this.value)">
+              <button class="btn btn-xs" id="btn-format-json" onclick="toggleFormatDrawerJSON()" style="font-size: 0.68rem; padding: 0.2rem 0.5rem;">✨ Format JSON</button>
+              <button class="btn btn-xs" id="btn-copy-raw" onclick="copyDrawerRaw(this)" style="font-size: 0.68rem; padding: 0.2rem 0.5rem;">📋 Copy Raw</button>
+            </div>
+          </div>
+          <pre class="forensic-terminal-content" id="drawer-raw-content"></pre>
+        </div>
       </div>
     </div>
   </div>
@@ -3220,6 +3317,7 @@
       const visibleAlerts = filtered.slice(0, 150);
 
       tbody.innerHTML = visibleAlerts.map((a, idx) => {
+        const incKey = registerIncident(a);
         const score = a.threat_score || 0;
         const state = getContainmentState(a);
         const relTime = formatRelativeTime(a.timestamp_ms);
@@ -3250,11 +3348,11 @@
         // 2. Threat Actor / Entity
         let actorHtml = '';
         if (isHost) {
-          actorHtml = `<span class="badge" style="background: rgba(59, 130, 246, 0.2); color: #60a5fa; border: 1px solid #3b82f6; font-weight: 700;">🖥️ HOST / LOCAL</span>`;
+          actorHtml = `<span class="badge" onclick="openInspector('${incKey}')" style="background: rgba(59, 130, 246, 0.2); color: #60a5fa; border: 1px solid #3b82f6; font-weight: 700; cursor: pointer;">🖥️ HOST / LOCAL</span>`;
         } else {
           const flag = resolveEventFlag(a);
           const asn = a.asn ? `<span class="chip chip-proto" style="margin-left: 0.3rem;" title="${escapeHtml(a.asn)}">${escapeHtml(a.asn.length > 22 ? a.asn.substring(0, 22) + '...' : a.asn)}</span>` : '';
-          actorHtml = `<span class="ip-chip" onclick="openPayloadDrawerById(${a.id || 0})" style="cursor: pointer;" title="Inspect incident payload">${escapeHtml(flag)} ${escapeHtml(a.client_ip || '-')}${repeatBadge}</span>${asn}`;
+          actorHtml = `<span class="ip-chip" onclick="openInspector('${incKey}')" style="cursor: pointer;" title="Inspect incident payload">${escapeHtml(flag)} ${escapeHtml(a.client_ip || '-')}${repeatBadge}</span>${asn}`;
         }
 
         // 3. Detection Vector & MITRE ID
@@ -3287,12 +3385,13 @@
           actionButtons += `<button class="btn-triage-xs btn-triage-ban" onclick="triageQuickBan('${escapeHtml(a.client_ip)}')">⚡ XDP Ban Fleet</button>`;
           actionButtons += `<button class="btn-triage-xs btn-triage-tarpit" onclick="triageSendTarpit('${escapeHtml(a.client_ip)}')">🕳️ Trap in Tarpit</button>`;
         }
+        actionButtons += `<button class="btn-triage-xs btn-triage-report" onclick="openInspector('${incKey}')" title="Inspect Forensic Payload">🔍 Inspect</button>`;
         actionButtons += `<button class="btn-triage-xs btn-triage-report" onclick="triageAIReport(${idx})">🧠 AI Forensics</button>`;
         actionButtons += `<button class="btn-triage-xs btn-triage-dismiss" onclick="triageDismiss(${idx}, '${escapeHtml(a.client_ip)}', this)">✅ Resolve / FP</button>`;
 
         const rowClasses = `incident-row ${isCrit ? 'row-crit row-critical-pulsing' : (score >= 70 ? 'row-high' : 'row-med')} ${isSelected ? 'active-keyboard-row' : ''}`;
         return `
-          <tr id="triage-row-${idx}" class="${rowClasses}" onclick="selectActiveAlertRow(${idx})" ondblclick="openPayloadDrawerById(${a.id || 0})" style="cursor: pointer;">
+          <tr id="triage-row-${idx}" class="${rowClasses}" onclick="selectActiveAlertRow(${idx})" ondblclick="openInspector('${incKey}')" style="cursor: pointer;">
             <td>${sevBadge}</td>
             <td>
               <div style="font-family: var(--font-mono); font-size: 0.78rem; font-weight: 700; color: #cbd5e1;">${escapeHtml(relTime)}</div>
@@ -3729,6 +3828,7 @@
     }
 
     function prependEventRow(ev) {
+      const incKey = registerIncident(ev);
       eventsLog.unshift(ev);
       if (eventsLog.length > 150) eventsLog.pop();
 
@@ -3737,7 +3837,6 @@
         tbody.innerHTML = '';
       }
 
-      const index = eventsLog.indexOf(ev);
       const tr = document.createElement('tr');
 
       // Add severity row border & animation class
@@ -3747,6 +3846,12 @@
       else if (ev.threat_score >= 30) rowSeverityClass = 'row-med';
 
       tr.className = `incident-row ${rowSeverityClass}`;
+      tr.style.cursor = 'pointer';
+      tr.onclick = (e) => {
+        if (e.target.tagName !== 'BUTTON' && !e.target.closest('button')) {
+          openInspector(incKey);
+        }
+      };
 
       const scoreBadge = getScoreBadge(ev.threat_score, ev.score_breakdown);
       const timeStr = new Date(ev.timestamp_ms || Date.now()).toLocaleTimeString();
@@ -3766,7 +3871,7 @@
         <td>
           <div class="payload-cell">
             <div class="payload-summary">${snortChip}${mlChip}${signal.html}</div>
-            <button class="btn-inspect" onclick="openPayloadDrawerByIndex(${index})">🔍 Inspect</button>
+            <button class="btn-inspect" onclick="event.stopPropagation(); openInspector('${incKey}')">🔍 Inspect</button>
           </div>
         </td>
       `;
@@ -4096,266 +4201,570 @@
       showToast(`Command copied to clipboard: ${text.substring(0, 40)}...`, 'info', 'Clipboard');
     }
 
-    function openPayloadDrawerById(id) {
-      const alert = activeAlerts.find(a => a.id === id) || eventsLog.find(e => e.id === id);
-      if (alert) {
-        openPayloadDrawer(alert);
+    // -------------------------------------------------------------
+    // Global Incident Registry & Forensic Log Console Engine
+    // -------------------------------------------------------------
+    const incidentRegistry = new Map();
+    let currentDrawerFormattedJSON = false;
+    let currentDrawerRawText = '';
+
+    function registerIncident(ev) {
+      if (!ev) return '';
+      const idKey = ev.id ? String(ev.id) : (ev._internal_id = ev._internal_id || 'inc_' + Math.random().toString(36).substr(2, 9));
+      incidentRegistry.set(idKey, ev);
+      return idKey;
+    }
+
+    function openInspector(incidentIdOrObj) {
+      let ev = null;
+      if (typeof incidentIdOrObj === 'object' && incidentIdOrObj !== null) {
+        ev = incidentIdOrObj;
+      } else if (incidentIdOrObj !== undefined && incidentIdOrObj !== null) {
+        const idStr = String(incidentIdOrObj);
+        ev = incidentRegistry.get(idStr) ||
+             (activeAlerts && activeAlerts.find(a => String(a.id) === idStr || a._internal_id === idStr)) ||
+             (eventsLog && eventsLog.find(e => String(e.id) === idStr || e._internal_id === idStr));
       }
+      if (!ev) {
+        showToast('Incident record could not be loaded', 'warning', 'Inspector');
+        return;
+      }
+      openPayloadDrawer(ev);
+    }
+
+    function openPayloadDrawerById(id) {
+      openInspector(id);
     }
 
     function openPayloadDrawerByIndex(idx) {
       const ev = eventsLog[idx];
-      if (!ev) return;
-      openPayloadDrawer(ev);
+      if (ev) openPayloadDrawer(ev);
     }
 
-    function openPayloadDrawer(ev) {
-      currentDrawerEvent = ev;
-      const score = ev.threat_score || 0;
-      const ip = ev.client_ip || '127.0.0.1';
-      const isHost = ip === '127.0.0.1' || ip === 'local' || ip === '-' || ev.is_host_local;
-
-      // 1. Header & Severity Badge
-      const headerThreatBadge = document.getElementById('drawer-header-threat-badge');
-      if (headerThreatBadge) {
-        headerThreatBadge.textContent = score >= 85 ? `CRITICAL (${score})` : (score >= 70 ? `HIGH (${score})` : (score >= 40 ? `SUSPICIOUS (${score})` : `LOW (${score})`));
-        headerThreatBadge.className = score >= 85 ? 'badge badge-critical' : (score >= 70 ? 'badge badge-high' : 'badge badge-medium');
-      }
-      document.getElementById('drawer-event-id').textContent = `INCIDENT ID: #${ev.id || 'LIVE-' + (ev.timestamp_ms || Date.now())}`;
-
-      // 2. Single-Source Threat Entity Card
-      const entityFlag = document.getElementById('drawer-entity-flag');
-      const entityIP = document.getElementById('drawer-entity-ip');
-      const entityGeo = document.getElementById('drawer-entity-geo');
-      const entityOrg = document.getElementById('drawer-entity-org');
-      const entityLoc = document.getElementById('drawer-entity-loc');
-      const entityHost = document.getElementById('drawer-entity-host');
-      const entityClass = document.getElementById('drawer-entity-classification');
-      const entitySrcBadge = document.getElementById('drawer-entity-source-badge');
-
-      const tagHosting = document.getElementById('tag-hosting');
-      const tagVPN = document.getElementById('tag-vpn');
-      const tagTor = document.getElementById('tag-tor');
-      const tagProxy = document.getElementById('tag-proxy');
-      const tagAnycast = document.getElementById('tag-anycast');
-
-      // Initial Synchronized Values
-      const flag = resolveEventFlag(ev);
-      if (entityFlag) entityFlag.textContent = flag;
-      if (entityIP) entityIP.textContent = ip;
-      
-      const initialGeo = isHost ? 'Local Host Execution' : [ev.city, ev.country_name || ev.country_code].filter(Boolean).join(', ') || 'Unknown Location';
-      if (entityGeo) entityGeo.textContent = initialGeo;
-      if (entityOrg) entityOrg.textContent = isHost ? 'Local Process / System Daemon' : (ev.asn || 'Resolving ASN & ISP...');
-      if (entityLoc) entityLoc.textContent = isHost ? '127.0.0.1 (Loopback)' : (ev.country_name || ev.country_code || 'External WAN');
-      if (entityHost) entityHost.textContent = isHost ? 'localhost' : '-';
-      if (entityClass) {
-        entityClass.textContent = score >= 85 ? `🚨 Critical Threat Actor (${score}/100)` : (score >= 70 ? `⚠️ High Risk Entity (${score}/100)` : `Standard Telemetry Entity (${score}/100)`);
-      }
-      if (entitySrcBadge) {
-        entitySrcBadge.textContent = isHost ? 'LOCAL HOST' : 'GEOIP SYNC';
-        entitySrcBadge.className = 'badge badge-low';
-      }
-
-      // Hide all tags initially
-      if (tagHosting) tagHosting.style.display = 'none';
-      if (tagVPN) tagVPN.style.display = 'none';
-      if (tagTor) tagTor.style.display = 'none';
-      if (tagProxy) tagProxy.style.display = 'none';
-      if (tagAnycast) tagAnycast.style.display = 'none';
-
-      // 3. Animated Cyber Attack Vector Visualizer
-      const flowActorIP = document.getElementById('flow-actor-ip');
-      const flowActorLoc = document.getElementById('flow-actor-loc');
-      const flowProtoBadge = document.getElementById('flow-proto-badge');
-      const flowStatusBadge = document.getElementById('flow-status-badge');
-      const flowTargetNode = document.getElementById('flow-target-node');
-      const flowTargetService = document.getElementById('flow-target-service');
-
-      if (flowActorIP) {
-        flowActorIP.textContent = `${flag} ${ip}`;
-        flowActorLoc.textContent = isHost ? 'Local Host / Kernel Space' : (initialGeo + (ev.asn ? ` • ${ev.asn}` : ''));
-        
-        let proto = 'TCP :443';
-        const raw = ev.raw_line || '';
-        const rawLower = raw.toLowerCase();
-        const portMatch = raw.match(/:([0-9]{2,5})\s*->\s*:?([0-9]{2,5})/i) || raw.match(/port[:=]\s*([0-9]+)/i);
-        if (portMatch) {
-          proto = portMatch[2] ? `TCP :${portMatch[1]} ➔ :${portMatch[2]}` : `TCP :${portMatch[1]}`;
-        } else if (rawLower.includes('udp') || rawLower.includes('dns') || rawLower.includes(':53')) {
-          proto = 'UDP :53 (DNS)';
-        } else if (rawLower.includes('ssh') || rawLower.includes('port 22')) {
-          proto = 'TCP :22 (SSH)';
-        } else if (rawLower.includes('http/')) {
-          proto = 'TCP :80 (HTTP)';
-        }
-        flowProtoBadge.textContent = proto;
-
-        // Containment state pill
-        if (isHost) {
-          flowStatusBadge.className = 'flow-status-pill flow-status-host';
-          flowStatusBadge.textContent = '🛡️ HOST CONTAINED';
-        } else if (score >= 85) {
-          flowStatusBadge.className = 'flow-status-pill flow-status-banned';
-          flowStatusBadge.textContent = '🔴 XDP_DROP (BLOCKED)';
-        } else if (score >= 60) {
-          flowStatusBadge.className = 'flow-status-pill flow-status-tarpit';
-          flowStatusBadge.textContent = '🟡 TARPIT / INSPECT';
-        } else {
-          flowStatusBadge.className = 'flow-status-pill flow-status-active';
-          flowStatusBadge.textContent = '🟢 ACTIVE INGESTION';
-        }
-
-        flowTargetNode.textContent = ev.node_id || 'controller';
-        flowTargetService.textContent = ev.source ? `Sensor Engine: ${ev.source.toUpperCase()}` : 'CoPSeC Edge Guard';
-      }
-
-      // 4. Meta Information Strip
-      document.getElementById('drawer-time').textContent = new Date(ev.timestamp_ms || Date.now()).toLocaleString();
-      document.getElementById('drawer-node').textContent = ev.node_id || 'controller';
-      const ruleNameEl = document.getElementById('drawer-rule-name');
-      if (ruleNameEl) ruleNameEl.textContent = ev.rule_id || (ev.source ? `ENGINE_${ev.source.toUpperCase()}` : 'HEURISTIC_RULE');
-      const mitreIdEl = document.getElementById('drawer-mitre-id');
-      if (mitreIdEl) mitreIdEl.textContent = ev.mitre_technique_id || 'T1190';
-
-      // 5. Asynchronously Enrich & Synchronize IPinfo Threat Entity State
-      if (!isHost && ip) {
-        fetch(`/api/ipinfo/lookup?ip=${encodeURIComponent(ip)}`)
-          .then(res => res.json())
-          .then(data => {
-            if (data && !data.error) {
-              const exactOrg = data.org || (data.asn && data.asn.name) || ev.asn || 'Unknown ISP / Org';
-              const cName = data.country_name || (data.country === 'NL' ? 'The Netherlands' : (data.country || ev.country_name || ''));
-              const locParts = [data.city, data.region, cName].filter(Boolean).join(', ');
-              const coords = data.latitude && data.longitude ? ` (${data.latitude.toFixed(4)}, ${data.longitude.toFixed(4)})` : (data.loc ? ` (${data.loc})` : '');
-              const exactFlag = getCountryFlag(data.country || data.country_code, data.flag_emoji) || flag;
-
-              if (entityFlag) entityFlag.textContent = exactFlag;
-              if (entityGeo) entityGeo.textContent = locParts || cName || 'Global WAN';
-              if (entityOrg) entityOrg.textContent = exactOrg;
-              if (entityLoc) entityLoc.textContent = (locParts ? locParts : 'Unknown Origin') + coords;
-              if (entityHost) entityHost.textContent = data.hostname || '-';
-
-              if (tagHosting) tagHosting.style.display = data.is_hosting ? 'inline-block' : 'none';
-              if (tagVPN) tagVPN.style.display = data.is_vpn ? 'inline-block' : 'none';
-              if (tagTor) tagTor.style.display = data.is_tor ? 'inline-block' : 'none';
-              if (tagProxy) tagProxy.style.display = data.is_proxy ? 'inline-block' : 'none';
-              if (tagAnycast) tagAnycast.style.display = (data.is_anycast || data.anycast) ? 'inline-block' : 'none';
-
-              if (entitySrcBadge) {
-                entitySrcBadge.textContent = data.source === 'ipinfo_live' ? '🛡️ IPinfo Verified (Live)' : (data.source === 'lru_cache' ? '🛡️ IPinfo Verified (Cached)' : 'GeoIP Synced');
-                entitySrcBadge.className = 'badge badge-success';
-              }
-
-              // Update Flow Card subtitle with enriched data
-              if (flowActorIP) flowActorIP.textContent = `${exactFlag} ${ip}`;
-              if (flowActorLoc) flowActorLoc.textContent = `${locParts || cName}${exactOrg ? ' • ' + exactOrg : ''}`;
-            }
-          })
-          .catch(() => {});
-      }
-
-      // 6. Populate Root Cause & Evidence Analysis
-      populateDrawerEvidence(ev);
-
-      // 7. Populate Embedded Dynamic SOC Playbook Assistant
-      populateDrawerPlaybook(ev);
-
-      // 8. Populate Structured Analyst Investigation Log
-      populateDrawerAnalystNotes(ev);
-
-      // 9. Score Breakdown Box
-      const breakdownBox = document.getElementById('drawer-breakdown-box');
-      const breakdownText = document.getElementById('drawer-breakdown-text');
-      if (ev.score_breakdown && breakdownBox && breakdownText) {
-        breakdownText.textContent = ev.score_breakdown;
-        breakdownBox.style.display = 'block';
-      } else if (breakdownBox) {
-        breakdownBox.style.display = 'none';
-      }
-
-      // 10. ML Anomaly Box
-      const mlContainer = document.getElementById('drawer-ml-container');
-      const mlBadge = document.getElementById('drawer-ml-badge');
-      const mlDesc = document.getElementById('drawer-ml-desc');
-      if (ev.ml_anomaly && mlContainer && mlBadge && mlDesc) {
-        mlBadge.textContent = `CONFIDENCE: ${(ev.ml_confidence_pct || 88).toFixed(0)}%`;
-        mlDesc.textContent = `Unsupervised Anomaly: ${ev.ml_description || 'Abnormal flow velocity, entropy distribution, or error burst detected.'}`;
-        mlContainer.style.display = 'block';
-      } else if (mlContainer) {
-        mlContainer.style.display = 'none';
-      }
-
-      // 11. Snort ML Box
-      const snortContainer = document.getElementById('drawer-snort-container');
-      const snortBadge = document.getElementById('drawer-snort-badge');
-      const snortDesc = document.getElementById('drawer-snort-desc');
-      const snortModel = document.getElementById('drawer-snort-model');
-      if ((ev.snort_ml || ev.snort_msg) && snortContainer && snortBadge && snortDesc && snortModel) {
-        snortBadge.textContent = ev.snort_anomaly_score > 0 ? `SCORE: ${ev.snort_anomaly_score.toFixed(2)}` : (ev.snort_priority ? `PRIORITY ${ev.snort_priority}` : 'SNORT ALERT');
-        snortDesc.textContent = ev.snort_msg || 'Snort 3 ML Intrusion Alert';
-        const modelInfo = [
-          ev.snort_model_id ? `Model: ${ev.snort_model_id}` : '',
-          ev.snort_confidence ? `Confidence: ${(ev.snort_confidence * 100).toFixed(0)}%` : '',
-          ev.snort_priority ? `Priority: ${ev.snort_priority}` : ''
-        ].filter(Boolean).join(' • ');
-        snortModel.textContent = modelInfo || 'Engine: Snort 3 Network Intrusion Detection';
-        snortContainer.style.display = 'block';
-      } else if (snortContainer) {
-        snortContainer.style.display = 'none';
-      }
-
-      // 12. JSON Inspector Rendering
-      const jsonContainer = document.getElementById('drawer-json-content');
-      const searchBox = document.getElementById('drawer-json-search');
-      const matchCountEl = document.getElementById('drawer-json-matches');
-      if (searchBox) searchBox.value = '';
-      if (matchCountEl) matchCountEl.textContent = '';
+    // Structured Key-Value Parser for Common Telemetry Formats
+    function extractStructuredKV(ev) {
+      const kv = [];
+      const raw = (ev.raw_line || '').trim();
+      const rawLower = raw.toLowerCase();
+      let logType = 'GENERIC TELEMETRY';
 
       let parsed = null;
-      if (ev.raw_line) {
-        const firstBrace = ev.raw_line.indexOf('{');
-        const lastBrace = ev.raw_line.lastIndexOf('}');
+      if (raw) {
+        if (raw.startsWith('{') && raw.endsWith('}')) {
+          try { parsed = JSON.parse(raw); } catch(e) {}
+        } else {
+          const firstBrace = raw.indexOf('{');
+          const lastBrace = raw.lastIndexOf('}');
+          if (firstBrace !== -1 && lastBrace > firstBrace) {
+            try { parsed = JSON.parse(raw.substring(firstBrace, lastBrace + 1)); } catch(e) {}
+          }
+        }
+      }
+
+      if (parsed && typeof parsed === 'object') {
+        if (parsed.event_type || parsed.flow_id || parsed.src_ip) {
+          logType = `SURICATA ${parsed.event_type ? parsed.event_type.toUpperCase() : 'FLOW'}`;
+          if (parsed.event_type) kv.push({ label: 'Event Type', value: parsed.event_type.toUpperCase() });
+          if (parsed.proto) kv.push({ label: 'Protocol', value: parsed.proto });
+          if (parsed.src_ip || parsed.dest_ip) {
+            const src = `${parsed.src_ip || '-'}${parsed.src_port ? ':' + parsed.src_port : ''}`;
+            const dst = `${parsed.dest_ip || '-'}${parsed.dest_port ? ':' + parsed.dest_port : ''}`;
+            kv.push({ label: 'Source ➔ Destination', value: `${src} ➔ ${dst}` });
+          }
+          if (parsed.alert && parsed.alert.signature) {
+            kv.push({ label: 'Alert Signature', value: parsed.alert.signature, highlight: true });
+            if (parsed.alert.category) kv.push({ label: 'Category', value: parsed.alert.category });
+            if (parsed.alert.severity) kv.push({ label: 'Severity', value: `Sev ${parsed.alert.severity}` });
+          }
+          if (parsed.http) {
+            const httpUri = `${parsed.http.http_method || 'GET'} ${parsed.http.url || parsed.http.hostname || '/'}`;
+            kv.push({ label: 'HTTP Request', value: httpUri, highlight: true });
+            if (parsed.http.status) kv.push({ label: 'Status Code', value: String(parsed.http.status) });
+            if (parsed.http.http_user_agent) kv.push({ label: 'User-Agent', value: parsed.http.http_user_agent });
+          }
+          if (parsed.dns) {
+            if (parsed.dns.rrname) kv.push({ label: 'DNS Query (RRNAME)', value: parsed.dns.rrname, highlight: true });
+            if (parsed.dns.rrtype) kv.push({ label: 'DNS Record Type', value: parsed.dns.rrtype });
+            if (parsed.dns.rcode) kv.push({ label: 'DNS RCode', value: parsed.dns.rcode });
+          }
+          if (parsed.tls) {
+            if (parsed.tls.sni) kv.push({ label: 'TLS SNI', value: parsed.tls.sni });
+            if (parsed.tls.version) kv.push({ label: 'TLS Version', value: parsed.tls.version });
+          }
+        } else if (parsed.msg || parsed.sid || parsed.generator) {
+          logType = 'SNORT 3 INTRUSION';
+          if (parsed.msg) kv.push({ label: 'Snort Message', value: parsed.msg, highlight: true });
+          if (parsed.proto) kv.push({ label: 'Protocol', value: parsed.proto });
+          if (parsed.src_ap && parsed.dst_ap) kv.push({ label: 'Source ➔ Destination', value: `${parsed.src_ap} ➔ ${parsed.dst_ap}` });
+          if (parsed.sid) kv.push({ label: 'Signature ID (SID)', value: String(parsed.sid) });
+        } else {
+          logType = 'STRUCTURED JSON';
+          if (parsed.action) kv.push({ label: 'Action', value: String(parsed.action) });
+          if (parsed.method || parsed.uri || parsed.url) {
+            kv.push({ label: 'HTTP Request', value: `${parsed.method || ''} ${parsed.uri || parsed.url || ''}`.trim(), highlight: true });
+          }
+          if (parsed.status || parsed.status_code) kv.push({ label: 'Status Code', value: String(parsed.status || parsed.status_code) });
+          if (parsed.user_agent || parsed.useragent) kv.push({ label: 'User-Agent', value: String(parsed.user_agent || parsed.useragent) });
+          if (parsed.command || parsed.cmd) kv.push({ label: 'Command Executed', value: String(parsed.command || parsed.cmd), highlight: true });
+          if (parsed.pid) kv.push({ label: 'Process PID', value: String(parsed.pid) });
+        }
+      } else {
+        if (rawLower.includes('type=user_cmd') || rawLower.includes('type=cred_acq') || rawLower.includes('type=syscall') || rawLower.includes('audit')) {
+          logType = 'LINUX AUDITD';
+          const typeM = raw.match(/type=([A-Z_]+)/i);
+          const commM = raw.match(/comm="?([^"\s]+)"?/i);
+          const exeM = raw.match(/exe="?([^"\s]+)"?/i);
+          const pidM = raw.match(/pid=(\d+)/i);
+          const cmdM = raw.match(/cmd="?([^"]+)"?/i) || raw.match(/proctitle="?([^"]+)"?/i);
+
+          if (typeM) kv.push({ label: 'Audit Type', value: typeM[1] });
+          if (commM) kv.push({ label: 'Process / Comm', value: commM[1] });
+          if (exeM) kv.push({ label: 'Executable Path', value: exeM[1] });
+          if (pidM) kv.push({ label: 'Process PID', value: pidM[1] });
+          if (cmdM) kv.push({ label: 'Command / Proctitle', value: cmdM[1], highlight: true });
+        } else if (rawLower.includes('sshd') || rawLower.includes('password') || rawLower.includes('authentication failure') || rawLower.includes('accepted')) {
+          logType = 'LINUX AUTH / SSH';
+          const authM = raw.match(/(Failed password|Accepted password|Invalid user|Accepted publickey|authentication failure)/i);
+          const userM = raw.match(/for (invalid user )?([a-zA-Z0-9_\-]+)/i) || raw.match(/user=([a-zA-Z0-9_\-]+)/i);
+          const ipM = raw.match(/from ([0-9a-fA-F\.:]+)/i) || raw.match(/rhost=([0-9a-fA-F\.:]+)/i);
+          const portM = raw.match(/port (\d+)/i);
+
+          if (authM) kv.push({ label: 'Auth Action', value: authM[1], highlight: true });
+          if (userM) kv.push({ label: 'Target Account', value: userM[2] || userM[1] });
+          if (ipM) kv.push({ label: 'Source IP', value: ipM[1] });
+          if (portM) kv.push({ label: 'Port', value: portM[1] });
+        } else if (raw.match(/^[0-9a-fA-F\.:]+\s+-\s+-\s+\[.+\]\s+"[A-Z]+\s+\S+\s+HTTP/i)) {
+          logType = 'NGINX / WEB ACCESS';
+          const webM = raw.match(/"([A-Z]+)\s+([^"\s]+)\s+HTTP\/[0-9\.]+"\s+(\d{3})/i);
+          const uaM = raw.match(/"[^"]*"\s+"([^"]*)"$/);
+          if (webM) {
+            kv.push({ label: 'HTTP Method & URI', value: `${webM[1]} ${webM[2]}`, highlight: true });
+            kv.push({ label: 'Status Code', value: webM[3] });
+          }
+          if (uaM && uaM[1]) kv.push({ label: 'User-Agent', value: uaM[1] });
+        } else if (rawLower.includes('sudo:')) {
+          logType = 'SUDO EXECUTION';
+          const userM = raw.match(/sudo:\s+([a-zA-Z0-9_\-]+)\s+:/i);
+          const cmdM = raw.match(/COMMAND=(.*)$/i);
+          const ttyM = raw.match(/TTY=([^\s]+)/i);
+          const pwdM = raw.match(/PWD=([^\s]+)/i);
+
+          if (userM) kv.push({ label: 'Operator User', value: userM[1] });
+          if (cmdM) kv.push({ label: 'Elevated Command', value: cmdM[1], highlight: true });
+          if (pwdM) kv.push({ label: 'Working Directory', value: pwdM[1] });
+          if (ttyM) kv.push({ label: 'TTY Terminal', value: ttyM[1] });
+        }
+      }
+
+      if (!kv.some(item => item.label.includes('Source') || item.label.includes('IP'))) {
+        if (ev.client_ip && ev.client_ip !== '-') {
+          kv.push({ label: 'Client / Source IP', value: ev.client_ip });
+        }
+      }
+      if (ev.status_code && !kv.some(item => item.label.includes('Status'))) {
+        kv.push({ label: 'Status Code', value: String(ev.status_code) });
+      }
+      if (ev.rule_id) {
+        kv.push({ label: 'Matched Rule', value: ev.rule_id });
+      }
+      if (ev.mitre_technique_id) {
+        kv.push({ label: 'MITRE ATT&CK', value: ev.mitre_technique_id });
+      }
+      if (ev.node_id) {
+        kv.push({ label: 'Sensor Node', value: ev.node_id });
+      }
+
+      return { logType, kv };
+    }
+
+    function renderForensicKV(ev) {
+      const grid = document.getElementById('drawer-kv-grid');
+      const badge = document.getElementById('drawer-kv-logtype-badge');
+      if (!grid) return;
+
+      const { logType, kv } = extractStructuredKV(ev);
+      if (badge) {
+        badge.textContent = `LOG: ${logType}`;
+        badge.className = 'badge badge-low';
+      }
+
+      if (kv.length === 0) {
+        grid.innerHTML = '<div style="color: var(--text-muted); font-size: 0.75rem; grid-column: 1 / -1;">No additional structured keys parsed from payload.</div>';
+        return;
+      }
+
+      grid.innerHTML = kv.map(item => {
+        const valColor = item.highlight ? 'color: var(--amber); font-weight: 700;' : 'color: #cbd5e1;';
+        return `
+          <div class="forensic-kv-item">
+            <label>${escapeHtml(item.label)}</label>
+            <span style="${valColor}">${escapeHtml(item.value)}</span>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function renderForensicRaw(ev, forceFormat = false) {
+      const consoleEl = document.getElementById('drawer-raw-content');
+      const searchBox = document.getElementById('drawer-raw-search');
+      const matchesEl = document.getElementById('drawer-raw-matches');
+      const formatBtn = document.getElementById('btn-format-json');
+
+      if (!consoleEl) return;
+      if (searchBox) searchBox.value = '';
+      if (matchesEl) matchesEl.textContent = '';
+
+      let raw = (ev.raw_line || '').trim();
+      if (!raw) {
+        try {
+          raw = JSON.stringify({
+            id: ev.id,
+            node_id: ev.node_id,
+            source: ev.source,
+            client_ip: ev.client_ip,
+            status_code: ev.status_code,
+            timestamp: new Date(ev.timestamp_ms || Date.now()).toISOString(),
+            threat_score: ev.threat_score,
+            rule_id: ev.rule_id,
+            mitre_technique_id: ev.mitre_technique_id,
+            analyst_notes: ev.analyst_notes
+          }, null, 2);
+        } catch(e) {
+          raw = String(ev);
+        }
+      }
+
+      currentDrawerRawText = raw;
+
+      let isJSON = false;
+      let parsed = null;
+      if (raw.startsWith('{') && raw.endsWith('}')) {
+        try {
+          parsed = JSON.parse(raw);
+          isJSON = true;
+        } catch(e) {}
+      } else {
+        const firstBrace = raw.indexOf('{');
+        const lastBrace = raw.lastIndexOf('}');
         if (firstBrace !== -1 && lastBrace > firstBrace) {
           try {
-            parsed = JSON.parse(ev.raw_line.substring(firstBrace, lastBrace + 1));
+            parsed = JSON.parse(raw.substring(firstBrace, lastBrace + 1));
+            isJSON = true;
           } catch(e) {}
         }
       }
 
-      if (parsed) {
-        currentDrawerJSONObj = parsed;
-        jsonContainer.innerHTML = syntaxHighlightJSON(parsed);
-      } else {
-        currentDrawerJSONObj = {
-          id: ev.id,
-          node_id: ev.node_id,
-          source: ev.source,
-          client_ip: ev.client_ip,
-          country: ev.country_name || ev.country_code,
-          asn: ev.asn,
-          status_code: ev.status_code,
-          timestamp_ms: ev.timestamp_ms,
-          rule_id: ev.rule_id,
-          mitre_technique_id: ev.mitre_technique_id,
-          threat_score: ev.threat_score,
-          analyst_notes: ev.analyst_notes,
-          raw_line: ev.raw_line
-        };
-        jsonContainer.innerHTML = syntaxHighlightJSON(currentDrawerJSONObj);
+      if (formatBtn) {
+        formatBtn.style.display = isJSON ? 'inline-block' : 'none';
+        formatBtn.textContent = forceFormat ? '📄 Raw String' : '✨ Format JSON';
       }
 
-      // 13. AI Forensic Summary Box
-      const aiContainer = document.getElementById('drawer-ai-container');
-      const aiText = document.getElementById('drawer-ai-text');
-      if (ev.ai_analysis) {
-        aiText.textContent = ev.ai_analysis;
-        aiContainer.style.display = 'block';
-      } else {
-        aiContainer.style.display = 'none';
+      if (isJSON && forceFormat) {
+        try {
+          consoleEl.innerHTML = syntaxHighlightJSON(parsed);
+          return;
+        } catch(e) {}
       }
 
-      document.getElementById('drawer-overlay').classList.add('open');
+      consoleEl.innerHTML = escapeHtml(raw);
+    }
+
+    function toggleFormatDrawerJSON() {
+      if (!currentDrawerEvent) return;
+      currentDrawerFormattedJSON = !currentDrawerFormattedJSON;
+      renderForensicRaw(currentDrawerEvent, currentDrawerFormattedJSON);
+    }
+
+    function copyDrawerRaw(btnEl) {
+      if (!currentDrawerEvent) return;
+      const textToCopy = currentDrawerRawText || currentDrawerEvent.raw_line || JSON.stringify(currentDrawerEvent, null, 2);
+      if (!navigator.clipboard) {
+        const ta = document.createElement('textarea');
+        ta.value = textToCopy;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      } else {
+        navigator.clipboard.writeText(textToCopy);
+      }
+
+      if (btnEl) {
+        const orig = btnEl.innerHTML;
+        btnEl.innerHTML = '✔ Copied!';
+        btnEl.style.background = 'var(--emerald)';
+        btnEl.style.color = '#000';
+        setTimeout(() => {
+          btnEl.innerHTML = orig;
+          btnEl.style.background = '';
+          btnEl.style.color = '';
+        }, 1800);
+      }
+      showToast('Raw telemetry payload copied to clipboard', 'success', 'Copied');
+    }
+
+    function filterDrawerRaw(query) {
+      const consoleEl = document.getElementById('drawer-raw-content');
+      const matchesEl = document.getElementById('drawer-raw-matches');
+      if (!consoleEl) return;
+
+      const baseText = currentDrawerRawText || '';
+      if (!query || !query.trim()) {
+        if (matchesEl) matchesEl.textContent = '';
+        renderForensicRaw(currentDrawerEvent, currentDrawerFormattedJSON);
+        return;
+      }
+
+      const q = query.trim();
+      const escapedQuery = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(`(${escapedQuery})`, 'gi');
+
+      let matchCount = 0;
+      const matches = baseText.match(regex);
+      if (matches) matchCount = matches.length;
+
+      if (matchesEl) {
+        matchesEl.textContent = matchCount > 0 ? `🔍 ${matchCount} match${matchCount > 1 ? 'es' : ''}` : 'No matches';
+      }
+
+      if (matchCount === 0) {
+        consoleEl.innerHTML = escapeHtml(baseText);
+        return;
+      }
+
+      const safeEscapedText = escapeHtml(baseText);
+      const safeQuery = escapeHtml(q).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const safeRegex = new RegExp(`(${safeQuery})`, 'gi');
+      consoleEl.innerHTML = safeEscapedText.replace(safeRegex, '<span class="forensic-highlight">$1</span>');
+    }
+
+    function openPayloadDrawer(ev) {
+      try {
+        if (!ev) return;
+        currentDrawerEvent = ev;
+        currentDrawerFormattedJSON = false;
+        registerIncident(ev);
+
+        const score = ev.threat_score || 0;
+        const ip = ev.client_ip || '127.0.0.1';
+        const isHost = ip === '127.0.0.1' || ip === 'local' || ip === '-' || ev.is_host_local;
+
+        // 1. Header & Severity Badge
+        const headerThreatBadge = document.getElementById('drawer-header-threat-badge');
+        if (headerThreatBadge) {
+          headerThreatBadge.textContent = score >= 85 ? `CRITICAL (${score})` : (score >= 70 ? `HIGH (${score})` : (score >= 40 ? `SUSPICIOUS (${score})` : `LOW (${score})`));
+          headerThreatBadge.className = score >= 85 ? 'badge badge-critical' : (score >= 70 ? 'badge badge-high' : 'badge badge-medium');
+        }
+        const eventIdEl = document.getElementById('drawer-event-id');
+        if (eventIdEl) {
+          eventIdEl.textContent = `INCIDENT ID: #${ev.id || 'LIVE-' + (ev.timestamp_ms || Date.now())}`;
+        }
+
+        // 2. Single-Source Threat Entity Card
+        const entityFlag = document.getElementById('drawer-entity-flag');
+        const entityIP = document.getElementById('drawer-entity-ip');
+        const entityGeo = document.getElementById('drawer-entity-geo');
+        const entityOrg = document.getElementById('drawer-entity-org');
+        const entityLoc = document.getElementById('drawer-entity-loc');
+        const entityHost = document.getElementById('drawer-entity-host');
+        const entityClass = document.getElementById('drawer-entity-classification');
+        const entitySrcBadge = document.getElementById('drawer-entity-source-badge');
+
+        const tagHosting = document.getElementById('tag-hosting');
+        const tagVPN = document.getElementById('tag-vpn');
+        const tagTor = document.getElementById('tag-tor');
+        const tagProxy = document.getElementById('tag-proxy');
+        const tagAnycast = document.getElementById('tag-anycast');
+
+        // Initial Synchronized Values
+        const flag = resolveEventFlag(ev);
+        if (entityFlag) entityFlag.textContent = flag;
+        if (entityIP) entityIP.textContent = ip;
+        
+        const initialGeo = isHost ? 'Local Host Execution' : [ev.city, ev.country_name || ev.country_code].filter(Boolean).join(', ') || 'Unknown Location';
+        if (entityGeo) entityGeo.textContent = initialGeo;
+        if (entityOrg) entityOrg.textContent = isHost ? 'Local Process / System Daemon' : (ev.asn || 'Resolving ASN & ISP...');
+        if (entityLoc) entityLoc.textContent = isHost ? '127.0.0.1 (Loopback)' : (ev.country_name || ev.country_code || 'External WAN');
+        if (entityHost) entityHost.textContent = isHost ? 'localhost' : '-';
+        if (entityClass) {
+          entityClass.textContent = score >= 85 ? `🚨 Critical Threat Actor (${score}/100)` : (score >= 70 ? `⚠️ High Risk Entity (${score}/100)` : `Standard Telemetry Entity (${score}/100)`);
+        }
+        if (entitySrcBadge) {
+          entitySrcBadge.textContent = isHost ? 'LOCAL HOST' : 'GEOIP SYNC';
+          entitySrcBadge.className = 'badge badge-low';
+        }
+
+        // Hide all tags initially
+        if (tagHosting) tagHosting.style.display = 'none';
+        if (tagVPN) tagVPN.style.display = 'none';
+        if (tagTor) tagTor.style.display = 'none';
+        if (tagProxy) tagProxy.style.display = 'none';
+        if (tagAnycast) tagAnycast.style.display = 'none';
+
+        // 3. Animated Cyber Attack Vector Visualizer
+        const flowActorIP = document.getElementById('flow-actor-ip');
+        const flowActorLoc = document.getElementById('flow-actor-loc');
+        const flowProtoBadge = document.getElementById('flow-proto-badge');
+        const flowStatusBadge = document.getElementById('flow-status-badge');
+        const flowTargetNode = document.getElementById('flow-target-node');
+        const flowTargetService = document.getElementById('flow-target-service');
+
+        if (flowActorIP) {
+          flowActorIP.textContent = `${flag} ${ip}`;
+          flowActorLoc.textContent = isHost ? 'Local Host / Kernel Space' : (initialGeo + (ev.asn ? ` • ${ev.asn}` : ''));
+          
+          let proto = 'TCP :443';
+          const raw = ev.raw_line || '';
+          const rawLower = raw.toLowerCase();
+          const portMatch = raw.match(/:([0-9]{2,5})\s*->\s*:?([0-9]{2,5})/i) || raw.match(/port[:=]\s*([0-9]+)/i);
+          if (portMatch) {
+            proto = portMatch[2] ? `TCP :${portMatch[1]} ➔ :${portMatch[2]}` : `TCP :${portMatch[1]}`;
+          } else if (rawLower.includes('udp') || rawLower.includes('dns') || rawLower.includes(':53')) {
+            proto = 'UDP :53 (DNS)';
+          } else if (rawLower.includes('ssh') || rawLower.includes('port 22')) {
+            proto = 'TCP :22 (SSH)';
+          } else if (rawLower.includes('http/')) {
+            proto = 'TCP :80 (HTTP)';
+          }
+          if (flowProtoBadge) flowProtoBadge.textContent = proto;
+
+          if (flowStatusBadge) {
+            if (isHost) {
+              flowStatusBadge.className = 'flow-status-pill flow-status-host';
+              flowStatusBadge.textContent = '🛡️ HOST CONTAINED';
+            } else if (score >= 85) {
+              flowStatusBadge.className = 'flow-status-pill flow-status-banned';
+              flowStatusBadge.textContent = '🔴 XDP_DROP (BLOCKED)';
+            } else if (score >= 60) {
+              flowStatusBadge.className = 'flow-status-pill flow-status-tarpit';
+              flowStatusBadge.textContent = '🟡 TARPIT / INSPECT';
+            } else {
+              flowStatusBadge.className = 'flow-status-pill flow-status-active';
+              flowStatusBadge.textContent = '🟢 ACTIVE INGESTION';
+            }
+          }
+
+          if (flowTargetNode) flowTargetNode.textContent = ev.node_id || 'controller';
+          if (flowTargetService) flowTargetService.textContent = ev.source ? `Sensor Engine: ${ev.source.toUpperCase()}` : 'CoPSeC Edge Guard';
+        }
+
+        // 4. Meta Information Strip
+        const timeEl = document.getElementById('drawer-time');
+        if (timeEl) timeEl.textContent = new Date(ev.timestamp_ms || Date.now()).toLocaleString();
+        const nodeEl = document.getElementById('drawer-node');
+        if (nodeEl) nodeEl.textContent = ev.node_id || 'controller';
+        const ruleNameEl = document.getElementById('drawer-rule-name');
+        if (ruleNameEl) ruleNameEl.textContent = ev.rule_id || (ev.source ? `ENGINE_${ev.source.toUpperCase()}` : 'HEURISTIC_RULE');
+        const mitreIdEl = document.getElementById('drawer-mitre-id');
+        if (mitreIdEl) mitreIdEl.textContent = ev.mitre_technique_id || 'T1190';
+
+        // 5. Asynchronously Enrich & Synchronize IPinfo Threat Entity State
+        if (!isHost && ip) {
+          fetch(`/api/ipinfo/lookup?ip=${encodeURIComponent(ip)}`)
+            .then(res => res.json())
+            .then(data => {
+              if (data && !data.error) {
+                const exactOrg = data.org || (data.asn && data.asn.name) || ev.asn || 'Unknown ISP / Org';
+                const cName = data.country_name || (data.country === 'NL' ? 'The Netherlands' : (data.country || ev.country_name || ''));
+                const locParts = [data.city, data.region, cName].filter(Boolean).join(', ');
+                const coords = data.latitude && data.longitude ? ` (${data.latitude.toFixed(4)}, ${data.longitude.toFixed(4)})` : (data.loc ? ` (${data.loc})` : '');
+                const exactFlag = getCountryFlag(data.country || data.country_code, data.flag_emoji) || flag;
+
+                if (entityFlag) entityFlag.textContent = exactFlag;
+                if (entityGeo) entityGeo.textContent = locParts || cName || 'Global WAN';
+                if (entityOrg) entityOrg.textContent = exactOrg;
+                if (entityLoc) entityLoc.textContent = (locParts ? locParts : 'Unknown Origin') + coords;
+                if (entityHost) entityHost.textContent = data.hostname || '-';
+
+                if (tagHosting) tagHosting.style.display = data.is_hosting ? 'inline-block' : 'none';
+                if (tagVPN) tagVPN.style.display = data.is_vpn ? 'inline-block' : 'none';
+                if (tagTor) tagTor.style.display = data.is_tor ? 'inline-block' : 'none';
+                if (tagProxy) tagProxy.style.display = data.is_proxy ? 'inline-block' : 'none';
+                if (tagAnycast) tagAnycast.style.display = (data.is_anycast || data.anycast) ? 'inline-block' : 'none';
+
+                if (entitySrcBadge) {
+                  entitySrcBadge.textContent = data.source === 'ipinfo_live' ? '🛡️ IPinfo Verified (Live)' : (data.source === 'lru_cache' ? '🛡️ IPinfo Verified (Cached)' : 'GeoIP Synced');
+                  entitySrcBadge.className = 'badge badge-success';
+                }
+
+                if (flowActorIP) flowActorIP.textContent = `${exactFlag} ${ip}`;
+                if (flowActorLoc) flowActorLoc.textContent = `${locParts || cName}${exactOrg ? ' • ' + exactOrg : ''}`;
+              }
+            })
+            .catch(() => {});
+        }
+
+        // 6. Populate Root Cause & Evidence Analysis
+        populateDrawerEvidence(ev);
+
+        // 7. Populate Embedded Dynamic SOC Playbook Assistant
+        populateDrawerPlaybook(ev);
+
+        // 8. Populate Structured Analyst Investigation Log
+        populateDrawerAnalystNotes(ev);
+
+        // 9. Score Breakdown Box
+        const breakdownBox = document.getElementById('drawer-breakdown-box');
+        const breakdownText = document.getElementById('drawer-breakdown-text');
+        if (ev.score_breakdown && breakdownBox && breakdownText) {
+          breakdownText.textContent = ev.score_breakdown;
+          breakdownBox.style.display = 'block';
+        } else if (breakdownBox) {
+          breakdownBox.style.display = 'none';
+        }
+
+        // 10. ML Anomaly Box
+        const mlContainer = document.getElementById('drawer-ml-container');
+        const mlBadge = document.getElementById('drawer-ml-badge');
+        const mlDesc = document.getElementById('drawer-ml-desc');
+        if (ev.ml_anomaly && mlContainer && mlBadge && mlDesc) {
+          mlBadge.textContent = `CONFIDENCE: ${(ev.ml_confidence_pct || 88).toFixed(0)}%`;
+          mlDesc.textContent = `Unsupervised Anomaly: ${ev.ml_description || 'Abnormal flow velocity, entropy distribution, or error burst detected.'}`;
+          mlContainer.style.display = 'block';
+        } else if (mlContainer) {
+          mlContainer.style.display = 'none';
+        }
+
+        // 11. Snort ML Box
+        const snortContainer = document.getElementById('drawer-snort-container');
+        const snortBadge = document.getElementById('drawer-snort-badge');
+        const snortDesc = document.getElementById('drawer-snort-desc');
+        const snortModel = document.getElementById('drawer-snort-model');
+        if ((ev.snort_ml || ev.snort_msg) && snortContainer && snortBadge && snortDesc && snortModel) {
+          snortBadge.textContent = ev.snort_anomaly_score > 0 ? `SCORE: ${ev.snort_anomaly_score.toFixed(2)}` : (ev.snort_priority ? `PRIORITY ${ev.snort_priority}` : 'SNORT ALERT');
+          snortDesc.textContent = ev.snort_msg || 'Snort 3 ML Intrusion Alert';
+          const modelInfo = [
+            ev.snort_model_id ? `Model: ${ev.snort_model_id}` : '',
+            ev.snort_confidence ? `Confidence: ${(ev.snort_confidence * 100).toFixed(0)}%` : '',
+            ev.snort_priority ? `Priority: ${ev.snort_priority}` : ''
+          ].filter(Boolean).join(' • ');
+          snortModel.textContent = modelInfo || 'Engine: Snort 3 Network Intrusion Detection';
+          snortContainer.style.display = 'block';
+        } else if (snortContainer) {
+          snortContainer.style.display = 'none';
+        }
+
+        // 12. Render Structured Key-Value Grid & Forensic Raw Log Console
+        renderForensicKV(ev);
+        renderForensicRaw(ev, false);
+
+        // 13. AI Forensic Summary Box
+        const aiContainer = document.getElementById('drawer-ai-container');
+        const aiText = document.getElementById('drawer-ai-text');
+        if (ev.ai_analysis && aiContainer && aiText) {
+          aiText.textContent = ev.ai_analysis;
+          aiContainer.style.display = 'block';
+        } else if (aiContainer) {
+          aiContainer.style.display = 'none';
+        }
+
+        const overlay = document.getElementById('drawer-overlay');
+        if (overlay) overlay.classList.add('open');
+      } catch(err) {
+        console.error('Error in openPayloadDrawer:', err);
+        const overlay = document.getElementById('drawer-overlay');
+        if (overlay) overlay.classList.add('open');
+      }
     }
 
     // -------------------------------------------------------------
