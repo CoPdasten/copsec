@@ -803,87 +803,210 @@
       gap: 0.4rem;
     }
 
-    /* Packet Flow & Lineage Card */
-    .flow-trajectory-card {
-      background: linear-gradient(90deg, rgba(244, 63, 94, 0.08), rgba(15, 23, 42, 0.95), rgba(0, 243, 255, 0.08));
-      border: 1px solid rgba(0, 243, 255, 0.25);
+    /* 1. Single-Source Threat Entity Card */
+    .threat-entity-card {
+      background: linear-gradient(135deg, rgba(15, 23, 42, 0.95), rgba(6, 182, 212, 0.08));
+      border: 1px solid rgba(0, 243, 255, 0.35);
       border-radius: 8px;
-      padding: 0.75rem 1rem;
+      padding: 0.85rem 1rem;
+      margin-bottom: 0.9rem;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+    }
+    .threat-entity-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 0.6rem;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+    }
+    .threat-entity-title {
+      font-size: 0.84rem;
+      font-weight: 800;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 0.45rem;
+      font-family: var(--font-mono);
+    }
+    .threat-entity-tags {
+      display: flex;
+      gap: 0.35rem;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .threat-tag {
+      font-size: 0.62rem;
+      font-family: var(--font-mono);
+      font-weight: 700;
+      padding: 0.15rem 0.45rem;
+      border-radius: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+    .threat-tag-hosting {
+      background: rgba(249, 115, 22, 0.2);
+      color: #fb923c;
+      border: 1px solid rgba(249, 115, 22, 0.5);
+    }
+    .threat-tag-vpn {
+      background: rgba(244, 63, 94, 0.2);
+      color: #fb7185;
+      border: 1px solid rgba(244, 63, 94, 0.5);
+    }
+    .threat-tag-tor {
+      background: rgba(168, 85, 247, 0.2);
+      color: #c084fc;
+      border: 1px solid rgba(168, 85, 247, 0.5);
+    }
+    .threat-tag-proxy {
+      background: rgba(245, 158, 11, 0.2);
+      color: #fcd34d;
+      border: 1px solid rgba(245, 158, 11, 0.5);
+    }
+    .threat-tag-anycast {
+      background: rgba(6, 182, 212, 0.2);
+      color: var(--cyan);
+      border: 1px solid rgba(6, 182, 212, 0.5);
+    }
+    .threat-entity-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+      gap: 0.55rem;
+      font-size: 0.74rem;
+    }
+    .threat-entity-field {
+      display: flex;
+      flex-direction: column;
+      gap: 0.15rem;
+    }
+    .threat-entity-field label {
+      font-size: 0.62rem;
+      color: #94a3b8;
+      font-family: var(--font-mono);
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+    }
+    .threat-entity-field span {
+      color: #fff;
+      font-family: var(--font-mono);
+      font-weight: 600;
+      word-break: break-all;
+    }
+
+    /* 2. Animated Cyber Attack Vector Visualizer */
+    .flow-trajectory-card {
+      background: linear-gradient(90deg, rgba(244, 63, 94, 0.12), rgba(15, 23, 42, 0.95), rgba(0, 243, 255, 0.12));
+      border: 1px solid rgba(0, 243, 255, 0.35);
+      border-radius: 8px;
+      padding: 0.85rem 1.1rem;
       margin-bottom: 0.9rem;
       display: flex;
       justify-content: space-between;
       align-items: center;
-      gap: 0.75rem;
+      gap: 0.85rem;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
     }
     .flow-step {
       flex: 1;
       display: flex;
       flex-direction: column;
-      gap: 0.15rem;
+      gap: 0.2rem;
     }
     .flow-label {
       font-size: 0.62rem;
       color: var(--text-muted);
       font-family: var(--font-mono);
-      font-weight: 700;
+      font-weight: 800;
       text-transform: uppercase;
-      letter-spacing: 0.5px;
+      letter-spacing: 0.6px;
     }
     .flow-val {
-      font-size: 0.82rem;
+      font-size: 0.84rem;
       font-family: var(--font-mono);
-      font-weight: 700;
+      font-weight: 800;
       color: #fff;
       word-break: break-all;
     }
     .flow-sub {
       font-size: 0.68rem;
       color: #94a3b8;
+      line-height: 1.3;
     }
     .flow-arrow-box {
       display: flex;
       flex-direction: column;
       align-items: center;
-      gap: 0.2rem;
-      padding: 0 0.5rem;
+      gap: 0.25rem;
+      padding: 0 0.6rem;
+      min-width: 130px;
     }
     .flow-protocol-badge {
-      font-size: 0.62rem;
+      font-size: 0.64rem;
       font-family: var(--font-mono);
       font-weight: 800;
-      color: var(--amber);
-      background: rgba(245, 158, 11, 0.15);
-      border: 1px solid rgba(245, 158, 11, 0.4);
+      color: #fff;
+      background: rgba(245, 158, 11, 0.2);
+      border: 1px solid rgba(245, 158, 11, 0.6);
       border-radius: 4px;
-      padding: 0.1rem 0.35rem;
+      padding: 0.15rem 0.45rem;
+      letter-spacing: 0.5px;
     }
     .flow-arrow-line {
-      width: 70px;
-      height: 2px;
-      background: linear-gradient(90deg, #f43f5e, var(--cyan));
+      width: 100%;
+      height: 3px;
+      background: linear-gradient(90deg, #f43f5e, #fbbf24, var(--cyan));
       position: relative;
-      margin: 0.25rem 0;
+      margin: 0.35rem 0;
+      border-radius: 2px;
+      box-shadow: 0 0 8px rgba(0, 243, 255, 0.5);
     }
     .flow-arrow-pulse {
       position: absolute;
-      width: 6px;
-      height: 6px;
+      width: 8px;
+      height: 8px;
       background: #fff;
       border-radius: 50%;
-      top: -2px;
-      box-shadow: 0 0 8px #fff;
-      animation: flowPulseAnim 2s infinite ease-in-out;
+      top: -2.5px;
+      box-shadow: 0 0 10px #fff, 0 0 20px #00f3ff;
+      animation: flowPulseAnim 1.8s infinite cubic-bezier(0.4, 0, 0.2, 1);
     }
     @keyframes flowPulseAnim {
-      0% { left: 0%; opacity: 0.2; }
-      50% { opacity: 1; }
-      100% { left: 95%; opacity: 0.2; }
+      0% { left: 0%; opacity: 0.3; transform: scale(0.8); }
+      50% { opacity: 1; transform: scale(1.3); }
+      100% { left: 95%; opacity: 0.3; transform: scale(0.8); }
     }
-    .flow-status-badge {
-      font-size: 0.62rem;
+    .flow-status-pill {
+      font-size: 0.64rem;
       font-family: var(--font-mono);
-      font-weight: 700;
-      color: var(--cyan);
+      font-weight: 800;
+      padding: 0.15rem 0.5rem;
+      border-radius: 12px;
+      letter-spacing: 0.4px;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+    }
+    .flow-status-active {
+      background: rgba(16, 185, 129, 0.2);
+      color: #10b981;
+      border: 1px solid #10b981;
+    }
+    .flow-status-banned {
+      background: rgba(244, 63, 94, 0.2);
+      color: #f43f5e;
+      border: 1px solid #f43f5e;
+      animation: pulse 1.5s infinite;
+    }
+    .flow-status-tarpit {
+      background: rgba(6, 182, 212, 0.2);
+      color: #06b6d4;
+      border: 1px solid #06b6d4;
+    }
+    .flow-status-host {
+      background: rgba(139, 92, 246, 0.2);
+      color: #a78bfa;
+      border: 1px solid #8b5cf6;
     }
 
     /* Active Keyboard Row Highlight */
@@ -936,9 +1059,9 @@
     }
     .drawer-meta-grid {
       display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 0.75rem;
-      margin-bottom: 1rem;
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+      gap: 0.65rem;
+      margin-bottom: 0.9rem;
     }
     .meta-box {
       background: #060913;
@@ -1024,13 +1147,14 @@
       word-break: break-all;
     }
 
-    /* Embedded Dynamic SOC Playbook Assistant */
+    /* 3. High-Contrast Interactive Playbook Assistant */
     .playbook-panel {
-      background: linear-gradient(135deg, rgba(168, 85, 247, 0.06), rgba(15, 23, 42, 0.9));
-      border: 1px solid rgba(168, 85, 247, 0.4);
+      background: linear-gradient(135deg, rgba(168, 85, 247, 0.08), rgba(15, 23, 42, 0.95));
+      border: 1px solid rgba(168, 85, 247, 0.45);
       border-radius: 8px;
-      padding: 0.9rem 1rem;
+      padding: 0.95rem 1.1rem;
       margin-bottom: 1rem;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
     }
     .playbook-header {
       display: flex;
@@ -1051,21 +1175,32 @@
     .playbook-steps-list {
       display: flex;
       flex-direction: column;
-      gap: 0.65rem;
+      gap: 0.75rem;
     }
     .playbook-step-card {
       background: #070c1a;
       border: 1px solid #1e293b;
-      border-radius: 6px;
-      padding: 0.7rem 0.85rem;
-      transition: all 0.2s ease;
+      border-radius: 7px;
+      padding: 0.8rem 0.95rem;
+      transition: all 0.25s ease;
+      position: relative;
     }
     .playbook-step-card:hover {
       border-color: #38bdf8;
+      box-shadow: 0 2px 12px rgba(0, 243, 255, 0.15);
+    }
+    .playbook-step-card.pending {
+      opacity: 0.85;
+      border-color: #1e293b;
+    }
+    .playbook-step-card.in-progress {
+      border: 1px solid var(--cyan);
+      box-shadow: 0 0 16px rgba(0, 243, 255, 0.25);
+      background: rgba(0, 243, 255, 0.04);
     }
     .playbook-step-card.completed {
-      background: rgba(16, 185, 129, 0.06);
-      border-color: rgba(16, 185, 129, 0.45);
+      background: rgba(16, 185, 129, 0.08);
+      border-color: rgba(16, 185, 129, 0.5);
     }
     .playbook-step-card.completed .playbook-step-title {
       text-decoration: line-through;
@@ -1076,7 +1211,7 @@
       align-items: center;
       justify-content: space-between;
       gap: 0.5rem;
-      margin-bottom: 0.35rem;
+      margin-bottom: 0.4rem;
     }
     .playbook-step-left {
       display: flex;
@@ -1087,48 +1222,86 @@
       font-size: 0.65rem;
       padding: 0.15rem 0.45rem;
       border-radius: 4px;
-      font-weight: 700;
+      font-weight: 800;
       font-family: var(--font-mono);
       background: rgba(168, 85, 247, 0.2);
       color: #c084fc;
       border: 1px solid rgba(168, 85, 247, 0.5);
     }
     .playbook-step-title {
-      font-size: 0.78rem;
+      font-size: 0.8rem;
       font-weight: 700;
       color: #fff;
     }
     .playbook-step-desc {
-      font-size: 0.74rem;
+      font-size: 0.75rem;
       color: #cbd5e1;
-      line-height: 1.4;
-      margin-left: 1.6rem;
-      margin-bottom: 0.4rem;
+      line-height: 1.45;
+      margin-left: 1.65rem;
+      margin-bottom: 0.45rem;
+    }
+    .code-snippet-box {
+      background: #030712;
+      border: 1px solid #1f2937;
+      border-radius: 5px;
+      padding: 0.45rem 0.65rem;
+      margin-left: 1.65rem;
+      margin-bottom: 0.5rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.5rem;
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+    }
+    .code-snippet-box code {
+      color: var(--cyan);
+      overflow-x: auto;
+      white-space: nowrap;
+      flex: 1;
+    }
+    .btn-code-copy {
+      background: rgba(55, 65, 81, 0.6);
+      border: 1px solid #4b5563;
+      color: #cbd5e1;
+      font-size: 0.64rem;
+      padding: 0.15rem 0.45rem;
+      border-radius: 3px;
+      cursor: pointer;
+      font-family: var(--font-mono);
+      transition: all 0.2s ease;
+      white-space: nowrap;
+    }
+    .btn-code-copy:hover {
+      background: var(--cyan);
+      color: #000;
+      border-color: var(--cyan);
     }
     .playbook-step-actions {
       display: flex;
       gap: 0.4rem;
-      margin-left: 1.6rem;
+      margin-left: 1.65rem;
       flex-wrap: wrap;
     }
 
-    /* Analyst Case Notes & Journal */
+    /* 4. Structured SOC Analyst Investigation Log */
     .analyst-notes-panel {
       background: #080d1e;
       border: 1px solid #1e293b;
       border-radius: 8px;
-      padding: 0.85rem 1rem;
+      padding: 0.9rem 1.05rem;
       margin-bottom: 1rem;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
     }
     .analyst-notes-header {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 0.45rem;
+      margin-bottom: 0.6rem;
     }
     .analyst-notes-title {
-      font-size: 0.78rem;
-      font-weight: 700;
+      font-size: 0.8rem;
+      font-weight: 800;
       color: #cbd5e1;
       display: flex;
       align-items: center;
@@ -1136,25 +1309,102 @@
       font-family: var(--font-mono);
       text-transform: uppercase;
     }
-    .analyst-notes-status {
-      font-size: 0.68rem;
-      color: #94a3b8;
-      font-family: var(--font-mono);
+    .quick-action-chips {
+      display: flex;
+      gap: 0.35rem;
+      margin-bottom: 0.65rem;
+      flex-wrap: wrap;
     }
-    .analyst-notes-textarea {
-      width: 100%;
-      height: 75px;
+    .quick-action-btn {
+      font-size: 0.65rem;
+      font-family: var(--font-mono);
+      font-weight: 700;
+      padding: 0.2rem 0.5rem;
+      border-radius: 4px;
+      cursor: pointer;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      background: rgba(255, 255, 255, 0.05);
+      color: #e2e8f0;
+      transition: all 0.2s ease;
+    }
+    .quick-action-btn:hover {
+      background: rgba(0, 243, 255, 0.15);
+      border-color: var(--cyan);
+      color: #fff;
+    }
+    .analyst-timeline {
+      display: flex;
+      flex-direction: column;
+      gap: 0.45rem;
+      max-height: 140px;
+      overflow-y: auto;
       background: #03060d;
       border: 1px solid #1e293b;
       border-radius: 6px;
+      padding: 0.6rem;
+      margin-bottom: 0.6rem;
+    }
+    .timeline-entry {
+      font-size: 0.73rem;
+      font-family: var(--font-mono);
+      display: flex;
+      align-items: flex-start;
+      gap: 0.45rem;
+      line-height: 1.35;
+      padding-bottom: 0.35rem;
+      border-bottom: 1px solid rgba(30, 41, 59, 0.6);
+    }
+    .timeline-entry:last-child {
+      border-bottom: none;
+      padding-bottom: 0;
+    }
+    .timeline-time {
+      color: var(--text-muted);
+      font-size: 0.65rem;
+      white-space: nowrap;
+    }
+    .timeline-badge {
+      font-size: 0.6rem;
+      padding: 0.05rem 0.3rem;
+      border-radius: 3px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .timeline-badge-analyst {
+      background: rgba(59, 130, 246, 0.2);
+      color: #60a5fa;
+      border: 1px solid #3b82f6;
+    }
+    .timeline-badge-system {
+      background: rgba(16, 185, 129, 0.2);
+      color: #10b981;
+      border: 1px solid #10b981;
+    }
+    .timeline-badge-critical {
+      background: rgba(244, 63, 94, 0.2);
+      color: #f43f5e;
+      border: 1px solid #f43f5e;
+    }
+    .timeline-text {
+      color: #e2e8f0;
+      flex: 1;
+      word-break: break-word;
+    }
+    .timeline-input-bar {
+      display: flex;
+      gap: 0.4rem;
+    }
+    .timeline-input {
+      flex: 1;
+      background: #03060d;
+      border: 1px solid #1e293b;
+      border-radius: 5px;
       color: #e2e8f0;
       font-family: var(--font-mono);
       font-size: 0.75rem;
-      padding: 0.6rem;
-      resize: vertical;
-      line-height: 1.4;
+      padding: 0.45rem 0.65rem;
     }
-    .analyst-notes-textarea:focus {
+    .timeline-input:focus {
       outline: none;
       border-color: var(--cyan);
       box-shadow: 0 0 10px rgba(0, 243, 255, 0.2);
@@ -1926,7 +2176,10 @@
     <div class="drawer" onclick="event.stopPropagation()">
       <div class="drawer-header">
         <div>
-          <h3 style="font-size: 1rem; font-weight: 700; color: #fff;">🔍 Incident Payload Inspector</h3>
+          <h3 style="font-size: 1rem; font-weight: 800; color: #fff; display: flex; align-items: center; gap: 0.45rem;">
+            <span>🔍 Incident Payload Inspector</span>
+            <span id="drawer-header-threat-badge" class="badge badge-critical" style="font-size: 0.65rem;">CRITICAL (90)</span>
+          </h3>
           <p style="font-size: 0.7rem; color: var(--text-muted); font-family: var(--font-mono);" id="drawer-event-id">-</p>
         </div>
         <div class="drawer-sticky-actions">
@@ -1936,15 +2189,46 @@
           <button class="toast-close" onclick="closePayloadDrawer()" style="margin-left: 0.35rem;">✖</button>
         </div>
       </div>
-        <div class="drawer-meta-grid" style="grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));">
-          <div class="meta-box"><label>Timestamp</label><span id="drawer-time">-</span></div>
-          <div class="meta-box"><label>Origin Sensor</label><span id="drawer-node">-</span></div>
-          <div class="meta-box"><label>Client IP</label><span id="drawer-ip" style="color: var(--cyan);">-</span></div>
-          <div class="meta-box"><label>Threat Score</label><span id="drawer-score">-</span></div>
-          <div class="meta-box" style="grid-column: span 2;"><label>Origin Country & ASN</label><span id="drawer-geo">-</span></div>
+
+      <div class="drawer-body">
+        <!-- 1. Single-Source Threat Entity Card -->
+        <div class="threat-entity-card" id="drawer-threat-entity-card">
+          <div class="threat-entity-header">
+            <div class="threat-entity-title">
+              <span id="drawer-entity-flag" style="font-size: 1.15rem;">🌐</span>
+              <span id="drawer-entity-ip" style="color: var(--cyan); font-weight: 800;">-</span>
+              <span id="drawer-entity-geo" style="color: #cbd5e1; font-weight: 600; font-size: 0.8rem;">Unknown Origin</span>
+            </div>
+            <div class="threat-entity-tags" id="drawer-entity-tags">
+              <span class="threat-tag threat-tag-hosting" id="tag-hosting" style="display: none;">🏢 Hosting</span>
+              <span class="threat-tag threat-tag-vpn" id="tag-vpn" style="display: none;">🛡️ VPN</span>
+              <span class="threat-tag threat-tag-tor" id="tag-tor" style="display: none;">🧅 Tor Exit</span>
+              <span class="threat-tag threat-tag-proxy" id="tag-proxy" style="display: none;">🔒 Proxy</span>
+              <span class="threat-tag threat-tag-anycast" id="tag-anycast" style="display: none;">🌐 Anycast</span>
+              <span class="badge" id="drawer-entity-source-badge" style="font-size: 0.6rem; background: rgba(0, 243, 255, 0.15); color: var(--cyan); border: 1px solid var(--cyan);">GEOIP SYNC</span>
+            </div>
+          </div>
+          <div class="threat-entity-grid">
+            <div class="threat-entity-field">
+              <label>ASN / Organization</label>
+              <span id="drawer-entity-org" style="color: #fff;">-</span>
+            </div>
+            <div class="threat-entity-field">
+              <label>Location & Coordinates</label>
+              <span id="drawer-entity-loc" style="color: #93c5fd;">-</span>
+            </div>
+            <div class="threat-entity-field">
+              <label>Hostname / rDNS</label>
+              <span id="drawer-entity-host" style="color: #a78bfa;">-</span>
+            </div>
+            <div class="threat-entity-field">
+              <label>Threat Score & Entity Class</label>
+              <span id="drawer-entity-classification" style="color: var(--amber);">-</span>
+            </div>
+          </div>
         </div>
 
-        <!-- Flow Trajectory & Packet Lineage Card -->
+        <!-- 2. Animated Cyber Attack Vector Visualizer -->
         <div class="flow-trajectory-card" id="drawer-flow-card">
           <div class="flow-step">
             <div class="flow-label">SOURCE ACTOR</div>
@@ -1952,17 +2236,25 @@
             <div class="flow-sub" id="flow-actor-loc">-</div>
           </div>
           <div class="flow-arrow-box">
-            <div class="flow-protocol-badge" id="flow-proto-badge">TCP / 443</div>
+            <div class="flow-protocol-badge" id="flow-proto-badge">TCP :443</div>
             <div class="flow-arrow-line">
               <span class="flow-arrow-pulse"></span>
             </div>
-            <div class="flow-status-badge" id="flow-status-badge">INSPECTING</div>
+            <div class="flow-status-pill flow-status-active" id="flow-status-badge">🟢 ACTIVE INGESTION</div>
           </div>
           <div class="flow-step" style="text-align: right;">
             <div class="flow-label">TARGET SENSOR</div>
             <div class="flow-val" id="flow-target-node" style="color: var(--cyan);">-</div>
             <div class="flow-sub" id="flow-target-service">CoPSeC Edge Guard</div>
           </div>
+        </div>
+
+        <!-- Meta Information Strip -->
+        <div class="drawer-meta-grid">
+          <div class="meta-box"><label>Timestamp</label><span id="drawer-time">-</span></div>
+          <div class="meta-box"><label>Origin Sensor</label><span id="drawer-node">-</span></div>
+          <div class="meta-box"><label>Detection Rule</label><span id="drawer-rule-name" style="color: var(--cyan);">-</span></div>
+          <div class="meta-box"><label>MITRE ATT&CK</label><span id="drawer-mitre-id" style="color: #c084fc;">-</span></div>
         </div>
 
         <!-- 1. Root Cause & Evidence Analysis Panel -->
@@ -1985,7 +2277,7 @@
           </div>
         </div>
 
-        <!-- 2. Embedded Dynamic SOC Playbook Assistant -->
+        <!-- 3. Embedded Dynamic SOC Playbook Assistant -->
         <div id="drawer-playbook-container" class="playbook-panel">
           <div class="playbook-header">
             <div class="playbook-title">
@@ -2001,31 +2293,26 @@
           </div>
         </div>
 
-        <!-- 3. Analyst Case Notes & Investigation Journal -->
+        <!-- 4. Structured SOC Analyst Investigation Log -->
         <div id="drawer-notes-container" class="analyst-notes-panel">
           <div class="analyst-notes-header">
             <div class="analyst-notes-title">
-              <span>📝 Analyst Investigation Notes</span>
+              <span>📝 Incident Timeline & Analyst Investigation Log</span>
             </div>
-            <span id="drawer-notes-status" class="analyst-notes-status">💾 Autosaved to SQLite</span>
+            <span id="drawer-notes-status" style="font-size: 0.68rem; color: #94a3b8; font-family: var(--font-mono);">💾 Autosaved to SQLite</span>
           </div>
-          <textarea id="drawer-analyst-notes" class="analyst-notes-textarea" placeholder="Add incident findings, forensic observations, compromised accounts, or response action notes..." oninput="handleAnalystNotesInput(this.value)"></textarea>
-        </div>
-
-        <!-- IPinfo Threat Intelligence & Geolocation Enrichment Card -->
-        <div id="drawer-ipinfo-container" style="background: rgba(6, 182, 212, 0.08); border: 1px solid rgba(6, 182, 212, 0.35); border-radius: 6px; padding: 0.75rem 0.85rem; margin-bottom: 0.85rem; display: none;">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.45rem;">
-            <div style="font-size: 0.74rem; color: var(--cyan); font-weight: 700; font-family: var(--font-mono); text-transform: uppercase; display: flex; align-items: center; gap: 0.4rem;">
-              <span>🌐 IPinfo Threat Intelligence</span>
-              <span id="drawer-ipinfo-src" class="badge" style="font-size: 0.6rem; background: rgba(0, 243, 255, 0.15); color: var(--cyan); border: 1px solid var(--cyan);">LIVE API</span>
-            </div>
-            <div id="drawer-ipinfo-badges" style="display: flex; gap: 0.3rem; flex-wrap: wrap;"></div>
+          <div class="quick-action-chips">
+            <button type="button" class="quick-action-btn" onclick="addTimelineQuickAction('FP')">🏷️ False Positive</button>
+            <button type="button" class="quick-action-btn" onclick="addTimelineQuickAction('SEV1')">🚨 Elevate to SEV1</button>
+            <button type="button" class="quick-action-btn" onclick="addTimelineQuickAction('BANNED')">🔒 Verified Attacker</button>
+            <button type="button" class="quick-action-btn" onclick="exportIncidentReport('html')">📄 Export Brief</button>
           </div>
-          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.5rem; font-size: 0.73rem;">
-            <div><strong style="color: #94a3b8;">ISP / Org:</strong> <span id="drawer-ipinfo-org" style="color: #fff; font-family: var(--font-mono);">-</span></div>
-            <div><strong style="color: #94a3b8;">Type:</strong> <span id="drawer-ipinfo-type" style="color: var(--amber); font-weight: 600;">-</span></div>
-            <div><strong style="color: #94a3b8;">Location:</strong> <span id="drawer-ipinfo-loc" style="color: #cbd5e1;">-</span></div>
-            <div><strong style="color: #94a3b8;">Hostname / rDNS:</strong> <span id="drawer-ipinfo-host" style="color: var(--cyan); font-family: var(--font-mono);">-</span></div>
+          <div class="analyst-timeline" id="drawer-timeline-list">
+            <!-- Dynamic Timeline Entries -->
+          </div>
+          <div class="timeline-input-bar">
+            <input type="text" id="drawer-analyst-input" class="timeline-input" placeholder="Type investigation observation or action..." onkeydown="if(event.key==='Enter') submitAnalystTimelineEntry()">
+            <button type="button" class="btn btn-primary" style="font-size: 0.72rem; padding: 0.35rem 0.75rem;" onclick="submitAnalystTimelineEntry()">+ Add Entry</button>
           </div>
         </div>
 
@@ -2054,35 +2341,29 @@
           <div style="font-size: 0.7rem; color: #94a3b8; font-family: var(--font-mono); margin-top: 0.25rem;" id="drawer-snort-model">-</div>
         </div>
 
-        <!-- SOC Executive Incident Report Action Bar -->
-        <div style="background: #090e1c; border: 1px solid #1e2c4a; border-radius: 6px; padding: 0.75rem; margin-bottom: 1rem; display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
-          <div>
-            <div style="font-size: 0.78rem; font-weight: 700; color: #fff;">📄 Forensic Incident Investigation</div>
-            <div style="font-size: 0.68rem; color: var(--text-muted);">Autonomous LLM synthesis, MITRE TTPs & SOAR audit</div>
+        <!-- Autonomous LLM SOC Analyst Forensic Synthesis -->
+        <div id="drawer-ai-container" style="background: linear-gradient(135deg, rgba(168, 85, 247, 0.12), rgba(15, 23, 42, 0.95)); border: 1px solid #c084fc; border-radius: 8px; padding: 0.85rem 1rem; margin-bottom: 0.9rem; display: none;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem;">
+            <div style="font-size: 0.8rem; font-weight: 800; color: #c084fc; font-family: var(--font-mono); display: flex; align-items: center; gap: 0.4rem;">
+              <span>🧠 Autonomous LLM SOC Forensic Summary</span>
+            </div>
+            <span class="badge badge-critical" style="font-size: 0.62rem;">AI SYNTHESIS</span>
           </div>
-          <div style="display: flex; gap: 0.4rem;">
-            <button class="btn btn-primary" style="font-size: 0.72rem; padding: 0.3rem 0.65rem;" onclick="exportIncidentReport('html')">📄 Export Report (PDF/HTML)</button>
-            <button class="btn" style="font-size: 0.72rem; padding: 0.3rem 0.65rem;" onclick="exportIncidentReport('markdown')">📥 Markdown (.md)</button>
-          </div>
+          <div id="drawer-ai-text" style="font-size: 0.76rem; color: #e2e8f0; line-height: 1.5; font-family: var(--font-mono); white-space: pre-wrap;"></div>
         </div>
 
+        <!-- Telemetry JSON Inspector -->
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; gap: 0.5rem; flex-wrap: wrap;">
           <div style="display: flex; align-items: center; gap: 0.5rem;">
-            <label style="font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; font-family: var(--font-mono); font-weight: 700;">Formatted Telemetry / EVE Log</label>
-            <span id="drawer-json-matches" style="font-size: 0.68rem; color: var(--cyan); font-family: var(--font-mono);"></span>
+            <span style="font-size: 0.8rem; font-weight: 700; color: var(--cyan); font-family: var(--font-mono);">RAW TELEMETRY PAYLOAD</span>
+            <span id="drawer-json-matches" style="font-size: 0.68rem; color: var(--amber); font-family: var(--font-mono);"></span>
           </div>
-          <div style="display: flex; gap: 0.35rem; align-items: center;">
-            <input type="text" id="drawer-json-search" placeholder="🔍 Filter JSON..." oninput="filterDrawerJSON(this.value)" style="background: #060913; border: 1px solid #1e293b; color: #fff; font-size: 0.7rem; font-family: var(--font-mono); padding: 0.25rem 0.5rem; border-radius: 4px; width: 140px;">
-            <button class="btn btn-inspect" onclick="copyDrawerJSON()" style="padding: 0.25rem 0.55rem; font-size: 0.7rem;">📋 Copy</button>
+          <div style="display: flex; gap: 0.4rem; align-items: center;">
+            <input type="text" id="drawer-json-search" placeholder="Search JSON (e.g. uri, ip, 404)..." style="background: #03060d; border: 1px solid #1e293b; color: #fff; font-size: 0.72rem; padding: 0.25rem 0.55rem; border-radius: 4px; font-family: var(--font-mono); width: 170px;" oninput="filterDrawerJSON(this.value)">
+            <button class="btn btn-xs" onclick="copyDrawerJSON()" style="font-size: 0.68rem; padding: 0.2rem 0.5rem;">📋 Copy</button>
           </div>
         </div>
-
         <div class="json-inspector-box" id="drawer-json-content"></div>
-
-        <div id="drawer-ai-container" style="margin-top: 1rem; display: none;">
-          <label style="font-size: 0.72rem; color: var(--amber); text-transform: uppercase; font-family: var(--font-mono); font-weight: 700;">🤖 AI Threat Intelligence Assessment</label>
-          <div style="background: #111a2f; border: 1px solid #1e3a6a; border-radius: 6px; padding: 0.75rem; font-size: 0.75rem; color: #cbd5e1; margin-top: 0.35rem; line-height: 1.4;" id="drawer-ai-text"></div>
-        </div>
       </div>
     </div>
   </div>
@@ -3549,15 +3830,106 @@
       openPayloadDrawer(ev);
     }
 
+    // -------------------------------------------------------------
+    // Unified Single-Source Threat Entity & Payload Drawer Engine
+    // -------------------------------------------------------------
+    let currentDrawerJSONObj = null;
+    let currentDrawerTimeline = [];
+
+    function copyCommandSnippet(text, btnEl) {
+      if (!navigator.clipboard) {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      } else {
+        navigator.clipboard.writeText(text);
+      }
+      if (btnEl) {
+        const orig = btnEl.innerHTML;
+        btnEl.innerHTML = '✔ Copied!';
+        btnEl.style.background = 'var(--cyan)';
+        btnEl.style.color = '#000';
+        setTimeout(() => {
+          btnEl.innerHTML = orig;
+          btnEl.style.background = '';
+          btnEl.style.color = '';
+        }, 1800);
+      }
+      showToast(`Command copied to clipboard: ${text.substring(0, 40)}...`, 'info', 'Clipboard');
+    }
+
+    function openPayloadDrawerById(id) {
+      const alert = activeAlerts.find(a => a.id === id) || eventsLog.find(e => e.id === id);
+      if (alert) {
+        openPayloadDrawer(alert);
+      }
+    }
+
+    function openPayloadDrawerByIndex(idx) {
+      const ev = eventsLog[idx];
+      if (!ev) return;
+      openPayloadDrawer(ev);
+    }
+
     function openPayloadDrawer(ev) {
       currentDrawerEvent = ev;
-      document.getElementById('drawer-event-id').textContent = `INCIDENT ID: #${ev.id || 'LIVE-' + (ev.timestamp_ms || Date.now())}`;
-      document.getElementById('drawer-time').textContent = new Date(ev.timestamp_ms || Date.now()).toLocaleString();
-      document.getElementById('drawer-node').textContent = ev.node_id || 'controller';
-      document.getElementById('drawer-ip').textContent = ev.client_ip || '-';
-      document.getElementById('drawer-score').innerHTML = getScoreBadge(ev.threat_score, ev.score_breakdown);
+      const score = ev.threat_score || 0;
+      const ip = ev.client_ip || '127.0.0.1';
+      const isHost = ip === '127.0.0.1' || ip === 'local' || ip === '-' || ev.is_host_local;
 
-      // Populate Packet Flow Trajectory Card
+      // 1. Header & Severity Badge
+      const headerThreatBadge = document.getElementById('drawer-header-threat-badge');
+      if (headerThreatBadge) {
+        headerThreatBadge.textContent = score >= 85 ? `CRITICAL (${score})` : (score >= 70 ? `HIGH (${score})` : (score >= 40 ? `SUSPICIOUS (${score})` : `LOW (${score})`));
+        headerThreatBadge.className = score >= 85 ? 'badge badge-critical' : (score >= 70 ? 'badge badge-high' : 'badge badge-medium');
+      }
+      document.getElementById('drawer-event-id').textContent = `INCIDENT ID: #${ev.id || 'LIVE-' + (ev.timestamp_ms || Date.now())}`;
+
+      // 2. Single-Source Threat Entity Card
+      const entityFlag = document.getElementById('drawer-entity-flag');
+      const entityIP = document.getElementById('drawer-entity-ip');
+      const entityGeo = document.getElementById('drawer-entity-geo');
+      const entityOrg = document.getElementById('drawer-entity-org');
+      const entityLoc = document.getElementById('drawer-entity-loc');
+      const entityHost = document.getElementById('drawer-entity-host');
+      const entityClass = document.getElementById('drawer-entity-classification');
+      const entitySrcBadge = document.getElementById('drawer-entity-source-badge');
+
+      const tagHosting = document.getElementById('tag-hosting');
+      const tagVPN = document.getElementById('tag-vpn');
+      const tagTor = document.getElementById('tag-tor');
+      const tagProxy = document.getElementById('tag-proxy');
+      const tagAnycast = document.getElementById('tag-anycast');
+
+      // Initial Synchronized Values
+      const flag = resolveEventFlag(ev);
+      if (entityFlag) entityFlag.textContent = flag;
+      if (entityIP) entityIP.textContent = ip;
+      
+      const initialGeo = isHost ? 'Local Host Execution' : [ev.city, ev.country_name || ev.country_code].filter(Boolean).join(', ') || 'Unknown Location';
+      if (entityGeo) entityGeo.textContent = initialGeo;
+      if (entityOrg) entityOrg.textContent = isHost ? 'Local Process / System Daemon' : (ev.asn || 'Resolving ASN & ISP...');
+      if (entityLoc) entityLoc.textContent = isHost ? '127.0.0.1 (Loopback)' : (ev.country_name || ev.country_code || 'External WAN');
+      if (entityHost) entityHost.textContent = isHost ? 'localhost' : '-';
+      if (entityClass) {
+        entityClass.textContent = score >= 85 ? `🚨 Critical Threat Actor (${score}/100)` : (score >= 70 ? `⚠️ High Risk Entity (${score}/100)` : `Standard Telemetry Entity (${score}/100)`);
+      }
+      if (entitySrcBadge) {
+        entitySrcBadge.textContent = isHost ? 'LOCAL HOST' : 'GEOIP SYNC';
+        entitySrcBadge.className = 'badge badge-low';
+      }
+
+      // Hide all tags initially
+      if (tagHosting) tagHosting.style.display = 'none';
+      if (tagVPN) tagVPN.style.display = 'none';
+      if (tagTor) tagTor.style.display = 'none';
+      if (tagProxy) tagProxy.style.display = 'none';
+      if (tagAnycast) tagAnycast.style.display = 'none';
+
+      // 3. Animated Cyber Attack Vector Visualizer
       const flowActorIP = document.getElementById('flow-actor-ip');
       const flowActorLoc = document.getElementById('flow-actor-loc');
       const flowProtoBadge = document.getElementById('flow-proto-badge');
@@ -3566,34 +3938,98 @@
       const flowTargetService = document.getElementById('flow-target-service');
 
       if (flowActorIP) {
-        flowActorIP.textContent = resolveEventFlag(ev) + ' ' + (ev.client_ip || '127.0.0.1');
-        const locs = [ev.city, ev.country_name || ev.country_code, ev.asn].filter(Boolean).join(' • ');
-        flowActorLoc.textContent = locs || (ev.client_ip === '127.0.0.1' || ev.client_ip === 'local' ? 'Local Host Execution' : 'External WAN Origin');
+        flowActorIP.textContent = `${flag} ${ip}`;
+        flowActorLoc.textContent = isHost ? 'Local Host / Kernel Space' : (initialGeo + (ev.asn ? ` • ${ev.asn}` : ''));
         
-        let proto = 'TCP/443';
-        const rawLower = (ev.raw_line || '').toLowerCase();
-        if (rawLower.includes('udp') || rawLower.includes('dns')) proto = 'UDP/53';
-        else if (rawLower.includes('ssh') || rawLower.includes('port 22')) proto = 'TCP/22';
-        else if (rawLower.includes('http/')) proto = 'TCP/80';
+        let proto = 'TCP :443';
+        const raw = ev.raw_line || '';
+        const rawLower = raw.toLowerCase();
+        const portMatch = raw.match(/:([0-9]{2,5})\s*->\s*:?([0-9]{2,5})/i) || raw.match(/port[:=]\s*([0-9]+)/i);
+        if (portMatch) {
+          proto = portMatch[2] ? `TCP :${portMatch[1]} ➔ :${portMatch[2]}` : `TCP :${portMatch[1]}`;
+        } else if (rawLower.includes('udp') || rawLower.includes('dns') || rawLower.includes(':53')) {
+          proto = 'UDP :53 (DNS)';
+        } else if (rawLower.includes('ssh') || rawLower.includes('port 22')) {
+          proto = 'TCP :22 (SSH)';
+        } else if (rawLower.includes('http/')) {
+          proto = 'TCP :80 (HTTP)';
+        }
         flowProtoBadge.textContent = proto;
 
-        const status = ev.status_code || 0;
-        flowStatusBadge.textContent = status > 0 ? `HTTP ${status}` : (ev.threat_score >= 85 ? 'BLOCKED / XDP' : 'INSPECTED');
-        flowStatusBadge.style.color = status >= 400 || ev.threat_score >= 85 ? 'var(--magenta)' : 'var(--cyan)';
+        // Containment state pill
+        if (isHost) {
+          flowStatusBadge.className = 'flow-status-pill flow-status-host';
+          flowStatusBadge.textContent = '🛡️ HOST CONTAINED';
+        } else if (score >= 85) {
+          flowStatusBadge.className = 'flow-status-pill flow-status-banned';
+          flowStatusBadge.textContent = '🔴 XDP_DROP (BLOCKED)';
+        } else if (score >= 60) {
+          flowStatusBadge.className = 'flow-status-pill flow-status-tarpit';
+          flowStatusBadge.textContent = '🟡 TARPIT / INSPECT';
+        } else {
+          flowStatusBadge.className = 'flow-status-pill flow-status-active';
+          flowStatusBadge.textContent = '🟢 ACTIVE INGESTION';
+        }
 
         flowTargetNode.textContent = ev.node_id || 'controller';
-        flowTargetService.textContent = ev.source ? `Sensor: ${ev.source.toUpperCase()}` : 'CoPSeC Edge Guard';
+        flowTargetService.textContent = ev.source ? `Sensor Engine: ${ev.source.toUpperCase()}` : 'CoPSeC Edge Guard';
       }
 
-      // 1. Populate Root Cause & Evidence Analysis
+      // 4. Meta Information Strip
+      document.getElementById('drawer-time').textContent = new Date(ev.timestamp_ms || Date.now()).toLocaleString();
+      document.getElementById('drawer-node').textContent = ev.node_id || 'controller';
+      const ruleNameEl = document.getElementById('drawer-rule-name');
+      if (ruleNameEl) ruleNameEl.textContent = ev.rule_id || (ev.source ? `ENGINE_${ev.source.toUpperCase()}` : 'HEURISTIC_RULE');
+      const mitreIdEl = document.getElementById('drawer-mitre-id');
+      if (mitreIdEl) mitreIdEl.textContent = ev.mitre_technique_id || 'T1190';
+
+      // 5. Asynchronously Enrich & Synchronize IPinfo Threat Entity State
+      if (!isHost && ip) {
+        fetch(`/api/ipinfo/lookup?ip=${encodeURIComponent(ip)}`)
+          .then(res => res.json())
+          .then(data => {
+            if (data && !data.error) {
+              const exactOrg = data.org || (data.asn && data.asn.name) || ev.asn || 'Unknown ISP / Org';
+              const cName = data.country_name || (data.country === 'NL' ? 'The Netherlands' : (data.country || ev.country_name || ''));
+              const locParts = [data.city, data.region, cName].filter(Boolean).join(', ');
+              const coords = data.latitude && data.longitude ? ` (${data.latitude.toFixed(4)}, ${data.longitude.toFixed(4)})` : (data.loc ? ` (${data.loc})` : '');
+              const exactFlag = getCountryFlag(data.country || data.country_code, data.flag_emoji) || flag;
+
+              if (entityFlag) entityFlag.textContent = exactFlag;
+              if (entityGeo) entityGeo.textContent = locParts || cName || 'Global WAN';
+              if (entityOrg) entityOrg.textContent = exactOrg;
+              if (entityLoc) entityLoc.textContent = (locParts ? locParts : 'Unknown Origin') + coords;
+              if (entityHost) entityHost.textContent = data.hostname || '-';
+
+              if (tagHosting) tagHosting.style.display = data.is_hosting ? 'inline-block' : 'none';
+              if (tagVPN) tagVPN.style.display = data.is_vpn ? 'inline-block' : 'none';
+              if (tagTor) tagTor.style.display = data.is_tor ? 'inline-block' : 'none';
+              if (tagProxy) tagProxy.style.display = data.is_proxy ? 'inline-block' : 'none';
+              if (tagAnycast) tagAnycast.style.display = (data.is_anycast || data.anycast) ? 'inline-block' : 'none';
+
+              if (entitySrcBadge) {
+                entitySrcBadge.textContent = data.source === 'ipinfo_live' ? '🛡️ IPinfo Verified (Live)' : (data.source === 'lru_cache' ? '🛡️ IPinfo Verified (Cached)' : 'GeoIP Synced');
+                entitySrcBadge.className = 'badge badge-success';
+              }
+
+              // Update Flow Card subtitle with enriched data
+              if (flowActorIP) flowActorIP.textContent = `${exactFlag} ${ip}`;
+              if (flowActorLoc) flowActorLoc.textContent = `${locParts || cName}${exactOrg ? ' • ' + exactOrg : ''}`;
+            }
+          })
+          .catch(() => {});
+      }
+
+      // 6. Populate Root Cause & Evidence Analysis
       populateDrawerEvidence(ev);
 
-      // 2. Populate Embedded Dynamic SOC Playbook Assistant
+      // 7. Populate Embedded Dynamic SOC Playbook Assistant
       populateDrawerPlaybook(ev);
 
-      // 3. Populate Analyst Case Notes & Journal
+      // 8. Populate Structured Analyst Investigation Log
       populateDrawerAnalystNotes(ev);
 
+      // 9. Score Breakdown Box
       const breakdownBox = document.getElementById('drawer-breakdown-box');
       const breakdownText = document.getElementById('drawer-breakdown-text');
       if (ev.score_breakdown && breakdownBox && breakdownText) {
@@ -3603,6 +4039,7 @@
         breakdownBox.style.display = 'none';
       }
 
+      // 10. ML Anomaly Box
       const mlContainer = document.getElementById('drawer-ml-container');
       const mlBadge = document.getElementById('drawer-ml-badge');
       const mlDesc = document.getElementById('drawer-ml-desc');
@@ -3614,6 +4051,7 @@
         mlContainer.style.display = 'none';
       }
 
+      // 11. Snort ML Box
       const snortContainer = document.getElementById('drawer-snort-container');
       const snortBadge = document.getElementById('drawer-snort-badge');
       const snortDesc = document.getElementById('drawer-snort-desc');
@@ -3632,69 +4070,7 @@
         snortContainer.style.display = 'none';
       }
 
-      const geoLabel = resolveEventFlag(ev) + ' ' + (ev.country_name || ev.country_code || 'Unknown Origin') + (ev.asn ? ` • ${ev.asn}` : '');
-      const geoEl = document.getElementById('drawer-geo');
-      if (geoEl) geoEl.textContent = geoLabel;
-
-      // IPinfo Threat Intelligence Card Handling
-      const ipinfoContainer = document.getElementById('drawer-ipinfo-container');
-      const ipinfoOrg = document.getElementById('drawer-ipinfo-org');
-      const ipinfoType = document.getElementById('drawer-ipinfo-type');
-      const ipinfoLoc = document.getElementById('drawer-ipinfo-loc');
-      const ipinfoHost = document.getElementById('drawer-ipinfo-host');
-      const ipinfoBadges = document.getElementById('drawer-ipinfo-badges');
-      const ipinfoSrc = document.getElementById('drawer-ipinfo-src');
-
-      if (ev.client_ip && ev.client_ip !== '127.0.0.1' && ev.client_ip !== 'local' && ev.client_ip !== '-' && ipinfoContainer) {
-        ipinfoContainer.style.display = 'block';
-        ipinfoOrg.textContent = 'Enriching via IPinfo...';
-        ipinfoType.textContent = 'Analyzing...';
-        ipinfoLoc.textContent = 'Resolving...';
-        ipinfoHost.textContent = '-';
-        ipinfoBadges.innerHTML = '';
-        ipinfoSrc.textContent = 'QUERYING';
-
-        fetch(`/api/ipinfo/lookup?ip=${encodeURIComponent(ev.client_ip)}`)
-          .then(res => res.json())
-          .then(data => {
-            if (data && !data.error) {
-              const exactOrg = data.org || (data.asn && data.asn.name) || ev.asn || 'Unknown ISP';
-              ipinfoOrg.textContent = exactOrg;
-              ipinfoType.textContent = data.classification || (data.is_hosting ? 'Hosting / Datacenter' : 'Standard ISP');
-              
-              const cName = data.country_name || (data.country === 'NL' ? 'The Netherlands' : (data.country || ev.country_name || ''));
-              const locParts = [data.city, data.region, cName].filter(Boolean).join(', ');
-              const coords = data.latitude && data.longitude ? ` (${data.latitude.toFixed(4)}, ${data.longitude.toFixed(4)})` : (data.loc ? ` (${data.loc})` : '');
-              ipinfoLoc.textContent = (locParts ? locParts : 'Unknown Location') + coords;
-              ipinfoHost.textContent = data.hostname || '-';
-
-              const flag = getCountryFlag(data.country || data.country_code, data.flag_emoji) || resolveEventFlag(ev);
-              if (geoEl && (data.country || cName)) {
-                geoEl.textContent = `${flag} ${cName}${exactOrg ? ' • ' + exactOrg : ''}`;
-              }
-
-              ipinfoSrc.textContent = data.source === 'ipinfo_live' ? '🛡️ IPinfo Verified (Live)' : (data.source === 'lru_cache' ? '🛡️ IPinfo Verified (Cached)' : 'GeoIP Fallback');
-              ipinfoSrc.className = 'badge badge-success';
-
-              let badgesHtml = '';
-              if (data.is_hosting) badgesHtml += '<span class="badge badge-high" style="font-size: 0.6rem;">HOSTING</span>';
-              if (data.is_vpn) badgesHtml += '<span class="badge badge-critical" style="font-size: 0.6rem;">VPN</span>';
-              if (data.is_tor) badgesHtml += '<span class="badge badge-critical" style="font-size: 0.6rem;">TOR EXIT</span>';
-              if (data.is_proxy) badgesHtml += '<span class="badge badge-medium" style="font-size: 0.6rem;">PROXY</span>';
-              if (data.is_anycast || data.anycast) badgesHtml += '<span class="badge badge-low" style="font-size: 0.6rem;">ANYCAST</span>';
-              ipinfoBadges.innerHTML = badgesHtml;
-            }
-          })
-          .catch(() => {
-            ipinfoOrg.textContent = ev.asn || 'Offline Lookup';
-            ipinfoType.textContent = 'Standard Entity';
-            ipinfoLoc.textContent = (ev.country_name || ev.country_code || 'Unknown Origin');
-            ipinfoSrc.textContent = 'LOCAL GEOIP';
-          });
-      } else if (ipinfoContainer) {
-        ipinfoContainer.style.display = 'none';
-      }
-
+      // 12. JSON Inspector Rendering
       const jsonContainer = document.getElementById('drawer-json-content');
       const searchBox = document.getElementById('drawer-json-search');
       const matchCountEl = document.getElementById('drawer-json-matches');
@@ -3716,7 +4092,6 @@
         currentDrawerJSONObj = parsed;
         jsonContainer.innerHTML = syntaxHighlightJSON(parsed);
       } else {
-        // Construct structured telemetry object
         currentDrawerJSONObj = {
           id: ev.id,
           node_id: ev.node_id,
@@ -3735,6 +4110,7 @@
         jsonContainer.innerHTML = syntaxHighlightJSON(currentDrawerJSONObj);
       }
 
+      // 13. AI Forensic Summary Box
       const aiContainer = document.getElementById('drawer-ai-container');
       const aiText = document.getElementById('drawer-ai-text');
       if (ev.ai_analysis) {
@@ -3748,122 +4124,7 @@
     }
 
     // -------------------------------------------------------------
-    // SOC Analyst Root Cause & Evidence Analysis Engine
-    // -------------------------------------------------------------
-    function populateDrawerEvidence(ev) {
-      if (!ev) return;
-      const score = ev.threat_score || 0;
-      const rule = (ev.rule_id || '').toLowerCase();
-      const mitre = (ev.mitre_technique_id || 'T1190').toUpperCase();
-      const raw = ev.raw_line || '';
-      const rawLower = raw.toLowerCase();
-      const status = ev.status_code || 0;
-
-      // 1. Rule Badge
-      const ruleBadge = document.getElementById('drawer-evidence-rule-badge');
-      if (ruleBadge) {
-        ruleBadge.textContent = ev.rule_id ? `RULE: ${ev.rule_id}` : `MITRE: ${mitre}`;
-        ruleBadge.className = score >= 85 ? 'badge badge-critical' : (score >= 70 ? 'badge badge-high' : 'badge badge-medium');
-      }
-
-      // 2. Determine Trigger Reason
-      let triggerReason = '';
-      if (rule.includes('revshell') || rawLower.includes('/bin/sh') || rawLower.includes('/bin/bash') || rawLower.includes('pty.spawn') || rawLower.includes('nc -e')) {
-        triggerReason = 'Interactive command injection / reverse shell sequence detected in outbound flow stream with anomalous process tree execution.';
-      } else if (rule.includes('sqli') || rawLower.includes('union select') || rawLower.includes('1=1') || rawLower.includes('information_schema')) {
-        triggerReason = 'High-risk SQL injection syntax targeting relational database endpoints detected in incoming request parameters.';
-      } else if (rule.includes('rce') || rawLower.includes('php://filter') || rawLower.includes('system(') || rawLower.includes('passthru(')) {
-        triggerReason = 'Remote code execution (RCE) payload matched via signature heuristic targeting web server runtime environment.';
-      } else if (rule.includes('sudo') || rawLower.includes('sudo:')) {
-        triggerReason = 'Privilege escalation anomaly: sudo command execution executed outside standard operational maintenance window.';
-      } else if (rule.includes('auth') || rule.includes('pam') || rawLower.includes('failed password') || rawLower.includes('authentication failure')) {
-        triggerReason = `Authentication brute-force threshold exceeded: multiple rapid password validation failures targeting local SSH/PAM accounts.`;
-      } else if (rule.includes('fim') || rawLower.includes('fim_healing') || rawLower.includes('config drift')) {
-        triggerReason = 'File Integrity Monitoring (FIM) drift detected: critical system configuration modified without authorized cryptographic hash match.';
-      } else if (rule.includes('rootkit') || rule.includes('ptrace') || rule.includes('ebpf')) {
-        triggerReason = 'Kernel security violation: unauthorized ptrace process injection or LKM rootkit symbol tampering intercepted by eBPF Integrity Guard.';
-      } else if (rule.includes('dns') || rule.includes('dga') || rule.includes('tunnel')) {
-        triggerReason = 'DNS protocol abuse: high-entropy non-standard query domain or DNS data exfiltration beacon intercepted by sinkhole guard.';
-      } else if (ev.snort_ml) {
-        triggerReason = `Snort 3 ML neural network classification flagged packet stream (Score: ${ev.snort_anomaly_score ? ev.snort_anomaly_score.toFixed(2) : '0.90+'}) as active intrusion vector.`;
-      } else if (ev.ml_anomaly) {
-        triggerReason = `Pure-Go Unsupervised Flow ML Engine detected statistical anomaly (${(ev.ml_confidence_pct || 88).toFixed(0)}% confidence) across packet distribution and entropy.`;
-      } else {
-        triggerReason = `Threat score threshold (${score}/100) exceeded based on correlated telemetry heuristic vectors and reputation flags.`;
-      }
-
-      const reasonEl = document.getElementById('drawer-evidence-reason');
-      if (reasonEl) {
-        reasonEl.innerHTML = `<strong>Root Cause:</strong> ${escapeHtml(triggerReason)}`;
-      }
-
-      // 3. Extract and Render Matched Offending IOCs & Fields
-      const iocsContainer = document.getElementById('drawer-evidence-iocs');
-      if (iocsContainer) {
-        let iocChips = [];
-
-        // Offending IP
-        if (ev.client_ip && ev.client_ip !== '-') {
-          iocChips.push(`<div class="evidence-ioc-chip"><label>Threat Actor IP</label><span>${escapeHtml(ev.client_ip)}</span></div>`);
-        }
-
-        // Offending URI / Target
-        const webMatch = raw.match(/"(GET|POST|PUT|DELETE|PATCH|HEAD)\s+([^\s]+)\s+HTTP/i) || raw.match(/uri[:=]\s*(\S+)/i) || raw.match(/url[:=]\s*(\S+)/i);
-        if (webMatch) {
-          const method = webMatch[1] || '';
-          const uri = webMatch[2] || webMatch[1] || '';
-          iocChips.push(`<div class="evidence-ioc-chip"><label>Offending URI / Method</label><span style="color: var(--amber);">${escapeHtml(method ? method + ' ' : '')}${escapeHtml(uri.substring(0, 55))}</span></div>`);
-        }
-
-        // Offending User
-        const userMatch = raw.match(/user[:=]\s*([a-zA-Z0-9_.-]+)/i) || raw.match(/user\s+([a-zA-Z0-9_.-]+)/i);
-        if (userMatch && userMatch[1]) {
-          iocChips.push(`<div class="evidence-ioc-chip"><label>Target Account / User</label><span style="color: var(--magenta);">${escapeHtml(userMatch[1])}</span></div>`);
-        }
-
-        // Executed Command
-        const cmdMatch = raw.match(/COMMAND=(.*)/i) || raw.match(/cmd[:=]\s*(.*)/i);
-        if (cmdMatch && cmdMatch[1]) {
-          iocChips.push(`<div class="evidence-ioc-chip" style="grid-column: span 2;"><label>Executed Command</label><span style="color: #f43f5e;">${escapeHtml(cmdMatch[1].substring(0, 75))}</span></div>`);
-        }
-
-        // HTTP Status Code
-        if (status > 0) {
-          iocChips.push(`<div class="evidence-ioc-chip"><label>Response Status</label><span style="color: ${status >= 400 ? 'var(--amber)' : 'var(--emerald)'};">HTTP ${status}</span></div>`);
-        }
-
-        // Rule & MITRE ID
-        if (ev.rule_id) {
-          iocChips.push(`<div class="evidence-ioc-chip"><label>Detection Rule ID</label><span style="color: var(--cyan);">${escapeHtml(ev.rule_id)}</span></div>`);
-        }
-        if (ev.mitre_technique_id) {
-          iocChips.push(`<div class="evidence-ioc-chip"><label>MITRE ATT&CK</label><span style="color: #c084fc;">${escapeHtml(ev.mitre_technique_id)}</span></div>`);
-        }
-
-        // Origin ASN
-        if (ev.asn) {
-          iocChips.push(`<div class="evidence-ioc-chip"><label>Network ASN</label><span>${escapeHtml(ev.asn)}</span></div>`);
-        }
-
-        iocsContainer.innerHTML = iocChips.join('');
-      }
-
-      // 4. Itemized Calculation Breakdown
-      const calcEl = document.getElementById('drawer-evidence-calc');
-      if (calcEl) {
-        let baseScore = ev.threat_score >= 85 ? 85 : (ev.threat_score >= 70 ? 70 : 60);
-        let repeats = ev.repeat_count || 1;
-        let repeatBonus = repeats > 1 ? ` + ${repeats * 5} (Repeated Bursts)` : '';
-        let calcStr = `Base ${baseScore}${repeatBonus} → Final Score: ${score}/100`;
-        if (ev.score_breakdown) {
-          calcStr = ev.score_breakdown;
-        }
-        calcEl.textContent = calcStr;
-      }
-    }
-
-    // -------------------------------------------------------------
-    // Embedded Dynamic SOC Playbook Assistant Generator
+    // High-Contrast Interactive Playbook Assistant Engine
     // -------------------------------------------------------------
     let playbookStepState = {};
 
@@ -3889,7 +4150,6 @@
       if (!ev) return;
       const mitre = (ev.mitre_technique_id || 'T1190').toUpperCase();
       const ip = ev.client_ip || '127.0.0.1';
-      const isHost = ip === '127.0.0.1' || ip === 'local' || ev.is_host_local;
       const rule = (ev.rule_id || '').toLowerCase();
       const incidentId = ev.id || 'current';
 
@@ -3917,7 +4177,8 @@
           {
             badge: 'STEP 1: TRIAGE',
             title: 'Analyze Authentication Failure Velocity',
-            desc: `Inspect rate of authentication attempts from ${ip}: <code>grep '${ip}' /var/log/auth.log | grep -E 'Failed password|authentication failure' | tail -n 20</code>`,
+            desc: `Inspect rate of authentication attempts from ${ip}:`,
+            command: `grep '${ip}' /var/log/auth.log | grep -E 'Failed password|authentication failure' | tail -n 20`,
             actions: [
               { label: '🔍 Pull Access Logs', fn: `pullIncidentAccessLogs('${ip}')`, cls: 'btn-triage-report' }
             ]
@@ -3925,7 +4186,8 @@
           {
             badge: 'STEP 2: SCOPE',
             title: 'Verify Targeted Accounts & Breach Status',
-            desc: `Check if any targeted accounts were successfully accessed from attacker IP: <code>grep '${ip}' /var/log/auth.log | grep 'Accepted'</code>`
+            desc: `Check if any targeted accounts were successfully accessed from attacker IP:`,
+            command: `grep '${ip}' /var/log/auth.log | grep 'Accepted'`
           },
           {
             badge: 'STEP 3: CONTAINMENT',
@@ -3939,7 +4201,8 @@
           {
             badge: 'STEP 4: ERADICATION',
             title: 'Lock Affected Accounts & Enforce MFA',
-            desc: 'Temporary lockout targeted accounts (passwd -l), invalidate existing sessions, and verify fail2ban/pam rate-limiting.'
+            desc: 'Temporary lockout targeted accounts (passwd -l), invalidate existing sessions, and verify fail2ban rate-limiting.',
+            command: `passwd -l <compromised_user> && pkill -u <compromised_user>`
           }
         ];
       } else if (mitre.startsWith('T1078') || rule.includes('pam') || rule.includes('ssh') || rule.includes('valid_accounts')) {
@@ -3948,7 +4211,8 @@
           {
             badge: 'STEP 1: TRIAGE',
             title: 'Verify Authentication Audit Logs',
-            desc: `Inspect /var/log/auth.log or journalctl for successful logon sessions originated from ${ip}: <code>grep -E 'Accepted|session opened' /var/log/auth.log | grep '${ip}'</code>`,
+            desc: `Inspect /var/log/auth.log or journalctl for successful logon sessions originated from ${ip}:`,
+            command: `grep -E 'Accepted|session opened' /var/log/auth.log | grep '${ip}'`,
             actions: [
               { label: '🔍 Pull Access Logs', fn: `pullIncidentAccessLogs('${ip}')`, cls: 'btn-triage-report' }
             ]
@@ -3956,7 +4220,8 @@
           {
             badge: 'STEP 2: SCOPE',
             title: 'Audit Active User Sessions & Socket Lineage',
-            desc: `Check if attacker holds active interactive PTY sockets: <code>w && who && ss -tnp | grep ':22'</code>`
+            desc: `Check if attacker holds active interactive PTY sockets:`,
+            command: `w && who && ss -tnp | grep ':22'`
           },
           {
             badge: 'STEP 3: CONTAINMENT',
@@ -3970,7 +4235,8 @@
           {
             badge: 'STEP 4: ERADICATION',
             title: 'Rotate Credentials & Enforce Key-Based Auth',
-            desc: 'Disable password authentication in /etc/ssh/sshd_config (PasswordAuthentication no) and cycle compromised SSH keys.'
+            desc: 'Disable password authentication in /etc/ssh/sshd_config (PasswordAuthentication no) and cycle compromised SSH keys.',
+            command: `sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config && systemctl reload sshd`
           }
         ];
       } else if (mitre.startsWith('T1059') || rule.includes('revshell') || rule.includes('rce') || rule.includes('exec')) {
@@ -3979,7 +4245,8 @@
           {
             badge: 'STEP 1: TRIAGE',
             title: 'Inspect Process Tree & Command Lineage',
-            desc: `Check active processes spawned by web server / unprivileged daemons: <code>ps auxf | grep -E 'sh|bash|python|perl|nc'</code>`,
+            desc: `Check active processes spawned by web server / unprivileged daemons:`,
+            command: `ps auxf | grep -E 'sh|bash|python|perl|nc'`,
             actions: [
               { label: '🧠 Run AI Forensics', fn: `triageAIReport(0)`, cls: 'btn-triage-report' }
             ]
@@ -3987,7 +4254,8 @@
           {
             badge: 'STEP 2: SCOPE',
             title: 'Identify Open C2 Socket Connections',
-            desc: `Inspect outbound TCP established connections to external WAN ports: <code>ss -tapn | grep ESTAB</code>`
+            desc: `Inspect outbound TCP established connections to external WAN ports:`,
+            command: `ss -tapn | grep ESTAB`
           },
           {
             badge: 'STEP 3: CONTAINMENT',
@@ -4001,7 +4269,8 @@
           {
             badge: 'STEP 4: ERADICATION',
             title: 'Purge Persistence & Web Shell Artifacts',
-            desc: 'Audit /tmp, /dev/shm, /var/tmp, crontabs (crontab -l, /etc/cron.*), and systemd services for rogue persistence scripts.'
+            desc: 'Audit /tmp, /dev/shm, /var/tmp, crontabs (crontab -l, /etc/cron.*), and systemd services for rogue persistence scripts.',
+            command: `ls -lat /tmp /dev/shm /var/tmp | head -n 30`
           }
         ];
       } else if (mitre.startsWith('T1071') || ev.ml_anomaly || rule.includes('c2') || rule.includes('beacon')) {
@@ -4010,7 +4279,8 @@
           {
             badge: 'STEP 1: TRIAGE',
             title: 'Evaluate Shannon Entropy & Flow Distribution',
-            desc: `Review statistical payload entropy and packet distribution score: <code>ss -tulpn | grep '${ip}'</code>`,
+            desc: `Review statistical payload entropy and packet distribution score:`,
+            command: `ss -tulpn | grep '${ip}'`,
             actions: [
               { label: '🧠 Run AI Forensics', fn: `triageAIReport(0)`, cls: 'btn-triage-report' }
             ]
@@ -4018,7 +4288,8 @@
           {
             badge: 'STEP 2: SCOPE',
             title: 'Correlate C2 Beaconing Frequency & Jitter',
-            desc: 'Inspect periodic heartbeat intervals and check for DNS tunneling / HTTP beaconing payloads.'
+            desc: 'Inspect periodic heartbeat intervals and check for DNS tunneling / HTTP beaconing payloads.',
+            command: `journalctl -u copsec-collector -n 50 | grep '${ip}'`
           },
           {
             badge: 'STEP 3: CONTAINMENT',
@@ -4032,7 +4303,8 @@
           {
             badge: 'STEP 4: ERADICATION',
             title: 'Sinkhole Domain on Local DNS Resolver',
-            desc: 'Add beaconing domain to CoPSeC DNS sinkhole filter and purge local resolver cache.'
+            desc: 'Add beaconing domain to CoPSeC DNS sinkhole filter and purge local resolver cache.',
+            command: `rndc flush || systemd-resolve --flush-caches`
           }
         ];
       } else if (mitre.startsWith('T1014') || rule.includes('rootkit') || rule.includes('ptrace') || rule.includes('fim')) {
@@ -4041,7 +4313,8 @@
           {
             badge: 'STEP 1: TRIAGE',
             title: 'Audit eBPF Kernel Hooks & Module Symbols',
-            desc: 'Inspect /proc/modules and kernel ring buffer for tainted flags: <code>dmesg -T | grep -E "taint|module|hook"</code>',
+            desc: 'Inspect /proc/modules and kernel ring buffer for tainted flags:',
+            command: `dmesg -T | grep -E "taint|module|hook|ptrace" | tail -n 25`,
             actions: [
               { label: '🛡️ Re-Validate FIM / Kernel', fn: `revalidateFIMKernel()`, cls: 'btn-triage-report' }
             ]
@@ -4049,7 +4322,8 @@
           {
             badge: 'STEP 2: SCOPE',
             title: 'Verify File Integrity Hashes',
-            desc: 'Verify SHA256 integrity of system binaries in /bin, /sbin, /usr/bin against package manager baselines (dpkg -V / rpm -V).'
+            desc: 'Verify SHA256 integrity of system binaries in /bin, /sbin, /usr/bin against package manager baselines.',
+            command: `dpkg -V || rpm -V -a`
           },
           {
             badge: 'STEP 3: CONTAINMENT',
@@ -4063,7 +4337,8 @@
           {
             badge: 'STEP 4: ERADICATION',
             title: 'Re-Deploy Hardened Kernel & Clean Snapshot',
-            desc: 'Reboot with module locking enabled (sysctl kernel.modules_disabled=1) and verify secure boot state.'
+            desc: 'Reboot with module locking enabled (sysctl kernel.modules_disabled=1) and verify secure boot state.',
+            command: `sysctl -w kernel.modules_disabled=1`
           }
         ];
       } else {
@@ -4072,7 +4347,8 @@
           {
             badge: 'STEP 1: TRIAGE',
             title: 'Inspect Target Web Application Logs',
-            desc: `Correlate request URI in web server access log around timestamp: <code>grep '${ip}' /var/log/nginx/access.log | tail -n 25</code>`,
+            desc: `Correlate request URI in web server access log around timestamp:`,
+            command: `grep '${ip}' /var/log/nginx/access.log | tail -n 25`,
             actions: [
               { label: '🔍 Pull Access Logs', fn: `pullIncidentAccessLogs('${ip}')`, cls: 'btn-triage-report' }
             ]
@@ -4080,7 +4356,8 @@
           {
             badge: 'STEP 2: SCOPE',
             title: 'Assess Impact & HTTP Status Codes',
-            desc: 'Verify whether web server responded with 200 OK (potential exploit execution) or 403/404 blocked.'
+            desc: 'Verify whether web server responded with 200 OK (potential exploit execution) or 403/404 blocked.',
+            command: `grep '${ip}' /var/log/nginx/access.log | awk '{print $9}' | sort | uniq -c`
           },
           {
             badge: 'STEP 3: CONTAINMENT',
@@ -4095,31 +4372,52 @@
           {
             badge: 'STEP 4: ERADICATION',
             title: 'Patch Vulnerable Application Endpoint',
-            desc: 'Update vulnerable web component, apply rate-limiting rules in WAF, and verify input sanitization.'
+            desc: 'Update vulnerable web component, apply rate-limiting rules in WAF, and verify input sanitization.',
+            command: `nginx -t && systemctl reload nginx`
           }
         ];
       }
 
-      // Render Playbook Steps
+      // Render Playbook Steps with High-Contrast Cyber States
       const stepsContainer = document.getElementById('drawer-playbook-steps');
       if (stepsContainer) {
+        let firstIncompleteFound = false;
         stepsContainer.innerHTML = steps.map((step, idx) => {
           const stepKey = `pb-${incidentId}-${idx}`;
           const isDone = !!playbookStepState[stepKey];
+          let statusClass = 'pending';
+          if (isDone) {
+            statusClass = 'completed';
+          } else if (!firstIncompleteFound) {
+            statusClass = 'in-progress';
+            firstIncompleteFound = true;
+          }
+
           const actionButtons = (step.actions || []).map(a => 
             `<button class="btn-triage-xs ${a.cls}" onclick="${a.fn}">${a.label}</button>`
           ).join('');
 
+          const cmdSnippet = step.command ? `
+            <div class="code-snippet-box">
+              <code>${escapeHtml(step.command)}</code>
+              <button type="button" class="btn-code-copy" onclick="copyCommandSnippet('${escapeHtml(step.command.replace(/'/g, "\\'"))}', this)">📋 Copy</button>
+            </div>
+          ` : '';
+
           return `
-            <div id="${stepKey}" class="playbook-step-card ${isDone ? 'completed' : ''}">
+            <div id="${stepKey}" class="playbook-step-card ${statusClass}">
               <div class="playbook-step-top">
                 <div class="playbook-step-left">
                   <input type="checkbox" style="cursor: pointer; accent-color: #10b981;" onchange="togglePlaybookStep('${stepKey}', this, ${idx})" ${isDone ? 'checked' : ''}>
                   <span class="playbook-step-badge">${step.badge}</span>
                   <span class="playbook-step-title">${escapeHtml(step.title)}</span>
                 </div>
+                <span class="badge" style="font-size: 0.6rem; ${isDone ? 'background: rgba(16, 185, 129, 0.2); color: #10b981; border: 1px solid #10b981;' : (statusClass === 'in-progress' ? 'background: rgba(0, 243, 255, 0.2); color: var(--cyan); border: 1px solid var(--cyan);' : 'background: rgba(100, 116, 139, 0.2); color: #94a3b8; border: 1px solid #475569;')}">
+                  ${isDone ? '✔ COMPLETED' : (statusClass === 'in-progress' ? '⚡ IN PROGRESS' : 'PENDING')}
+                </span>
               </div>
               <div class="playbook-step-desc">${step.desc}</div>
+              ${cmdSnippet}
               ${actionButtons ? `<div class="playbook-step-actions">${actionButtons}</div>` : ''}
             </div>
           `;
@@ -4131,16 +4429,12 @@
 
     function togglePlaybookStep(stepKey, checkboxEl, stepIdx) {
       playbookStepState[stepKey] = checkboxEl.checked;
-      const card = document.getElementById(stepKey);
-      if (card) {
-        if (checkboxEl.checked) {
-          card.classList.add('completed');
-        } else {
-          card.classList.remove('completed');
-        }
-      }
       const incidentId = currentDrawerEvent ? (currentDrawerEvent.id || 'current') : 'current';
-      updatePlaybookProgress(incidentId, 4);
+      
+      // Re-render Playbook steps to update In-Progress / Pending / Completed CSS states
+      if (currentDrawerEvent) {
+        populateDrawerPlaybook(currentDrawerEvent);
+      }
 
       // Persist playbook progress to backend
       let progressMap = {};
@@ -4172,64 +4466,179 @@
     }
 
     // -------------------------------------------------------------
-    // Analyst Investigation Notes & Debounced Autosave
+    // Structured SOC Analyst Investigation Log & Timeline
     // -------------------------------------------------------------
     let notesAutosaveTimer = null;
 
     function populateDrawerAnalystNotes(ev) {
-      const textarea = document.getElementById('drawer-analyst-notes');
-      const status = document.getElementById('drawer-notes-status');
-      if (textarea) {
-        textarea.value = ev.analyst_notes || '';
+      const timelineContainer = document.getElementById('drawer-timeline-list');
+      const inputEl = document.getElementById('drawer-analyst-input');
+      if (inputEl) inputEl.value = '';
+
+      currentDrawerTimeline = [];
+      const score = ev.threat_score || 0;
+      const timeStr = new Date(ev.timestamp_ms || Date.now()).toLocaleTimeString();
+
+      // Initial System Baseline Log
+      currentDrawerTimeline.push({
+        time: timeStr,
+        badge: 'SYSTEM',
+        badgeClass: 'timeline-badge-system',
+        text: `Incident ingested from sensor ${ev.node_id || 'controller'} (Threat Score: ${score}/100, Rule: ${ev.rule_id || 'HEURISTIC'})`
+      });
+
+      if (score >= 85) {
+        currentDrawerTimeline.push({
+          time: timeStr,
+          badge: 'CRITICAL',
+          badgeClass: 'timeline-badge-critical',
+          text: `High-severity anomaly triggered autonomous SOAR pre-quarantine alert.`
+        });
       }
-      if (status) {
-        status.textContent = ev.analyst_notes ? '💾 Saved to SQLite' : 'Ready';
-        status.style.color = '#94a3b8';
+
+      // Parse existing analyst notes
+      if (ev.analyst_notes) {
+        const lines = ev.analyst_notes.split('\n');
+        lines.forEach(line => {
+          line = line.trim();
+          if (!line) return;
+          const match = line.match(/^\[(.*?)\]\s*(.*)$/);
+          if (match) {
+            currentDrawerTimeline.push({
+              time: match[1],
+              badge: 'ANALYST',
+              badgeClass: 'timeline-badge-analyst',
+              text: match[2]
+            });
+          } else {
+            currentDrawerTimeline.push({
+              time: timeStr,
+              badge: 'ANALYST',
+              badgeClass: 'timeline-badge-analyst',
+              text: line
+            });
+          }
+        });
+      }
+
+      renderAnalystTimeline();
+    }
+
+    function renderAnalystTimeline() {
+      const container = document.getElementById('drawer-timeline-list');
+      if (!container) return;
+
+      container.innerHTML = currentDrawerTimeline.map(entry => `
+        <div class="timeline-entry">
+          <span class="timeline-time">[${entry.time}]</span>
+          <span class="timeline-badge ${entry.badgeClass}">${entry.badge}</span>
+          <span class="timeline-text">${escapeHtml(entry.text)}</span>
+        </div>
+      `).join('');
+
+      container.scrollTop = container.scrollHeight;
+    }
+
+    function submitAnalystTimelineEntry() {
+      const inputEl = document.getElementById('drawer-analyst-input');
+      if (!inputEl) return;
+      const val = inputEl.value.trim();
+      if (!val) return;
+
+      const timeStr = new Date().toLocaleTimeString();
+      currentDrawerTimeline.push({
+        time: timeStr,
+        badge: 'ANALYST',
+        badgeClass: 'timeline-badge-analyst',
+        text: val
+      });
+      inputEl.value = '';
+      renderAnalystTimeline();
+      saveAnalystTimelineToBackend();
+    }
+
+    function addTimelineQuickAction(actionType) {
+      if (!currentDrawerEvent) return;
+      const timeStr = new Date().toLocaleTimeString();
+      const ip = currentDrawerEvent.client_ip || '127.0.0.1';
+
+      if (actionType === 'FP') {
+        currentDrawerTimeline.push({
+          time: timeStr,
+          badge: 'ANALYST',
+          badgeClass: 'timeline-badge-analyst',
+          text: `🏷️ Verified as False Positive; incident dismissed from active queue.`
+        });
+        saveAnalystTimelineToBackend();
+        renderAnalystTimeline();
+        showToast('Incident tagged as False Positive', 'info', 'Analyst Action');
+        setTimeout(() => drawerResolve(), 500);
+      } else if (actionType === 'SEV1') {
+        currentDrawerEvent.threat_score = 95;
+        currentDrawerTimeline.push({
+          time: timeStr,
+          badge: 'CRITICAL',
+          badgeClass: 'timeline-badge-critical',
+          text: `🚨 Escalated to SEV1 Critical Incident; swarm-wide quarantine broadcasted.`
+        });
+        saveAnalystTimelineToBackend();
+        renderAnalystTimeline();
+        showToast('Incident elevated to SEV1 Critical Threat', 'warning', 'SOAR Alert');
+      } else if (actionType === 'BANNED') {
+        currentDrawerTimeline.push({
+          time: timeStr,
+          badge: 'ANALYST',
+          badgeClass: 'timeline-badge-critical',
+          text: `🔒 Threat Actor verified malicious; permanent XDP fast-path drop enforced on ${ip}.`
+        });
+        saveAnalystTimelineToBackend();
+        renderAnalystTimeline();
+        drawerQuickBan();
       }
     }
 
-    function handleAnalystNotesInput(val) {
+    function saveAnalystTimelineToBackend() {
+      if (!currentDrawerEvent) return;
       const status = document.getElementById('drawer-notes-status');
       if (status) {
         status.textContent = '✍️ Saving...';
         status.style.color = 'var(--amber)';
       }
 
-      if (notesAutosaveTimer) clearTimeout(notesAutosaveTimer);
+      // Serialize analyst entries
+      const analystLines = currentDrawerTimeline
+        .filter(e => e.badge === 'ANALYST' || e.badge === 'CRITICAL')
+        .map(e => `[${e.time}] ${e.text}`);
 
-      notesAutosaveTimer = setTimeout(() => {
-        if (!currentDrawerEvent) return;
-        currentDrawerEvent.analyst_notes = val;
+      const fullNotes = analystLines.join('\n');
+      currentDrawerEvent.analyst_notes = fullNotes;
 
-        const incidentId = currentDrawerEvent.id || 0;
+      const incidentId = currentDrawerEvent.id || 0;
+      if (incidentId) {
+        const matchAlert = activeAlerts.find(a => a.id === incidentId);
+        if (matchAlert) matchAlert.analyst_notes = fullNotes;
+        const matchEv = eventsLog.find(e => e.id === incidentId);
+        if (matchEv) matchEv.analyst_notes = fullNotes;
+      }
 
-        // Also update matching items in activeAlerts / eventsLog
-        if (incidentId) {
-          const matchAlert = activeAlerts.find(a => a.id === incidentId);
-          if (matchAlert) matchAlert.analyst_notes = val;
-          const matchEv = eventsLog.find(e => e.id === incidentId);
-          if (matchEv) matchEv.analyst_notes = val;
+      fetch('/api/alerts/notes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ incident_id: incidentId, id: incidentId, notes: fullNotes })
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (status) {
+          status.textContent = `💾 Autosaved to SQLite (${new Date().toLocaleTimeString()})`;
+          status.style.color = '#10b981';
         }
-
-        fetch('/api/alerts/notes', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ incident_id: incidentId, id: incidentId, notes: val })
-        })
-        .then(res => res.json())
-        .then(data => {
-          if (status) {
-            status.textContent = `💾 Autosaved to SQLite (${new Date().toLocaleTimeString()})`;
-            status.style.color = '#10b981';
-          }
-        })
-        .catch(err => {
-          if (status) {
-            status.textContent = '⚠️ Failed to save notes';
-            status.style.color = 'var(--magenta)';
-          }
-        });
-      }, 500);
+      })
+      .catch(err => {
+        if (status) {
+          status.textContent = '⚠️ Failed to save notes';
+          status.style.color = 'var(--magenta)';
+        }
+      });
     }
 
     function exportIncidentReport(format) {
