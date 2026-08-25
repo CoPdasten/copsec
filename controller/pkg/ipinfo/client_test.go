@@ -248,4 +248,42 @@ func TestIPv6IPInfoLookup(t *testing.T) {
 	if !resp.IsHosting {
 		t.Errorf("Expected Hetzner IPv6 to be identified as Hosting")
 	}
+	if resp.FlagEmoji != "🇫🇷" {
+		t.Errorf("Expected flag 🇫🇷, got %s", resp.FlagEmoji)
+	}
+}
+
+func TestCountryCodeNormalizationAndPortSanitization(t *testing.T) {
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		// Simulate API returning lowercase country code "nl"
+		w.Write([]byte(`{
+			"ip": "192.253.248.229",
+			"city": "Kerkrade",
+			"region": "Limburg",
+			"country": "nl",
+			"loc": "50.8658,6.0625",
+			"org": "AS215790 Limited Network LTD"
+		}`))
+	}))
+	defer mockServer.Close()
+
+	client := NewClient("test-token")
+	client.SetBaseURL(mockServer.URL)
+
+	// IP with raw port attached
+	resp, err := client.Lookup(context.Background(), "192.253.248.229:443")
+	if err != nil {
+		t.Fatalf("Lookup failed: %v", err)
+	}
+
+	if resp.Country != "NL" {
+		t.Errorf("Expected normalized uppercase country 'NL', got '%s'", resp.Country)
+	}
+	if resp.FlagEmoji != "🇳🇱" {
+		t.Errorf("Expected flag 🇳🇱, got %s", resp.FlagEmoji)
+	}
+	if resp.IP != "192.253.248.229" {
+		t.Errorf("Expected stripped IP 192.253.248.229, got %s", resp.IP)
+	}
 }

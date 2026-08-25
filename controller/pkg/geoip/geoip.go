@@ -86,11 +86,11 @@ func NewEngine() *Engine {
 // CountryCodeToEmoji converts an ISO 3166-1 alpha-2 country code to a Unicode flag emoji.
 func CountryCodeToEmoji(code string) string {
 	code = strings.ToUpper(strings.TrimSpace(code))
+	if code == "LOC" || code == "LOCAL" || code == "LAN" || code == "PRIV" || code == "LO" {
+		return "🖥️"
+	}
 	if len(code) != 2 {
 		return "🌐"
-	}
-	if code == "LO" || code == "LAN" || code == "PRIV" || code == "LOC" {
-		return "🏠"
 	}
 	if code[0] < 'A' || code[0] > 'Z' || code[1] < 'A' || code[1] > 'Z' {
 		return "🌐"
@@ -101,76 +101,106 @@ func CountryCodeToEmoji(code string) string {
 	return string([]rune{r1, r2})
 }
 
-// Lookup resolves an IP address to its GeoLocation record.
-func (e *Engine) Lookup(ipStr string) *GeoLocation {
+// CleanIPAddress normalizes and strips port numbers, brackets, and CIDR masks from raw IP strings.
+func CleanIPAddress(ipStr string) string {
 	ipStr = strings.TrimSpace(ipStr)
-	if ipStr == "" || ipStr == "-" || ipStr == "127.0.0.1" || ipStr == "local" || ipStr == "localhost" || ipStr == "::1" {
-		return &GeoLocation{
-			IP:          ipStr,
-			CountryCode: "LOC",
-			CountryName: "Local / Host Execution",
-			City:        "Internal",
-			ASN:         "Local Host",
-			Latitude:    0.0,
-			Longitude:   0.0,
-			FlagEmoji:   "🏠",
-			IsPrivate:   true,
+	if ipStr == "" {
+		return ""
+	}
+	// Trim outer quotes/whitespace
+	ipStr = strings.Trim(ipStr, " \t\r\n\"'")
+
+	// 1. Attempt net.SplitHostPort (handles IPv4:port and [IPv6]:port)
+	if host, _, err := net.SplitHostPort(ipStr); err == nil {
+		ipStr = host
+	} else if strings.Count(ipStr, ":") == 1 {
+		// Single colon in IPv4 string: e.g. 192.253.248.229:443
+		if parts := strings.Split(ipStr, ":"); len(parts) == 2 {
+			if net.ParseIP(parts[0]) != nil {
+				ipStr = parts[0]
+			}
 		}
 	}
 
-	// Remove brackets, ports, and CIDR suffix if present (e.g. "[2001:db8::1]:80" or "198.51.100.1:443" or "1.2.3.4/32")
+	// 2. Strip IPv6 brackets if still present (e.g. "[2001:...]")
 	ipStr = strings.Trim(ipStr, "[]")
-	if host, _, err := net.SplitHostPort(ipStr); err == nil {
-		ipStr = host
-	}
+
+	// 3. Strip CIDR mask if present (e.g. "1.2.3.4/32")
 	if idx := strings.Index(ipStr, "/"); idx != -1 {
 		ipStr = ipStr[:idx]
 	}
 	ipStr = strings.TrimSpace(ipStr)
+	if parsed := net.ParseIP(ipStr); parsed != nil {
+		return parsed.String()
+	}
+	return ipStr
+}
+
+// Lookup resolves an IP address to its GeoLocation record.
+func (e *Engine) Lookup(ipStr string) *GeoLocation {
+	cleanIP := CleanIPAddress(ipStr)
+	if cleanIP == "" || cleanIP == "-" || cleanIP == "127.0.0.1" || cleanIP == "local" || cleanIP == "localhost" || cleanIP == "::1" || cleanIP == "0.0.0.0" || cleanIP == "::" {
+		return &GeoLocation{
+			IP:          cleanIP,
+			CountryCode: "LOC",
+			CountryName: "Local Host",
+			City:        "Internal",
+			ASN:         "Local Host",
+			Latitude:    0.0,
+			Longitude:   0.0,
+			FlagEmoji:   "🖥️",
+			IsPrivate:   true,
+		}
+	}
 
 	e.mu.RLock()
-	if cached, ok := e.cache[ipStr]; ok {
+	if cached, ok := e.cache[cleanIP]; ok {
 		e.mu.RUnlock()
 		return cached
 	}
 	e.mu.RUnlock()
 
-	parsedIP := net.ParseIP(ipStr)
+	parsedIP := net.ParseIP(cleanIP)
 	if parsedIP == nil {
 		return &GeoLocation{
-			IP:          ipStr,
-			CountryCode: "UN",
-			CountryName: "Unknown Origin",
-			City:        "Unknown",
-			ASN:         "AS0 Unknown",
+			IP:          cleanIP,
+			CountryCode: "LOC",
+			CountryName: "Local Host",
+			City:        "Internal",
+			ASN:         "Local Host",
 			Latitude:    0.0,
 			Longitude:   0.0,
-			FlagEmoji:   "🌐",
+			FlagEmoji:   "🖥️",
+			IsPrivate:   true,
 		}
 	}
 
-	// 1. Check if Private / Loopback / CGNAT (100.64.0.0/10)
-	if parsedIP.IsLoopback() || parsedIP.IsPrivate() || isCGNAT(parsedIP) || parsedIP.IsUnspecified() {
+	// 1. Check if Private / Loopback / CGNAT (100.64.0.0/10) / Link-Local
+	if parsedIP.IsLoopback() || parsedIP.IsPrivate() || isCGNAT(parsedIP) || parsedIP.IsUnspecified() || parsedIP.IsLinkLocalUnicast() || parsedIP.IsLinkLocalMulticast() {
 		loc := &GeoLocation{
-			IP:          ipStr,
+			IP:          cleanIP,
 			CountryCode: "LOC",
-			CountryName: "Local / Private Network",
+			CountryName: "Local Host",
 			City:        "Internal",
 			ASN:         "RFC1918 Private Subnet",
 			Latitude:    0.0,
 			Longitude:   0.0,
-			FlagEmoji:   "🏠",
+			FlagEmoji:   "🖥️",
 			IsPrivate:   true,
 		}
-		e.cacheResult(ipStr, loc)
+		e.cacheResult(cleanIP, loc)
 		return loc
 	}
 
 	// 2. Check Live IPinfo LRU Cache (Highest Priority Live Threat Intel)
-	if ipinfoResp, ok := ipinfo.GetDefaultClient().GetCached(ipStr); ok && ipinfoResp != nil {
+	if ipinfoResp, ok := ipinfo.GetDefaultClient().GetCached(cleanIP); ok && ipinfoResp != nil {
+		countryCode := strings.ToUpper(strings.TrimSpace(ipinfoResp.Country))
+		if countryCode == "" {
+			countryCode = "UN"
+		}
 		loc := &GeoLocation{
-			IP:             ipStr,
-			CountryCode:    ipinfoResp.Country,
+			IP:             cleanIP,
+			CountryCode:    countryCode,
 			CountryName:    ipinfoResp.CountryName,
 			City:           ipinfoResp.City,
 			Region:         ipinfoResp.Region,
@@ -179,7 +209,7 @@ func (e *Engine) Lookup(ipStr string) *GeoLocation {
 			ASN:            ipinfoResp.Org,
 			Latitude:       ipinfoResp.Latitude,
 			Longitude:      ipinfoResp.Longitude,
-			FlagEmoji:      ipinfoResp.FlagEmoji,
+			FlagEmoji:      CountryCodeToEmoji(countryCode),
 			IsPrivate:      false,
 			IsHosting:      ipinfoResp.IsHosting,
 			IsVPN:          ipinfoResp.IsVPN,
@@ -190,22 +220,19 @@ func (e *Engine) Lookup(ipStr string) *GeoLocation {
 		if loc.CountryName == "" {
 			loc.CountryName = ipinfo.CountryCodeToName(loc.CountryCode)
 		}
-		if loc.FlagEmoji == "" {
-			loc.FlagEmoji = CountryCodeToEmoji(loc.CountryCode)
-		}
 		e.recordHit(loc.CountryCode)
-		e.cacheResult(ipStr, loc)
+		e.cacheResult(cleanIP, loc)
 		return loc
 	}
 
 	// Trigger non-blocking async IPinfo resolution for fresh lookups
-	ipinfo.GetDefaultClient().LookupAsync(ipStr)
+	ipinfo.GetDefaultClient().LookupAsync(cleanIP)
 
 	// 3. Check Custom / Known Threat & Cloud Subnet Ranges
 	for _, r := range e.customRanges {
 		if r.Net.Contains(parsedIP) {
 			loc := &GeoLocation{
-				IP:          ipStr,
+				IP:          cleanIP,
 				CountryCode: r.CountryCode,
 				CountryName: r.CountryName,
 				City:        r.City,
@@ -216,15 +243,15 @@ func (e *Engine) Lookup(ipStr string) *GeoLocation {
 				IsPrivate:   false,
 			}
 			e.recordHit(loc.CountryCode)
-			e.cacheResult(ipStr, loc)
+			e.cacheResult(cleanIP, loc)
 			return loc
 		}
 	}
 
 	// 4. Deterministic High-Coverage Regional Hash Resolution (Fallback for unmapped IPs)
-	loc := e.resolveSyntheticGeo(parsedIP, ipStr)
+	loc := e.resolveSyntheticGeo(parsedIP, cleanIP)
 	e.recordHit(loc.CountryCode)
-	e.cacheResult(ipStr, loc)
+	e.cacheResult(cleanIP, loc)
 	return loc
 }
 

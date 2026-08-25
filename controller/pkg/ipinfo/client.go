@@ -311,10 +311,11 @@ func (c *Client) Lookup(ctx context.Context, ipStr string) (*IPInfoResponse, err
 		return &IPInfoResponse{
 			IP:             cleanIP,
 			Country:        "LOC",
+			CountryName:    "Local Host",
 			City:           "Internal",
 			Region:         "Private Subnet",
 			Org:            "RFC1918 Local Host",
-			FlagEmoji:      "🏠",
+			FlagEmoji:      "🖥️",
 			Classification: "Local / Private Network",
 			CachedAtMs:     time.Now().UnixMilli(),
 			Source:         "private_network",
@@ -376,9 +377,65 @@ func (c *Client) Lookup(ctx context.Context, ipStr string) (*IPInfoResponse, err
 		return nil, err
 	}
 
-	var ipinfoResp IPInfoResponse
-	if err := json.Unmarshal(body, &ipinfoResp); err != nil {
+	var raw struct {
+		IP          string       `json:"ip"`
+		Hostname    string       `json:"hostname,omitempty"`
+		Anycast     bool         `json:"anycast,omitempty"`
+		City        string       `json:"city,omitempty"`
+		Region      string       `json:"region,omitempty"`
+		Country     string       `json:"country,omitempty"`
+		CountryCode string       `json:"country_code,omitempty"`
+		CountryName string       `json:"country_name,omitempty"`
+		Loc         string       `json:"loc,omitempty"`
+		Org         string       `json:"org,omitempty"`
+		Postal      string       `json:"postal,omitempty"`
+		Timezone    string       `json:"timezone,omitempty"`
+		ASN         *ASNInfo     `json:"asn,omitempty"`
+		Company     *CompanyInfo `json:"company,omitempty"`
+		Privacy     *PrivacyInfo `json:"privacy,omitempty"`
+	}
+
+	if err := json.Unmarshal(body, &raw); err != nil {
 		return nil, fmt.Errorf("failed to parse ipinfo response: %v", err)
+	}
+
+	ipinfoResp := IPInfoResponse{
+		IP:       cleanIP,
+		Hostname: raw.Hostname,
+		Anycast:  raw.Anycast,
+		City:     raw.City,
+		Region:   raw.Region,
+		Loc:      raw.Loc,
+		Org:      raw.Org,
+		Postal:   raw.Postal,
+		Timezone: raw.Timezone,
+		ASN:      raw.ASN,
+		Company:  raw.Company,
+		Privacy:  raw.Privacy,
+	}
+
+	// Normalize ISO Country Code (uppercase 2-letter code)
+	countryRaw := strings.TrimSpace(raw.Country)
+	countryCodeRaw := strings.TrimSpace(raw.CountryCode)
+	var isoCode string
+
+	if len(countryCodeRaw) == 2 {
+		isoCode = strings.ToUpper(countryCodeRaw)
+	} else if len(countryRaw) == 2 {
+		isoCode = strings.ToUpper(countryRaw)
+	} else if countryRaw != "" {
+		isoCode = countryNameToISOCode(countryRaw)
+	}
+
+	if isoCode == "" {
+		isoCode = "UN"
+	}
+
+	ipinfoResp.Country = isoCode
+	if raw.CountryName != "" {
+		ipinfoResp.CountryName = raw.CountryName
+	} else {
+		ipinfoResp.CountryName = CountryCodeToName(isoCode)
 	}
 
 	// Parse coordinates from "loc": "lat,lon"
@@ -392,16 +449,15 @@ func (c *Client) Lookup(ctx context.Context, ipStr string) (*IPInfoResponse, err
 		}
 	}
 
-	// Set flag emoji & country name
+	// Set flag emoji & metadata
 	ipinfoResp.FlagEmoji = countryCodeToEmoji(ipinfoResp.Country)
-	ipinfoResp.CountryName = CountryCodeToName(ipinfoResp.Country)
 	ipinfoResp.CachedAtMs = time.Now().UnixMilli()
 	ipinfoResp.Source = "ipinfo_live"
 
 	// Derive Hosting / VPN / Proxy / Classification flags
 	c.deriveSecurityContext(&ipinfoResp)
 
-	// Save to LRU cache
+	// Save valid response to LRU cache
 	c.cache.Set(cleanIP, &ipinfoResp)
 
 	return &ipinfoResp, nil
@@ -474,15 +530,75 @@ func (c *Client) deriveSecurityContext(resp *IPInfoResponse) {
 	}
 }
 
+func countryNameToISOCode(name string) string {
+	nameUpper := strings.ToUpper(strings.TrimSpace(name))
+	mapping := map[string]string{
+		"NETHERLANDS":        "NL",
+		"THE NETHERLANDS":    "NL",
+		"GERMANY":            "DE",
+		"UNITED STATES":      "US",
+		"UNITED KINGDOM":     "GB",
+		"FRANCE":             "FR",
+		"TURKEY":             "TR",
+		"RUSSIA":             "RU",
+		"RUSSIAN FEDERATION": "RU",
+		"CHINA":              "CN",
+		"INDIA":              "IN",
+		"BRAZIL":             "BR",
+		"JAPAN":              "JP",
+		"SINGAPORE":          "SG",
+		"CANADA":             "CA",
+		"AUSTRALIA":          "AU",
+		"SPAIN":              "ES",
+		"ITALY":              "IT",
+		"POLAND":             "PL",
+		"UKRAINE":            "UA",
+		"SWEDEN":             "SE",
+		"SWITZERLAND":        "CH",
+		"ROMANIA":            "RO",
+		"BULGARIA":           "BG",
+		"IRAN":               "IR",
+		"ISRAEL":             "IL",
+		"SOUTH AFRICA":       "ZA",
+		"SOUTH KOREA":        "KR",
+		"FINLAND":            "FI",
+		"NORWAY":             "NO",
+		"DENMARK":            "DK",
+		"BELGIUM":            "BE",
+		"AUSTRIA":            "AT",
+		"CZECH REPUBLIC":     "CZ",
+		"CZECHIA":            "CZ",
+	}
+	if code, ok := mapping[nameUpper]; ok {
+		return code
+	}
+	return ""
+}
+
 func cleanIPAddress(ipStr string) string {
 	ipStr = strings.TrimSpace(ipStr)
 	if ipStr == "" {
 		return ""
 	}
+	// Trim outer quotes/whitespace
+	ipStr = strings.Trim(ipStr, " \t\r\n\"'")
+
+	// 1. Attempt net.SplitHostPort first (handles IPv4:port and [IPv6]:port)
 	if host, _, err := net.SplitHostPort(ipStr); err == nil {
 		ipStr = host
+	} else if strings.Count(ipStr, ":") == 1 {
+		// Single colon in IPv4 string: e.g. 192.253.248.229:443
+		if parts := strings.Split(ipStr, ":"); len(parts) == 2 {
+			if net.ParseIP(parts[0]) != nil {
+				ipStr = parts[0]
+			}
+		}
 	}
+
+	// 2. Strip IPv6 brackets if still present (e.g. "[2001:...]")
 	ipStr = strings.Trim(ipStr, "[]")
+
+	// 3. Strip CIDR mask if present (e.g. "1.2.3.4/32")
 	if idx := strings.Index(ipStr, "/"); idx != -1 {
 		ipStr = ipStr[:idx]
 	}
@@ -494,14 +610,14 @@ func cleanIPAddress(ipStr string) string {
 }
 
 func isPrivateOrExcluded(ipStr string) bool {
-	if ipStr == "" || ipStr == "-" || ipStr == "127.0.0.1" || ipStr == "local" || ipStr == "localhost" || ipStr == "::1" {
+	if ipStr == "" || ipStr == "-" || ipStr == "127.0.0.1" || ipStr == "local" || ipStr == "localhost" || ipStr == "::1" || ipStr == "0.0.0.0" || ipStr == "::" {
 		return true
 	}
 	parsed := net.ParseIP(ipStr)
 	if parsed == nil {
-		return true
+		return false
 	}
-	if parsed.IsLoopback() || parsed.IsPrivate() || parsed.IsUnspecified() {
+	if parsed.IsLoopback() || parsed.IsPrivate() || parsed.IsUnspecified() || parsed.IsLinkLocalUnicast() || parsed.IsLinkLocalMulticast() {
 		return true
 	}
 
@@ -516,11 +632,11 @@ func isPrivateOrExcluded(ipStr string) bool {
 
 func countryCodeToEmoji(code string) string {
 	code = strings.ToUpper(strings.TrimSpace(code))
+	if code == "LOC" || code == "LOCAL" || code == "LAN" || code == "PRIV" || code == "LO" {
+		return "🖥️"
+	}
 	if len(code) != 2 {
 		return "🌐"
-	}
-	if code == "LO" || code == "LAN" || code == "PRIV" || code == "LOC" {
-		return "🏠"
 	}
 	if code[0] < 'A' || code[0] > 'Z' || code[1] < 'A' || code[1] > 'Z' {
 		return "🌐"

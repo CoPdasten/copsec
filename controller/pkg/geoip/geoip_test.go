@@ -14,14 +14,15 @@ func TestGeoIPLookup(t *testing.T) {
 	}{
 		{"127.0.0.1", "LOC", true},
 		{"::1", "LOC", true},
-		{"10.0.0.5", "LOC", true},
-		{"192.168.1.100", "LOC", true},
+		{"10.0.0.5:8080", "LOC", true},
+		{"192.168.1.100:443", "LOC", true},
 		{"172.16.0.1", "LOC", true},
-		{"198.51.100.45", "US", false},
-		{"203.0.113.88", "DE", false},
+		{"198.51.100.45:443", "US", false},
+		{"[fd00::1]:80", "LOC", true},
+		{"203.0.113.88:8080", "DE", false},
 		{"176.236.10.20", "TR", false},
 		{"42.1.2.3", "CN", false},
-		{"88.198.50.60", "DE", false},
+		{"88.198.50.60:22", "DE", false},
 	}
 
 	for _, tt := range tests {
@@ -37,6 +38,9 @@ func TestGeoIPLookup(t *testing.T) {
 		}
 		if loc.FlagEmoji == "" {
 			t.Errorf("Lookup(%s) FlagEmoji is empty", tt.ip)
+		}
+		if tt.expectedCC == "LOC" && loc.FlagEmoji != "🖥️" {
+			t.Errorf("Lookup(%s) FlagEmoji = %s, expected 🖥️", tt.ip, loc.FlagEmoji)
 		}
 	}
 }

@@ -2188,6 +2188,34 @@
     let currentDrawerEvent = null;
     let totalMitreHits = 0;
 
+    // Universal ISO 3166-1 alpha-2 to Unicode Flag Generator
+    function getCountryFlag(countryCode, fallback) {
+      if (!countryCode) return fallback || '🌐';
+      const code = String(countryCode).trim().toUpperCase();
+      if (code === 'LOC' || code === 'LOCAL' || code === 'LAN' || code === 'PRIV' || code === 'LO') return '🖥️';
+      if (code.length !== 2) return fallback || '🌐';
+      if (code[0] < 'A' || code[0] > 'Z' || code[1] < 'A' || code[1] > 'Z') return fallback || '🌐';
+      const codePoints = [...code].map(c => 127397 + c.charCodeAt(0));
+      return String.fromCodePoint(...codePoints);
+    }
+
+    function resolveEventFlag(ev) {
+      if (!ev) return '🌐';
+      const ip = (ev.client_ip || ev.ip || ev.remote_addr || '').toLowerCase();
+      if (ip === '127.0.0.1' || ip === 'local' || ip === 'localhost' || ip === '::1' || ev.is_host_local) {
+        return '🖥️';
+      }
+      const code = ev.country_code || ev.country || '';
+      if (code) {
+        const flag = getCountryFlag(code);
+        if (flag && flag !== '🌐') return flag;
+      }
+      if (ev.flag_emoji && ev.flag_emoji !== '🌐') {
+        return ev.flag_emoji;
+      }
+      return getCountryFlag(code);
+    }
+
     // Toast Notification System
     function showToast(message, type = 'info', title = '', duration = 3500) {
       const container = document.getElementById('toast-container');
@@ -2245,7 +2273,7 @@
       toast.style.boxShadow = '0 8px 32px rgba(255, 0, 85, 0.25)';
 
       const isHost = brief.client_ip === '127.0.0.1' || brief.client_ip === 'local' || !brief.client_ip;
-      const actorLabel = isHost ? '🖥️ HOST LOCAL' : `${escapeHtml(brief.flag_emoji || '🌐')} ${escapeHtml(brief.client_ip)}`;
+      const actorLabel = isHost ? '🖥️ HOST LOCAL' : `${escapeHtml(resolveEventFlag(brief))} ${escapeHtml(brief.client_ip)}`;
 
       let actionBtns = '';
       if (!isHost) {
@@ -2637,7 +2665,7 @@
         if (isHost) {
           actorHtml = `<span class="badge" style="background: rgba(59, 130, 246, 0.2); color: #60a5fa; border: 1px solid #3b82f6; font-weight: 700;">🖥️ HOST / LOCAL</span>`;
         } else {
-          const flag = a.flag_emoji || '🌐';
+          const flag = resolveEventFlag(a);
           const asn = a.asn ? `<span class="chip chip-proto" style="margin-left: 0.3rem;" title="${escapeHtml(a.asn)}">${escapeHtml(a.asn.length > 22 ? a.asn.substring(0, 22) + '...' : a.asn)}</span>` : '';
           actorHtml = `<span class="ip-chip" onclick="openPayloadDrawerById(${a.id || 0})" style="cursor: pointer;" title="Inspect incident payload">${escapeHtml(flag)} ${escapeHtml(a.client_ip || '-')}${repeatBadge}</span>${asn}`;
         }
@@ -3122,7 +3150,7 @@
       const timeStr = new Date(ev.timestamp_ms || Date.now()).toLocaleTimeString();
       const nodeLabel = ev.node_id || 'controller';
       const signal = parseTelemetrySignal(ev.raw_line, ev.source);
-      const flagEmoji = ev.flag_emoji || '🌐';
+      const flagEmoji = resolveEventFlag(ev);
 
       const mlChip = ev.ml_anomaly ? `<span class="chip chip-alert" style="background: rgba(168, 85, 247, 0.2); color: #c084fc; border: 1px solid #c084fc; font-weight: 700; margin-right: 0.35rem;">🤖 ML Anomaly ${(ev.ml_confidence_pct || 88).toFixed(0)}%</span>` : '';
       const snortChip = ev.snort_ml ? `<span class="chip chip-alert" style="background: rgba(244, 63, 94, 0.2); color: #f43f5e; border: 1px solid #f43f5e; font-weight: 700; margin-right: 0.35rem;">🐽 Snort 3 ML</span>` : '';
@@ -3279,7 +3307,7 @@
 
         // Pulsing Attacker Source Pin with Radiating Ripples
         const safeCountry = escapeHtml(s.country_name || s.country_code);
-        const safeFlag = escapeHtml(s.flag_emoji || '🌐');
+        const safeFlag = escapeHtml(getCountryFlag(s.country_code, s.flag_emoji));
         const safeCity = escapeHtml(s.city || '');
         const safeRegion = escapeHtml(s.region || '');
         const safeOrg = escapeHtml(s.org || s.asn || '');
@@ -3369,7 +3397,7 @@
         return `
           <div class="mitre-pill" style="margin-bottom: 0.45rem;">
             <div class="mitre-pill-top">
-              <span class="mitre-pill-tech" style="color: #fff;">${escapeHtml(s.flag_emoji || '🌐')} ${escapeHtml(s.country_name || s.country_code)}</span>
+              <span class="mitre-pill-tech" style="color: #fff;">${escapeHtml(getCountryFlag(s.country_code, s.flag_emoji))} ${escapeHtml(s.country_name || s.country_code)}</span>
               <span class="mitre-pill-count">${s.attack_count} hits (${pct}%)</span>
             </div>
             <div class="mitre-bar-bg">
@@ -3538,7 +3566,7 @@
       const flowTargetService = document.getElementById('flow-target-service');
 
       if (flowActorIP) {
-        flowActorIP.textContent = (ev.flag_emoji ? ev.flag_emoji + ' ' : '') + (ev.client_ip || '127.0.0.1');
+        flowActorIP.textContent = resolveEventFlag(ev) + ' ' + (ev.client_ip || '127.0.0.1');
         const locs = [ev.city, ev.country_name || ev.country_code, ev.asn].filter(Boolean).join(' • ');
         flowActorLoc.textContent = locs || (ev.client_ip === '127.0.0.1' || ev.client_ip === 'local' ? 'Local Host Execution' : 'External WAN Origin');
         
@@ -3604,7 +3632,7 @@
         snortContainer.style.display = 'none';
       }
 
-      const geoLabel = (ev.flag_emoji || '🌐') + ' ' + (ev.country_name || ev.country_code || 'Unknown Origin') + (ev.asn ? ` • ${ev.asn}` : '');
+      const geoLabel = resolveEventFlag(ev) + ' ' + (ev.country_name || ev.country_code || 'Unknown Origin') + (ev.asn ? ` • ${ev.asn}` : '');
       const geoEl = document.getElementById('drawer-geo');
       if (geoEl) geoEl.textContent = geoLabel;
 
@@ -3640,7 +3668,7 @@
               ipinfoLoc.textContent = (locParts ? locParts : 'Unknown Location') + coords;
               ipinfoHost.textContent = data.hostname || '-';
 
-              const flag = data.flag_emoji || ev.flag_emoji || '🌐';
+              const flag = getCountryFlag(data.country || data.country_code, data.flag_emoji) || resolveEventFlag(ev);
               if (geoEl && (data.country || cName)) {
                 geoEl.textContent = `${flag} ${cName}${exactOrg ? ' • ' + exactOrg : ''}`;
               }
@@ -4305,12 +4333,13 @@
           const statusBadge = isOnline ? '<span class="badge badge-success">ONLINE</span>' : '<span class="badge badge-critical">OFFLINE</span>';
           const uptimeStr = formatUptimeMetric(n.uptime_seconds);
           const ramStr = formatMemoryMetric(n.memory_usage);
+          const flag = resolveEventFlag(n);
           return `
             <tr>
               <td style="font-family: var(--font-mono); font-weight: 700; color: var(--cyan);">${escapeHtml(n.node_id)}</td>
               <td style="font-weight: 600;">${escapeHtml(n.hostname || '-')}</td>
               <td><span class="badge badge-medium">${escapeHtml(n.group_name || 'DEFAULT_EDGE')}</span></td>
-              <td><span class="ip-chip">${escapeHtml(n.flag_emoji || '🌐')} ${escapeHtml(n.remote_addr || '-')}</span></td>
+              <td><span class="ip-chip">${escapeHtml(flag)} ${escapeHtml(n.remote_addr || '-')}</span></td>
               <td style="font-family: var(--font-mono);">${(n.cpu_usage || 0).toFixed(1)}%</td>
               <td style="font-family: var(--font-mono); color: var(--cyan); font-weight: 700;">${ramStr}</td>
               <td style="font-family: var(--font-mono); color: var(--amber); font-weight: 700;">${n.active_bans_count || 0}</td>
@@ -4337,9 +4366,10 @@
         }
         tbody.innerHTML = data.map(b => {
           const remText = b.remaining_sec > 0 ? `${b.remaining_sec}s remaining` : (b.remaining_sec === -1 ? 'PERMANENT' : 'EXPIRED');
+          const flag = resolveEventFlag(b);
           return `
             <tr id="ban-row-${escapeHtml(b.ip.replace(/[:.]/g, '_'))}">
-              <td><span class="ip-chip" style="color: var(--magenta);">${escapeHtml(b.flag_emoji || '🌐')} ${escapeHtml(b.ip)}</span></td>
+              <td><span class="ip-chip" style="color: var(--magenta);">${escapeHtml(flag)} ${escapeHtml(b.ip)}</span></td>
               <td>
                 <span class="chip chip-proto">XDP FAST</span>
                 <span class="chip chip-proto">L3 RAW</span>
@@ -4429,18 +4459,21 @@
           tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: var(--text-muted); padding: 2rem;">No honeypot captures recorded yet.</td></tr>';
           return;
         }
-        tbody.innerHTML = data.map(h => `
-          <tr>
-            <td style="font-family: var(--font-mono); color: var(--text-muted);">${new Date(h.timestamp_ms).toLocaleTimeString()}</td>
-            <td><span class="badge ${h.trap_type === 'SSH' ? 'badge-critical' : 'badge-high'}">${escapeHtml(h.trap_type)}</span></td>
-            <td><span class="ip-chip" style="color: var(--magenta);">${escapeHtml(h.flag_emoji || '🌐')} ${escapeHtml(h.client_ip)}:${h.port || 0}</span></td>
-            <td style="font-family: var(--font-mono); font-size: 0.75rem;">
-              ${h.username ? `User: <b style="color: var(--cyan);">${escapeHtml(h.username)}</b> Pass: <b style="color: var(--amber);">${escapeHtml(h.password || '')}</b>` : escapeHtml(h.requested_url || '-')}
-            </td>
-            <td style="font-size: 0.72rem; color: var(--text-muted);">${escapeHtml(h.client_version || h.user_agent || '-')}</td>
-            <td><span class="badge badge-success">⚡ ISOLATED</span></td>
-          </tr>
-        `).join('');
+        tbody.innerHTML = data.map(h => {
+          const flag = resolveEventFlag(h);
+          return `
+            <tr>
+              <td style="font-family: var(--font-mono); color: var(--text-muted);">${new Date(h.timestamp_ms).toLocaleTimeString()}</td>
+              <td><span class="badge ${h.trap_type === 'SSH' ? 'badge-critical' : 'badge-high'}">${escapeHtml(h.trap_type)}</span></td>
+              <td><span class="ip-chip" style="color: var(--magenta);">${escapeHtml(flag)} ${escapeHtml(h.client_ip)}:${h.port || 0}</span></td>
+              <td style="font-family: var(--font-mono); font-size: 0.75rem;">
+                ${h.username ? `User: <b style="color: var(--cyan);">${escapeHtml(h.username)}</b> Pass: <b style="color: var(--amber);">${escapeHtml(h.password || '')}</b>` : escapeHtml(h.requested_url || '-')}
+              </td>
+              <td style="font-size: 0.72rem; color: var(--text-muted);">${escapeHtml(h.client_version || h.user_agent || '-')}</td>
+              <td><span class="badge badge-success">⚡ ISOLATED</span></td>
+            </tr>
+          `;
+        }).join('');
       } catch (err) {
         showToast('Failed to fetch deception logs: ' + err, 'danger');
       }
