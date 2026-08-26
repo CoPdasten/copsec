@@ -123,6 +123,7 @@ func (ws *WebSOCServer) Start() error {
 
 	// 2. REST APIs
 	mux.HandleFunc("/api/config", ws.handleConfig)
+	mux.HandleFunc("/api/config/ipinfo", ws.handleConfigIPInfo)
 	mux.HandleFunc("/api/stats", ws.handleStats)
 	mux.HandleFunc("/api/events", ws.handleEvents)
 	mux.HandleFunc("/api/alerts", ws.handleAlerts)
@@ -241,6 +242,76 @@ func (ws *WebSOCServer) handleConfig(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"success": true,
 			"message": "Configuration saved and applied dynamically",
+		})
+		return
+	}
+
+	http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+}
+
+func maskToken(token string) string {
+	token = strings.TrimSpace(token)
+	if token == "" || token == ipinfo.DefaultIPInfoToken {
+		return ""
+	}
+	if len(token) <= 4 {
+		return "****"
+	}
+	if len(token) <= 8 {
+		return token[:2] + "****"
+	}
+	return token[:4] + "****"
+}
+
+func (ws *WebSOCServer) handleConfigIPInfo(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method == http.MethodGet {
+		var token string
+		if ws.storage != nil {
+			token, _ = ws.storage.GetConfig("ipinfo_token")
+		}
+		if token == "" {
+			token = ipinfo.GetDefaultClient().GetToken()
+		}
+
+		configured := token != "" && token != ipinfo.DefaultIPInfoToken
+		if configured {
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"configured":   true,
+				"token_masked": maskToken(token),
+			})
+		} else {
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"configured": false,
+			})
+		}
+		return
+	}
+
+	if r.Method == http.MethodPost {
+		var req struct {
+			Token string `json:"token"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		token := strings.TrimSpace(req.Token)
+		if ws.storage != nil {
+			if err := ws.storage.SaveConfig("ipinfo_token", token); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+
+		// Update in-memory IPinfo client dynamically
+		ipinfo.GetDefaultClient().SetToken(token)
+
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":     "saved",
+			"configured": token != "" && token != ipinfo.DefaultIPInfoToken,
 		})
 		return
 	}

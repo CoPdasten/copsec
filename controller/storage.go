@@ -225,7 +225,7 @@ func (s *StorageEngine) initSchema() error {
 	CREATE TABLE IF NOT EXISTS system_config (
 		key TEXT PRIMARY KEY,
 		value TEXT NOT NULL,
-		updated_at_ms INTEGER NOT NULL
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 
 	CREATE TABLE IF NOT EXISTS honeypot_events (
@@ -711,26 +711,53 @@ func (s *StorageEngine) GetMITREStats() ([]MITREStat, error) {
 	return stats, nil
 }
 
+// SaveConfig stores a key-value setting atomically.
+func (s *StorageEngine) SaveConfig(key string, value string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	query := `INSERT INTO system_config(key, value, updated_at) VALUES(?, ?, CURRENT_TIMESTAMP)
+	          ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP`
+	_, err := s.db.Exec(query, key, value)
+	return err
+}
+
+// GetConfig retrieves a single configuration value by key.
+func (s *StorageEngine) GetConfig(key string) (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var val string
+	err := s.db.QueryRow(`SELECT value FROM system_config WHERE key = ?`, key).Scan(&val)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return "", nil
+		}
+		return "", err
+	}
+	return val, nil
+}
+
 // SaveSystemConfig persists a map of runtime settings.
 func (s *StorageEngine) SaveSystemConfig(cfg map[string]string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	nowMs := time.Now().UnixMilli()
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	stmt, err := tx.Prepare(`INSERT OR REPLACE INTO system_config (key, value, updated_at_ms) VALUES (?, ?, ?)`)
+	stmt, err := tx.Prepare(`INSERT INTO system_config(key, value, updated_at) VALUES(?, ?, CURRENT_TIMESTAMP)
+	                         ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP`)
 	if err != nil {
 		return err
 	}
 	defer stmt.Close()
 
 	for k, v := range cfg {
-		if _, err := stmt.Exec(k, v, nowMs); err != nil {
+		if _, err := stmt.Exec(k, v); err != nil {
 			return err
 		}
 	}

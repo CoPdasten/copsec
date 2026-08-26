@@ -8,8 +8,11 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
+
+	"github.com/copsec/controller/pkg/ipinfo"
 )
 
 func main() {
@@ -48,6 +51,12 @@ func main() {
 		log.Fatalf("[FATAL] Storage engine initialization failed: %v", err)
 	}
 	defer storage.Close()
+
+	// Bootstrap IPinfo token from persistent SQLite configuration
+	if token, err := storage.GetConfig("ipinfo_token"); err == nil && strings.TrimSpace(token) != "" {
+		ipinfo.GetDefaultClient().SetToken(token)
+		log.Printf("[INFO] Bootstrapped active IPinfo API token from SQLite persistent configuration")
+	}
 
 	// Startup Memory & Quarantine Flush
 	if flushed, err := storage.FlushInvalidQuarantines(); err == nil && flushed > 0 {

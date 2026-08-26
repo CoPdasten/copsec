@@ -634,3 +634,74 @@ func TestRulesAPIEndpoints(t *testing.T) {
 	}
 }
 
+func TestPersistentConfigAndIPInfoEndpoints(t *testing.T) {
+	tmpDir := t.TempDir()
+	store, err := NewStorageEngine(filepath.Join(tmpDir, "config_test.db"))
+	if err != nil {
+		t.Fatalf("Failed to initialize storage: %v", err)
+	}
+	defer store.Close()
+
+	// 1. Test StorageEngine SaveConfig and GetConfig directly
+	err = store.SaveConfig("ipinfo_token", "test_secret_token_12345")
+	if err != nil {
+		t.Fatalf("SaveConfig failed: %v", err)
+	}
+
+	val, err := store.GetConfig("ipinfo_token")
+	if err != nil || val != "test_secret_token_12345" {
+		t.Fatalf("GetConfig returned %q, err: %v", val, err)
+	}
+
+	// 2. Test WebSOCServer REST endpoints
+	analyzer := NewRuleEngine("")
+	server := NewCentralServer(store, analyzer)
+	ttlMgr := NewTTLBanManager(store, server)
+	defer ttlMgr.Stop()
+	wsHub := NewWSHub()
+	webSoc := NewWebSOCServer(":0", server, store, ttlMgr, nil, wsHub)
+
+	// GET /api/config/ipinfo
+	getReq := httptest.NewRequest("GET", "/api/config/ipinfo", nil)
+	getRec := httptest.NewRecorder()
+	webSoc.handleConfigIPInfo(getRec, getReq)
+
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK from GET /api/config/ipinfo, got %d", getRec.Code)
+	}
+	var getResp map[string]interface{}
+	if err := json.Unmarshal(getRec.Body.Bytes(), &getResp); err != nil {
+		t.Fatalf("Failed to parse JSON: %v", err)
+	}
+	if getResp["configured"] != true {
+		t.Errorf("Expected configured = true, got %v", getResp["configured"])
+	}
+	if getResp["token_masked"] != "test****" {
+		t.Errorf("Expected token_masked = test****, got %v", getResp["token_masked"])
+	}
+
+	// POST /api/config/ipinfo
+	postBody, _ := json.Marshal(map[string]string{
+		"token": "live_prod_key_9999",
+	})
+	postReq := httptest.NewRequest("POST", "/api/config/ipinfo", bytes.NewBuffer(postBody))
+	postReq.Header.Set("Content-Type", "application/json")
+	postRec := httptest.NewRecorder()
+	webSoc.handleConfigIPInfo(postRec, postReq)
+
+	if postRec.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK from POST /api/config/ipinfo, got %d", postRec.Code)
+	}
+	var postResp map[string]interface{}
+	_ = json.Unmarshal(postRec.Body.Bytes(), &postResp)
+	if postResp["status"] != "saved" || postResp["configured"] != true {
+		t.Errorf("Unexpected POST response: %+v", postResp)
+	}
+
+	// Verify persistence in SQLite
+	persisted, err := store.GetConfig("ipinfo_token")
+	if err != nil || persisted != "live_prod_key_9999" {
+		t.Errorf("Expected persisted token 'live_prod_key_9999', got %q, err: %v", persisted, err)
+	}
+}
+

@@ -250,6 +250,20 @@ func (c *Client) SetToken(token string) {
 	c.token = strings.TrimSpace(token)
 }
 
+// GetToken returns the current IPinfo API token.
+func (c *Client) GetToken() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.token
+}
+
+// IsConfigured returns true if a custom IPinfo token is configured.
+func (c *Client) IsConfigured() bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.token != "" && c.token != DefaultIPInfoToken
+}
+
 // SetBaseURL overrides the API endpoint (useful for mock testing).
 func (c *Client) SetBaseURL(baseURL string) {
 	c.mu.Lock()

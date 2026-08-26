@@ -905,15 +905,24 @@
 
         <!-- System Configuration -->
         <div class="card">
-          <div class="card-title">SIEM Platform Parameters</div>
+          <div class="card-title">
+            <span>SIEM Platform Parameters</span>
+            <span id="cfgIPInfoStatusBadge" class="badge badge-iso">[DEFAULT_FALLBACK]</span>
+          </div>
           <div style="display: flex; flex-direction: column; gap: 10px;">
             <div>
               <label style="color: var(--text-muted); font-size: 10px; display: block; margin-bottom: 2px;">gRPC INGESTION BIND ADDRESS</label>
               <input type="text" id="cfgGRPC" class="input-box" style="width: 100%;" value="0.0.0.0:8443" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
             </div>
             <div>
-              <label style="color: var(--text-muted); font-size: 10px; display: block; margin-bottom: 2px;">IPINFO.IO THREAT INTEL API TOKEN</label>
-              <input type="text" id="cfgIPInfo" class="input-box" style="width: 100%;" placeholder="Default public fallback active" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
+                <label style="color: var(--text-muted); font-size: 10px;">IPINFO.IO THREAT INTEL API TOKEN</label>
+                <span id="ipinfoTokenState" style="font-size: 10px; color: var(--accent);"></span>
+              </div>
+              <div style="display: flex; gap: 6px;">
+                <input type="password" id="cfgIPInfo" class="input-box" style="flex: 1;" placeholder="Default public fallback active" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+                <button class="btn btn-accent" onclick="saveIPInfoToken()">[Save Token]</button>
+              </div>
             </div>
             <div>
               <label style="color: var(--text-muted); font-size: 10px; display: block; margin-bottom: 2px;">SOAR AUTONOMOUS BAN THREAT SCORE THRESHOLD</label>
@@ -1885,6 +1894,57 @@
     }
 
     // Settings & Fleet Grid
+    async function checkIPInfoStatus() {
+      try {
+        const res = await fetch('/api/config/ipinfo');
+        if (res.ok) {
+          const data = await res.json();
+          const input = document.getElementById('cfgIPInfo');
+          const badge = document.getElementById('cfgIPInfoStatusBadge');
+          const stateLabel = document.getElementById('ipinfoTokenState');
+          if (data.configured) {
+            localStorage.setItem('copsec_ipinfo_configured', 'true');
+            if (input) input.placeholder = '●●●●●●●● (Active & Persisted)';
+            if (badge) {
+              badge.className = 'badge badge-green';
+              badge.textContent = '[CONFIGURED]';
+            }
+            if (stateLabel) stateLabel.textContent = `Active (${data.token_masked || '●●●●'})`;
+          } else {
+            localStorage.removeItem('copsec_ipinfo_configured');
+            if (input) input.placeholder = 'Default public fallback active';
+            if (badge) {
+              badge.className = 'badge badge-iso';
+              badge.textContent = '[DEFAULT_FALLBACK]';
+            }
+            if (stateLabel) stateLabel.textContent = '';
+          }
+        }
+      } catch (e) {}
+    }
+
+    async function saveIPInfoToken() {
+      const token = (document.getElementById('cfgIPInfo').value || '').trim();
+      try {
+        const res = await fetch('/api/config/ipinfo', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          showToast('[TOKEN_SAVED] IPinfo API key persisted to SQLite', 'ok');
+          document.getElementById('cfgIPInfo').value = '';
+          localStorage.setItem('copsec_ipinfo_configured', 'true');
+          checkIPInfoStatus();
+        } else {
+          showToast('Failed to save IPinfo token', 'crit');
+        }
+      } catch (e) {
+        showToast('Error saving token: ' + e.message, 'crit');
+      }
+    }
+
     async function fetchSettings() {
       try {
         const [nodeRes, cfgRes, wlRes] = await Promise.all([
@@ -1917,6 +1977,9 @@
         document.getElementById('cfgGRPC').value = cfg.grpc_addr || '0.0.0.0:8443';
         document.getElementById('cfgAutoban').value = cfg.autoban_threshold || 80;
 
+        // Check IPinfo token status
+        checkIPInfoStatus();
+
         // Whitelist Badges
         const wlContainer = document.getElementById('whitelistTags');
         wlContainer.innerHTML = '';
@@ -1941,6 +2004,10 @@
           body: JSON.stringify({ grpc_addr, ipinfo_token, autoban_threshold })
         });
         showToast('Settings saved & applied dynamically', 'ok');
+        if (ipinfo_token) {
+          document.getElementById('cfgIPInfo').value = '';
+        }
+        checkIPInfoStatus();
       } catch (e) {}
     }
 
@@ -1961,31 +2028,42 @@
 
     // Fully Hydrated Forensic Slide-Over Drawer
     async function openDrawer(rawEvent) {
+      if (!rawEvent) return;
       const ev = normalizeEvent(rawEvent);
       currentDrawerEvent = ev;
       currentEventIP = ev.source_ip || '';
 
-      document.getElementById('drawerTitle').textContent = `INCIDENT #${ev.id || 'LIVE'}`;
-      document.getElementById('drawerScoreBadge').innerHTML = getSeverityBadge(ev.severity, ev.threat_score);
-      document.getElementById('drawerMitreBadge').innerHTML = ev.mitre_id ? `<span class="badge badge-mitre">[${ev.mitre_id}]</span>` : '<span class="badge badge-iso">[-]</span>';
-      document.getElementById('drawerISOBadge').innerHTML = getISOBadge(ev.country_code);
+      const dTitle = document.getElementById('drawerTitle');
+      if (dTitle) dTitle.textContent = `INCIDENT #${ev.id || 'LIVE'}`;
+      const dScore = document.getElementById('drawerScoreBadge');
+      if (dScore) dScore.innerHTML = getSeverityBadge(ev.severity, ev.threat_score);
+      const dMitre = document.getElementById('drawerMitreBadge');
+      if (dMitre) dMitre.innerHTML = ev.mitre_id ? `<span class="badge badge-mitre">[${ev.mitre_id}]</span>` : '<span class="badge badge-iso">[-]</span>';
+      const dISO = document.getElementById('drawerISOBadge');
+      if (dISO) dISO.innerHTML = getISOBadge(ev.country_code);
 
-      document.getElementById('dIP').textContent = ev.source_ip;
-      document.getElementById('dRule').textContent = `${ev.rule_matched} [${ev.severity}]`;
-      document.getElementById('dTime').textContent = new Date(ev.timestamp_ms).toISOString();
-      document.getElementById('dRaw').textContent = ev.raw_line;
-      document.getElementById('drawerNotes').value = ev.analyst_notes;
+      const dIP = document.getElementById('dIP');
+      if (dIP) dIP.textContent = ev.source_ip || 'N/A';
+      const dRule = document.getElementById('dRule');
+      if (dRule) dRule.textContent = `${ev.rule_matched} [${ev.severity}]`;
+      const dTime = document.getElementById('dTime');
+      if (dTime) dTime.textContent = new Date(ev.timestamp_ms).toISOString();
+      const dRaw = document.getElementById('dRaw');
+      if (dRaw) dRaw.textContent = ev.raw_line;
+      const dNotes = document.getElementById('drawerNotes');
+      if (dNotes) dNotes.value = ev.analyst_notes || '';
 
-      // Extract Evidence Analysis details
+      // Extract Evidence Analysis details safely
       hydrateEvidenceTable(ev);
 
-      // Hydrate MITRE Investigation Commands
+      // Hydrate MITRE Investigation Commands safely
       hydrateMitreCommands(ev);
 
       // Fetch / Retrieve LRU Cached IPinfo Metadata
       fetchDrawerIPInfo(ev.source_ip);
 
-      document.getElementById('drawer').classList.add('open');
+      const drawer = document.getElementById('drawer');
+      if (drawer) drawer.classList.add('open');
     }
 
     function hydrateEvidenceTable(ev) {
@@ -2004,7 +2082,8 @@
       else if (rawLower.includes('failed password')) matchedSub = 'SSH brute-force token: "Failed password"';
       else if (rawLower.includes('ptrace') || rawLower.includes('process_vm_writev')) matchedSub = 'Memory tampering syscall: "ptrace / injection"';
       else if (rawLower.includes('syn probe') || rawLower.includes('port scan')) matchedSub = 'Port probe sequence in TCP headers';
-      document.getElementById('dEvidencePayload').textContent = matchedSub;
+      const dEvidence = document.getElementById('dEvidencePayload');
+      if (dEvidence) dEvidence.textContent = matchedSub;
 
       // 2. Target URI / URL
       let targetURI = '-';
@@ -2012,30 +2091,38 @@
         const parts = raw.split(' ');
         if (parts.length >= 2) targetURI = parts[1];
       }
-      document.getElementById('dEvidenceURI').textContent = targetURI;
+      const dURI = document.getElementById('dEvidenceURI');
+      if (dURI) dURI.textContent = targetURI;
 
       // 3. Process Command Line
       let cmdLine = '-';
       if (ev.layer === 'EDR' || raw.includes('cmdline') || raw.includes('sh') || raw.includes('bash')) {
         cmdLine = raw.length > 80 ? raw.substring(0, 80) + '...' : raw;
       }
-      document.getElementById('dEvidenceCmd').textContent = cmdLine;
+      const dCmd = document.getElementById('dEvidenceCmd');
+      if (dCmd) dCmd.textContent = cmdLine;
 
       // 4. Subsystem / Process
-      document.getElementById('dEvidenceProc').textContent = `${ev.node_id} / ${ev.layer} (${ev.source}) - Protocol: ${ev.protocol} ${ev.status_code ? '[HTTP ' + ev.status_code + ']' : ''}`;
+      const dProc = document.getElementById('dEvidenceProc');
+      if (dProc) dProc.textContent = `${ev.node_id} / ${ev.layer} (${ev.source}) - Protocol: ${ev.protocol} ${ev.status_code ? '[HTTP ' + ev.status_code + ']' : ''}`;
     }
 
     async function fetchDrawerIPInfo(ip) {
-      document.getElementById('dOrg').textContent = 'Querying IP intelligence...';
-      document.getElementById('dASN').textContent = '-';
-      document.getElementById('dGeo').textContent = '-';
-      document.getElementById('dHosting').innerHTML = `<span class="badge badge-iso">[QUERYING]</span>`;
+      const dOrg = document.getElementById('dOrg');
+      const dASN = document.getElementById('dASN');
+      const dGeo = document.getElementById('dGeo');
+      const dHosting = document.getElementById('dHosting');
 
-      if (!ip || ip === '-' || ip === '127.0.0.1' || ip === '::1' || ip.startsWith('10.') || ip.startsWith('192.168.')) {
-        document.getElementById('dOrg').textContent = 'Local Protected Infrastructure';
-        document.getElementById('dASN').textContent = 'RFC1918 / Loopback';
-        document.getElementById('dGeo').textContent = 'Internal Network (LOC)';
-        document.getElementById('dHosting').innerHTML = `<span class="badge badge-green">[TRUSTED_LOCAL]</span>`;
+      if (dOrg) dOrg.textContent = 'Querying IP intelligence...';
+      if (dASN) dASN.textContent = '-';
+      if (dGeo) dGeo.textContent = '-';
+      if (dHosting) dHosting.innerHTML = `<span class="badge badge-iso">[QUERYING]</span>`;
+
+      if (!ip || ip === '-' || ip === 'N/A' || ip === '127.0.0.1' || ip === '::1' || ip.startsWith('10.') || ip.startsWith('192.168.')) {
+        if (dOrg) dOrg.textContent = 'Local Protected Infrastructure';
+        if (dASN) dASN.textContent = 'RFC1918 / Loopback';
+        if (dGeo) dGeo.textContent = 'Internal Network (LOC)';
+        if (dHosting) dHosting.innerHTML = `<span class="badge badge-green">[TRUSTED_LOCAL]</span>`;
         return;
       }
 
@@ -2051,32 +2138,41 @@
           ipinfoCache.set(ip, data);
           applyIPInfoData(data);
         } else {
-          document.getElementById('dOrg').textContent = 'Public Network Host';
+          if (dOrg) dOrg.textContent = 'Public Network Host (N/A)';
+          if (dASN) dASN.textContent = 'N/A';
+          if (dGeo) dGeo.textContent = 'N/A';
         }
       } catch (e) {
-        document.getElementById('dOrg').textContent = 'Lookup unavailable';
+        if (dOrg) dOrg.textContent = 'Lookup unavailable';
       }
     }
 
     function applyIPInfoData(info) {
-      const org = info.org || info.company || info.isp || 'Public IP Host';
-      const asn = info.asn || 'AS-UNKNOWN';
+      if (!info) return;
+      const org = info.org || info.company || info.isp || 'N/A';
+      const asn = info.asn || 'N/A';
       const city = info.city || '';
       const region = info.region || '';
       const country = info.country || info.country_code || 'LOC';
       const isDatacenter = info.is_datacenter || info.hosting || (asn && (asn.includes('AMAZON') || asn.includes('HETZNER') || asn.includes('OVH') || asn.includes('DIGITALOCEAN')));
 
-      document.getElementById('dOrg').textContent = org;
-      document.getElementById('dASN').textContent = asn;
-      document.getElementById('dGeo').textContent = `${city}${city && region ? ', ' : ''}${region} [${country}]`;
-      document.getElementById('dHosting').innerHTML = isDatacenter ? `<span class="badge badge-crit">[DATACENTER / CLOUD]</span>` : `<span class="badge badge-iso">[RESIDENTIAL / ISP]</span>`;
+      const dOrg = document.getElementById('dOrg');
+      if (dOrg) dOrg.textContent = org;
+      const dASN = document.getElementById('dASN');
+      if (dASN) dASN.textContent = asn;
+      const dGeo = document.getElementById('dGeo');
+      if (dGeo) dGeo.textContent = `${city}${city && region ? ', ' : ''}${region} [${country}]`;
+      const dHosting = document.getElementById('dHosting');
+      if (dHosting) dHosting.innerHTML = isDatacenter ? `<span class="badge badge-crit">[DATACENTER / CLOUD]</span>` : `<span class="badge badge-iso">[RESIDENTIAL / ISP]</span>`;
     }
 
     function hydrateMitreCommands(ev) {
       const container = document.getElementById('drawerCommandsList');
+      if (!container) return;
       const ip = ev.source_ip || '127.0.0.1';
       const mitre = (ev.mitre_id || '').toUpperCase();
-      document.getElementById('drawerMitreTechniqueLabel').textContent = mitre ? `[${mitre}]` : '[T1190]';
+      const mLabel = document.getElementById('drawerMitreTechniqueLabel');
+      if (mLabel) mLabel.textContent = mitre ? `[${mitre}]` : '[T1190]';
       let cmds = [];
 
       if (mitre.includes('T1190')) {
@@ -2136,16 +2232,18 @@
     }
 
     function closeDrawer() {
-      document.getElementById('drawer').classList.remove('open');
+      const drawer = document.getElementById('drawer');
+      if (drawer) drawer.classList.remove('open');
     }
 
     function copyRawLog() {
-      const raw = document.getElementById('dRaw').textContent;
-      copyText(raw);
+      const el = document.getElementById('dRaw');
+      if (el) copyText(el.textContent);
     }
 
     function prettifyRawLog() {
       const el = document.getElementById('dRaw');
+      if (!el) return;
       try {
         const obj = JSON.parse(el.textContent);
         el.textContent = JSON.stringify(obj, null, 2);
@@ -2156,13 +2254,15 @@
     }
 
     function copyText(txt) {
-      navigator.clipboard.writeText(txt);
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(txt);
+      }
       showToast('Copied to clipboard', 'ok');
     }
 
     async function saveDrawerNotes() {
       if (!currentDrawerEvent) return;
-      const notes = document.getElementById('drawerNotes').value;
+      const notes = (document.getElementById('drawerNotes')?.value || '').trim();
       try {
         await fetch('/api/alerts/notes', {
           method: 'POST',
@@ -2190,6 +2290,7 @@
       lastToasts.set(msg, now);
 
       const container = document.getElementById('toast-container');
+      if (!container) return;
       const toast = document.createElement('div');
       toast.className = `toast ${type}`;
       toast.textContent = msg;
@@ -2215,6 +2316,7 @@
     // Initial Startup
     window.addEventListener('DOMContentLoaded', () => {
       connectWS();
+      checkIPInfoStatus();
       fetchAlerts();
       fetchRules();
       fetchSOARPlaybooks();
