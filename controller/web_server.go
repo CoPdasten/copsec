@@ -130,6 +130,8 @@ func (ws *WebSOCServer) Start() error {
 	mux.HandleFunc("/api/telemetry", ws.handleEvents)
 	mux.HandleFunc("/api/alerts", ws.handleAlerts)
 	mux.HandleFunc("/api/alerts/triage", ws.handleAlertsTriage)
+	mux.HandleFunc("/api/alerts/dismiss", ws.handleAlertsDismiss)
+	mux.HandleFunc("/api/alerts/clear", ws.handleAlertsClear)
 	mux.HandleFunc("/api/bans", ws.handleBans)
 	mux.HandleFunc("/api/quarantine", ws.handleBans)
 	mux.HandleFunc("/api/quarantine/unban", ws.handleSOARUnban)
@@ -1108,12 +1110,20 @@ func (ws *WebSOCServer) handleAlertsTriage(w http.ResponseWriter, r *http.Reques
 				_, _ = ws.ttlManager.BanIP(cleanIP, "Analyst Triage: Zero-Window Tarpit Trap", 3600, TierTempIsolation)
 			}
 		}
-	case "whitelist", "dismiss":
+	case "whitelist":
 		if cleanIP != "" && ws.ttlManager != nil {
 			_ = ws.ttlManager.UnbanIP(cleanIP)
 		}
 		if ws.server != nil && ws.server.threatEngine != nil && cleanIP != "" {
 			_ = ws.server.threatEngine.AddWhitelistCIDR(cleanIP)
+		}
+	case "dismiss":
+		if ws.storage != nil {
+			if req.EventID > 0 {
+				_ = ws.storage.DismissAlert(fmt.Sprintf("%d", req.EventID))
+			} else if cleanIP != "" {
+				_ = ws.storage.DismissAlert(cleanIP)
+			}
 		}
 	}
 
@@ -1121,6 +1131,56 @@ func (ws *WebSOCServer) handleAlertsTriage(w http.ResponseWriter, r *http.Reques
 		"success": true,
 		"action":  req.Action,
 		"ip":      cleanIP,
+	})
+}
+
+func (ws *WebSOCServer) handleAlertsDismiss(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		ID interface{} `json:"id"`
+		IP string      `json:"ip"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	idStr := ""
+	if req.ID != nil {
+		idStr = strings.TrimSpace(fmt.Sprintf("%v", req.ID))
+	}
+	if idStr == "" || idStr == "0" || idStr == "<nil>" {
+		idStr = strings.TrimSpace(req.IP)
+	}
+
+	if ws.storage != nil && idStr != "" {
+		_ = ws.storage.DismissAlert(idStr)
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status": "dismissed",
+		"id":     idStr,
+	})
+}
+
+func (ws *WebSOCServer) handleAlertsClear(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if ws.storage != nil {
+		_ = ws.storage.ClearAllAlerts()
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status": "cleared",
 	})
 }
 

@@ -781,6 +781,7 @@
           </select>
         </div>
         <div class="toolbar-right">
+          <button class="btn btn-red" onclick="clearAllActiveAlerts()">[CLEAR ALL ALERTS]</button>
           <button class="btn" onclick="fetchAlerts()">REFRESH ALERTS</button>
         </div>
       </div>
@@ -924,7 +925,10 @@
         <span id="drawerMitreBadge" class="badge badge-mitre">[T1190]</span>
         <span id="drawerISOBadge" class="badge badge-iso">[LOCAL]</span>
       </div>
-      <button class="btn" onclick="closeDrawer()">[CLOSE]</button>
+      <div style="display: flex; gap: 6px; align-items: center;">
+        <button class="btn btn-red" style="padding: 3px 8px; font-size: 11px;" onclick="dismissCurrentDrawerAlert()">[DISMISS ALERT]</button>
+        <button class="btn" onclick="closeDrawer()">[CLOSE]</button>
+      </div>
     </div>
     <div class="drawer-body">
       <!-- 1. IPinfo Metadata Box (LRU Cached Live Lookup) -->
@@ -1542,10 +1546,11 @@
           <td>${a.mitre_id ? `<span class="badge badge-mitre">[${a.mitre_id}]</span>` : '-'}</td>
           <td style="color: var(--cyan);">${escapeHTML(ruleName)}</td>
           <td>${getContainmentBadge(a.containment_state)}</td>
-          <td style="text-align: right;">
-            <button class="btn btn-red" onclick="triageAction('ban', '${srcIP}')">[BAN]</button>
-            <button class="btn btn-orange" onclick="triageAction('tarpit', '${srcIP}')">[TARPIT]</button>
-            <button class="btn btn-accent" onclick="openDrawerFromAlert('${srcIP}')">[INSPECT]</button>
+          <td style="text-align: right; white-space: nowrap;">
+            <button class="btn btn-red" style="padding: 2px 6px; font-size: 10px;" onclick="triageAction('ban', '${srcIP}', ${a.id || 0})">[BAN]</button>
+            <button class="btn btn-orange" style="padding: 2px 6px; font-size: 10px;" onclick="triageAction('tarpit', '${srcIP}', ${a.id || 0})">[TARPIT]</button>
+            <button class="btn btn-accent" style="padding: 2px 6px; font-size: 10px;" onclick="openDrawerFromAlert('${srcIP}')">[INSPECT]</button>
+            <button class="btn" style="padding: 2px 6px; font-size: 10px; color: var(--text-muted);" onclick="dismissAlert(event, '${a.id || srcIP}')">[DISMISS]</button>
           </td>
         `;
         tbody.appendChild(tr);
@@ -1573,16 +1578,71 @@
       else openDrawer({ source_ip: ip, threat_score: 85, mitre_id: 'T1190', rule_matched: 'Active Alert' });
     }
 
-    async function triageAction(action, ip) {
+    async function triageAction(action, ip, eventId) {
       try {
         await fetch('/api/alerts/triage', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action, ip })
+          body: JSON.stringify({ action, ip, event_id: eventId || 0 })
         });
         showToast(`[ACTION] ${action.toUpperCase()} enforced on ${ip}`, 'ok');
         fetchAlerts();
       } catch (e) {}
+    }
+
+    async function dismissAlert(e, idOrIP) {
+      if (e && e.stopPropagation) e.stopPropagation();
+      const target = String(idOrIP || '').trim();
+      if (!target) return;
+
+      // Optimistically remove from local state immediately
+      activeAlertsList = activeAlertsList.filter(a => String(a.id) !== target && a.source_ip !== target);
+      const badge = document.getElementById('badgeAlerts');
+      if (badge) badge.textContent = activeAlertsList.length;
+      renderAlerts(activeAlertsList);
+
+      try {
+        await fetch('/api/alerts/dismiss', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: target,
+            ip: target.includes('.') || target.includes(':') ? target : ''
+          })
+        });
+        showToast(`[DISMISS] Alert resolved & cleared`, 'ok');
+      } catch (err) {
+        console.error('Dismiss failed:', err);
+      }
+    }
+
+    async function clearAllActiveAlerts() {
+      if (activeAlertsList.length === 0) {
+        showToast('No active alerts to clear', 'ok');
+        return;
+      }
+      activeAlertsList = [];
+      const badge = document.getElementById('badgeAlerts');
+      if (badge) badge.textContent = '0';
+      renderAlerts(activeAlertsList);
+
+      try {
+        await fetch('/api/alerts/clear', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({})
+        });
+        showToast('[QUEUE] All active alerts cleared', 'ok');
+      } catch (err) {
+        console.error('Clear all failed:', err);
+      }
+    }
+
+    function dismissCurrentDrawerAlert() {
+      if (!currentDrawerEvent) return;
+      const target = currentDrawerEvent.id || currentDrawerEvent.source_ip;
+      closeDrawer();
+      dismissAlert(null, target);
     }
 
     // Active Quarantine Vault (Kernel XDP Banned IPs)
@@ -2385,6 +2445,15 @@ ${notes}
       }
 
       if (!isInput) {
+        if ((e.key === 'x' || e.key === 'X' || e.key === 'd' || e.key === 'D' || e.key === 'Delete') && currentDrawerEvent) {
+          const drawer = document.getElementById('drawer');
+          if (drawer && drawer.classList.contains('open')) {
+            e.preventDefault();
+            dismissCurrentDrawerAlert();
+            return;
+          }
+        }
+
         if (e.key === '1') {
           e.preventDefault();
           navigateTo('dashboard');

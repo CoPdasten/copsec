@@ -404,6 +404,34 @@ func (s *StorageEngine) GetRecentAlerts(limit int) ([]*StoredEvent, error) {
 	return alerts, nil
 }
 
+// DismissAlert purges a triaged alert from the active SQLite alerts table.
+func (s *StorageEngine) DismissAlert(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return nil
+	}
+
+	if numID, err := strconv.ParseInt(id, 10, 64); err == nil && numID > 0 {
+		_, err := s.db.Exec(`DELETE FROM alerts WHERE id = ?`, numID)
+		return err
+	}
+
+	_, err := s.db.Exec(`DELETE FROM alerts WHERE client_ip = ? OR rule_id = ?`, id, id)
+	return err
+}
+
+// ClearAllAlerts purges all active alerts from the SQLite alerts table.
+func (s *StorageEngine) ClearAllAlerts() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(`DELETE FROM alerts`)
+	return err
+}
+
 // UpdateEventAI updates the AI analysis field for a stored incident.
 func (s *StorageEngine) UpdateEventAI(eventID int64, aiAnalysis string) error {
 	s.mu.Lock()
