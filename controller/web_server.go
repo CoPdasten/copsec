@@ -125,6 +125,7 @@ func (ws *WebSOCServer) Start() error {
 	mux.HandleFunc("/api/config", ws.handleConfig)
 	mux.HandleFunc("/api/config/ipinfo", ws.handleConfigIPInfo)
 	mux.HandleFunc("/api/stats", ws.handleStats)
+	mux.HandleFunc("/api/stats/actors", ws.handleTopActors)
 	mux.HandleFunc("/api/events", ws.handleEvents)
 	mux.HandleFunc("/api/telemetry", ws.handleEvents)
 	mux.HandleFunc("/api/alerts", ws.handleAlerts)
@@ -410,21 +411,42 @@ func (ws *WebSOCServer) handleStats(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var mitreStats []MITREStat
+	var topAttackers []TopAttackerRecord
 	if ws.storage != nil {
 		mitreStats, _ = ws.storage.GetMITREStats()
+		topAttackers, _ = ws.storage.GetTopAttackers(10)
 	}
 
 	data := map[string]interface{}{
-		"eps":          eps,
-		"total_events": total,
-		"nodes_count":  nodesCount,
-		"active_bans":  activeBansCount,
-		"mitre_stats":  mitreStats,
-		"geo_stats":    geoip.GetDefaultEngine().GetAttackOriginDensity(8),
-		"timestamp":    time.Now().UnixMilli(),
+		"eps":           eps,
+		"total_events":  total,
+		"nodes_count":   nodesCount,
+		"active_bans":   activeBansCount,
+		"mitre_stats":   mitreStats,
+		"top_attackers": topAttackers,
+		"geo_stats":     geoip.GetDefaultEngine().GetAttackOriginDensity(8),
+		"timestamp":     time.Now().UnixMilli(),
 	}
 
 	json.NewEncoder(w).Encode(data)
+}
+
+func (ws *WebSOCServer) handleTopActors(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if ws.storage == nil {
+		json.NewEncoder(w).Encode([]TopAttackerRecord{})
+		return
+	}
+	limitStr := r.URL.Query().Get("limit")
+	limit := 10
+	if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+		limit = l
+	}
+	actors, err := ws.storage.GetTopAttackers(limit)
+	if err != nil {
+		actors = []TopAttackerRecord{}
+	}
+	json.NewEncoder(w).Encode(actors)
 }
 
 func (ws *WebSOCServer) handleEvents(w http.ResponseWriter, r *http.Request) {

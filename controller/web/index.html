@@ -974,8 +974,11 @@
       <!-- 4. Contextual MITRE Investigation Runbook Checklist -->
       <div class="card">
         <div class="card-title">
-          <span>Contextual Investigation Runbook</span>
-          <span id="drawerMitreTechniqueLabel" style="font-size: 10px; color: var(--purple);">[T1190]</span>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span>Contextual Investigation Runbook</span>
+            <span id="drawerMitreTechniqueLabel" style="font-size: 10px; color: var(--purple);">[T1190]</span>
+          </div>
+          <button class="btn btn-accent" style="padding: 2px 8px; font-size: 10px;" onclick="copyCompleteRunbookScript()">[Copy Complete Script]</button>
         </div>
         <div id="drawerCommandsList" style="display: flex; flex-direction: column; gap: 8px;"></div>
       </div>
@@ -984,7 +987,10 @@
       <div class="card">
         <div class="card-title">Analyst Incident Notes (SQLite Persisted)</div>
         <textarea id="drawerNotes" class="input-box" rows="3" style="width: 100%; font-family: inherit; font-size: 11px;" placeholder="Add forensic observation notes..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
-        <button class="btn btn-accent" style="align-self: flex-start;" onclick="saveDrawerNotes()">Save Notes</button>
+        <div style="display: flex; gap: 8px; margin-top: 6px;">
+          <button class="btn btn-accent" onclick="saveDrawerNotes()">Save Notes</button>
+          <button class="btn btn-green" onclick="exportCaseMarkdown()">[Export Case .MD]</button>
+        </div>
       </div>
 
       <!-- Direct 1-Click Incident Mitigation Actions -->
@@ -1323,8 +1329,12 @@
       document.getElementById('hitsAUTH').textContent = layerCounts.AUTH || 0;
       document.getElementById('hitsNET').textContent = layerCounts.NET || 0;
 
-      // 3. Top Actor Counter (Ignore loopback)
-      if (ev.source_ip && ev.source_ip !== '-' && ev.source_ip !== '127.0.0.1' && ev.source_ip !== '::1') {
+      // 3. Top Actor Counter (Strict: ThreatScore >= 40, exclude loopback, RFC1918, and recursive public DNS resolvers)
+      const dnsResolvers = ['8.8.8.8','8.8.4.4','1.1.1.1','1.0.0.1','1.1.1.2','1.0.0.2','9.9.9.9','149.112.112.112','208.67.222.222','208.67.220.220','213.186.33.99','213.186.33.100','37.59.108.186'];
+      const isDNS = dnsResolvers.includes(ev.source_ip);
+      const isLocal = !ev.source_ip || ev.source_ip === '-' || ev.source_ip === '127.0.0.1' || ev.source_ip === '::1' || ev.source_ip.startsWith('127.') || ev.source_ip.startsWith('10.') || ev.source_ip.startsWith('192.168.') || ev.source_ip.startsWith('172.16.') || ev.source_ip.startsWith('172.17.') || ev.source_ip.startsWith('172.18.') || ev.source_ip.startsWith('172.19.') || ev.source_ip.startsWith('172.20.') || ev.source_ip.startsWith('172.21.') || ev.source_ip.startsWith('172.22.') || ev.source_ip.startsWith('172.23.') || ev.source_ip.startsWith('172.24.') || ev.source_ip.startsWith('172.25.') || ev.source_ip.startsWith('172.26.') || ev.source_ip.startsWith('172.27.') || ev.source_ip.startsWith('172.28.') || ev.source_ip.startsWith('172.29.') || ev.source_ip.startsWith('172.30.') || ev.source_ip.startsWith('172.31.') || ev.source_ip.startsWith('100.');
+
+      if (!isDNS && !isLocal && ev.threat_score >= 40) {
         let actor = actorMap.get(ev.source_ip) || {
           ip: ev.source_ip,
           country_code: ev.country_code,
@@ -1345,10 +1355,31 @@
       }
     }
 
+    async function fetchTopActors() {
+      try {
+        const res = await fetch('/api/stats/actors?limit=5');
+        if (res.ok) {
+          const actors = await res.json();
+          if (Array.isArray(actors) && actors.length > 0) {
+            actors.forEach(act => {
+              actorMap.set(act.ip, {
+                ip: act.ip,
+                country_code: act.country_code,
+                hits: act.hits,
+                peak_score: act.peak_score,
+                containment_state: 'ACTIVE'
+              });
+            });
+            renderTopActors();
+          }
+        }
+      } catch (e) {}
+    }
+
     function renderTopActors() {
-      const sorted = Array.from(actorMap.values()).sort((a, b) => b.hits - a.hits).slice(0, 5);
+      const sorted = Array.from(actorMap.values()).sort((a, b) => (b.hits * b.peak_score) - (a.hits * a.peak_score) || b.hits - a.hits).slice(0, 5);
       const tbody = document.getElementById('dashTopActorsBody');
-      if (sorted.length === 0) return;
+      if (!tbody || sorted.length === 0) return;
 
       tbody.innerHTML = '';
       sorted.forEach(act => {
@@ -1986,52 +2017,53 @@
       if (dHosting) dHosting.innerHTML = isDatacenter ? `<span class="badge badge-crit">[DATACENTER / CLOUD]</span>` : `<span class="badge badge-iso">[RESIDENTIAL / ISP]</span>`;
     }
 
+    function getCurrentRunbookCommands(ev) {
+      if (!ev) return [];
+      const ip = ev.source_ip || '127.0.0.1';
+      const layer = (ev.layer || '').toUpperCase();
+      const mitre = (ev.mitre_id || '').toUpperCase();
+
+      if (layer === 'WAF' || mitre.includes('T1190') || (mitre.includes('T1059') && !mitre.includes('T1059.004'))) {
+        return [
+          { title: "1. Inspect Web Server Offending Requests & Payloads", cmd: `grep -E '(\\.\\./|/bin/sh|<script|UNION SELECT)' /var/log/nginx/access.log | grep '${ip}' | tail -n 25` },
+          { title: "2. Verify Ingress Web Health & Header Integrity", cmd: `curl -sI -A 'CoPSeC-Probe' 'http://localhost/' | head -n 15` },
+          { title: "3. Inspect Established Web TCP Sockets for Attacker IP", cmd: `lsof -i :80 -i :443 -sTCP:ESTABLISHED | grep '${ip}'` },
+          { title: "4. Review Web Server Error Logs in Systemd Journal", cmd: `journalctl -u nginx --since "1 hour ago" --no-pager | grep -i error | tail -n 20` }
+        ];
+      } else if (layer === 'EDR' || mitre.includes('T1059.004') || mitre.includes('T1014') || mitre.includes('T1070') || mitre.includes('T1055')) {
+        return [
+          { title: "1. Inspect Process Tree & Parent PID Hierarchy", cmd: `pstree -apsh $(pgrep -f '${ip}' 2>/dev/null || echo $$)` },
+          { title: "2. Audit Suspicious Open Sockets and TCP FDs in /proc", cmd: `ls -la /proc/*/fd/* 2>/dev/null | grep -E 'socket:|/dev/tcp'` },
+          { title: "3. Dump Kernel TCP Socket Table State", cmd: `cat /proc/net/tcp /proc/net/tcp6 | awk '{print $2, $3, $4}'` },
+          { title: "4. Audit Recent Execve & Socket System Calls", cmd: `ausearch -i -m execve,socketcall --start recent | tail -n 30` }
+        ];
+      } else if (layer === 'AUTH' || mitre.includes('T1110') || mitre.includes('T1078')) {
+        return [
+          { title: "1. Tally Failed Authentication Usernames & Attempts", cmd: `grep 'Failed password' /var/log/auth.log | grep '${ip}' | awk '{print $(NF-5)}' | sort | uniq -c | sort -nr | head -n 10` },
+          { title: "2. Audit Failed Badlogins via lastb", cmd: `lastb -n 20 -a | grep '${ip}'` },
+          { title: "3. Check Account Lockout State & PAM Counters", cmd: `faillog -u root 2>/dev/null || pam_tally2 --user=root` },
+          { title: "4. Query Live Inbound SSH Connections", cmd: `ss -tnp '( dport = :22 )' | grep '${ip}'` }
+        ];
+      } else {
+        // NET layer / default
+        return [
+          { title: "1. Dump Netfilter Conntrack State for Attacker IP", cmd: `conntrack -L -s '${ip}' 2>/dev/null | head -n 30` },
+          { title: "2. Inspect Socket Summary & Destination IP Flows", cmd: `ss -s && ss -tnp dst '${ip}'` },
+          { title: "3. Search Kernel Buffer for SYN Floods & XDP Drops", cmd: `dmesg -T | grep -Ei '(syn flood|port scan|xdp|drop)' | tail -n 25` },
+          { title: "4. Query Kernel Routing Decision for Target IP", cmd: `ip route get '${ip}'` }
+        ];
+      }
+    }
+
     function hydrateMitreCommands(ev) {
       const container = document.getElementById('drawerCommandsList');
       if (!container) return;
-      const ip = ev.source_ip || '127.0.0.1';
+      const layer = (ev.layer || 'NET').toUpperCase();
       const mitre = (ev.mitre_id || '').toUpperCase();
       const mLabel = document.getElementById('drawerMitreTechniqueLabel');
-      if (mLabel) mLabel.textContent = mitre ? `[${mitre}]` : '[T1190]';
-      let cmds = [];
+      if (mLabel) mLabel.textContent = `[${layer}] ${mitre ? '[' + mitre + ']' : ''}`;
 
-      if (mitre.includes('T1190')) {
-        cmds = [
-          { title: "1. Inspect Web Server Offending Requests", cmd: `grep -E 'UNION|SELECT|<script|/bin/sh|\\.\\./' /var/log/nginx/access.log | grep '${ip}' | tail -n 25` },
-          { title: "2. Verify Active Web Listener Sockets", cmd: `ss -tulpn | grep -E ':80|:443|:8080'` },
-          { title: "3. Reload Web Firewall / Ingress Configuration", cmd: `nginx -t && systemctl reload nginx` }
-        ];
-      } else if (mitre.includes('T1059')) {
-        cmds = [
-          { title: "1. Audit Recent Process Invocations (auditd)", cmd: `ausearch -i -sc execve -ts recent | grep -E 'sh|bash|python|perl|nc'` },
-          { title: "2. Inspect Active Process Tree Hierarchy", cmd: `ps aux --forest | grep -E 'sh|bash|python|perl|nc|socat'` },
-          { title: "3. Issue Kernel SIGKILL to Suspicious PIDs", cmd: `pkill -9 -f '${ip}' || kill -9 <PID>` }
-        ];
-      } else if (mitre.includes('T1110')) {
-        cmds = [
-          { title: "1. Grep Authentication Failure Records", cmd: `grep 'Failed password' /var/log/auth.log | grep '${ip}' | tail -n 30` },
-          { title: "2. Inspect Live Open SSH Sockets", cmd: `ss -tna 'sport = :22' | grep '${ip}'` },
-          { title: "3. Reset Faillock / PAM Tally for Root", cmd: `faillock --user=root --reset || pam_tally2 --user=root --reset` }
-        ];
-      } else if (mitre.includes('T1014') || mitre.includes('T1055')) {
-        cmds = [
-          { title: "1. Audit Kernel Ring Buffer for Taints / Hooks", cmd: `dmesg -T | grep -E 'taint|module|hook|ptrace' | tail -n 30` },
-          { title: "2. Inspect Loaded Kernel Modules", cmd: `lsmod | grep -v -E '^(Module|ext4|xfs|overlay|bridge)'` },
-          { title: "3. Dump Kernel eBPF XDP Drop Map", cmd: `bpftool map dump name xdp_drop_map` }
-        ];
-      } else if (mitre.includes('T1046') || mitre.includes('T1595')) {
-        cmds = [
-          { title: "1. Trace Active Conntrack Flow Records", cmd: `conntrack -L -s '${ip}' | head -n 30` },
-          { title: "2. View Socket Statistics Summary", cmd: `ss -s` },
-          { title: "3. Check Kernel Log for SYN Drop Notices", cmd: `dmesg -T | grep -E 'SYN flood|port scan|XDP' | tail -n 25` }
-        ];
-      } else {
-        cmds = [
-          { title: "1. Inspect Socket Flow Connections", cmd: `ss -tulpn | grep '${ip}'` },
-          { title: "2. View Controller Journal Telemetry", cmd: `journalctl -u copsec -n 50 --no-pager` },
-          { title: "3. Query IP Route Target", cmd: `ip route get '${ip}'` }
-        ];
-      }
+      const cmds = getCurrentRunbookCommands(ev);
 
       container.innerHTML = '';
       cmds.forEach(item => {
@@ -2040,15 +2072,120 @@
         row.style.justifyContent = 'space-between';
         row.style.alignItems = 'center';
         row.style.gap = '6px';
+        row.style.padding = '4px 6px';
+        row.style.background = 'rgba(255,255,255,0.02)';
+        row.style.borderRadius = '4px';
+        row.style.border = '1px solid var(--border)';
         row.innerHTML = `
           <div style="flex: 1; overflow: hidden;">
-            <div style="font-size: 10px; font-weight: 600;">${item.title}:</div>
-            <div style="font-size: 10px; color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHTML(item.cmd)}</div>
+            <div style="font-size: 10px; font-weight: 600; color: var(--text);">${item.title}:</div>
+            <div style="font-size: 10px; font-family: monospace; color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHTML(item.cmd)}</div>
           </div>
-          <button class="btn" style="padding: 2px 5px;" onclick="copyText('${escapeHTML(item.cmd)}')">Copy</button>
+          <button class="btn" style="padding: 2px 6px; font-size: 10px;" onclick="copyText('${escapeHTML(item.cmd)}')">[Copy]</button>
         `;
         container.appendChild(row);
       });
+    }
+
+    function copyCompleteRunbookScript() {
+      if (!currentDrawerEvent) {
+        showToast('No active incident selected', 'crit');
+        return;
+      }
+      const cmds = getCurrentRunbookCommands(currentDrawerEvent);
+      if (cmds.length === 0) return;
+      const scriptText = cmds.map(c => c.cmd).join(';\n');
+      copyText(scriptText);
+      showToast('[RUNBOOK] Complete triage bash script copied', 'ok');
+    }
+
+    function exportCaseMarkdown() {
+      if (!currentDrawerEvent) {
+        showToast('No active incident selected to export', 'crit');
+        return;
+      }
+      const ev = currentDrawerEvent;
+      const ip = ev.source_ip || 'unknown_ip';
+      const now = new Date().toISOString();
+      const filename = `incident-${ip}-${Date.now()}.md`;
+
+      const info = ipinfoCache.get(ip) || {};
+      const org = info.org || info.company || info.isp || 'N/A';
+      const asn = info.asn || 'N/A';
+      const city = info.city || '';
+      const region = info.region || '';
+      const country = info.country || info.country_code || ev.country_code || 'LOC';
+      const isDatacenter = info.is_datacenter || info.hosting ? 'YES (Datacenter / Cloud Infrastructure)' : 'NO (Residential / Commercial ISP)';
+
+      const dEvidence = document.getElementById('dEvidencePayload')?.textContent || '-';
+      const dURI = document.getElementById('dEvidenceURI')?.textContent || '-';
+      const dCmd = document.getElementById('dEvidenceCmd')?.textContent || '-';
+      const dProc = document.getElementById('dEvidenceProc')?.textContent || '-';
+      const notes = document.getElementById('drawerNotes')?.value || ev.analyst_notes || 'No notes recorded.';
+
+      const cmds = getCurrentRunbookCommands(ev);
+      const cmdsText = cmds.map(c => `### ${c.title}\n\`\`\`bash\n${c.cmd}\n\`\`\``).join('\n\n');
+
+      let rawTelemetry = ev.raw_line || '';
+      try {
+        rawTelemetry = JSON.stringify(JSON.parse(ev.raw_line), null, 2);
+      } catch (e) {}
+
+      const md = `# Incident Forensic Case Report: #${ev.id || 'LIVE'}
+**Generated at:** ${now}
+**Target / Source IP:** \`${ip}\`
+**Severity:** \`[${ev.severity}]\` | **Threat Score:** \`${ev.threat_score}\` / 100
+**MITRE ATT&CK Technique:** \`[${ev.mitre_id || 'N/A'}]\`
+**Defense Layer:** \`[${ev.layer || 'NET'}]\`
+**Rule Matched:** \`${ev.rule_matched}\`
+
+---
+
+## 1. Threat Intelligence & IP Routing (IPinfo.io)
+- **Country / Geo:** ${city ? city + ', ' : ''}${region ? region + ' ' : ''}[${country}]
+- **Organization / ISP:** ${org}
+- **ASN Routing:** ${asn}
+- **Datacenter / Proxy Status:** ${isDatacenter}
+
+---
+
+## 2. Evidence Analysis & Offending Payload
+| Attribute | Detail |
+| :--- | :--- |
+| **Offending Substring** | \`${dEvidence}\` |
+| **Target URI / URL** | \`${dURI}\` |
+| **Process Command Line** | \`${dCmd}\` |
+| **Subsystem / PID** | \`${dProc}\` |
+| **Timestamp (ISO)** | \`${new Date(ev.timestamp_ms || Date.now()).toISOString()}\` |
+
+---
+
+## 3. Raw Telemetry Event Payload
+\`\`\`json
+${rawTelemetry}
+\`\`\`
+
+---
+
+## 4. Contextual Investigation Runbook & Triage Verification
+${cmdsText}
+
+---
+
+## 5. Analyst Incident Notes
+${notes}
+`;
+
+      const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast(`[EXPORT] Case report downloaded: ${filename}`, 'ok');
     }
 
     function closeDrawer() {
@@ -2173,6 +2310,59 @@
       }
     }
 
+    // Global Keyboard Shortcuts (Ergonomics)
+    window.addEventListener('keydown', (e) => {
+      const activeEl = document.activeElement;
+      const isInput = activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'SELECT' || activeEl.isContentEditable);
+
+      if (e.key === 'Escape') {
+        const drawer = document.getElementById('drawer');
+        if (drawer && drawer.classList.contains('open')) {
+          closeDrawer();
+          return;
+        }
+        const qm = document.getElementById('quarantineModal');
+        if (qm && qm.style.display !== 'none' && qm.style.display !== '') {
+          closeQuarantineModal();
+          return;
+        }
+        const rm = document.getElementById('ruleModal');
+        if (rm && rm.style.display !== 'none' && rm.style.display !== '') {
+          closeRuleModal();
+          return;
+        }
+      }
+
+      if (!isInput) {
+        if (e.key === '1') {
+          e.preventDefault();
+          navigateTo('dashboard');
+        } else if (e.key === '2') {
+          e.preventDefault();
+          navigateTo('telemetry');
+        } else if (e.key === '3') {
+          e.preventDefault();
+          navigateTo('alerts');
+        } else if (e.key === '4') {
+          e.preventDefault();
+          navigateTo('rules');
+        } else if (e.key === '/') {
+          e.preventDefault();
+          const activePane = document.querySelector('.tab-pane.active');
+          if (activePane && activePane.id === 'tab-telemetry') {
+            document.getElementById('telemetryFilter')?.focus();
+          } else if (activePane && activePane.id === 'tab-alerts') {
+            document.getElementById('alertsFilter')?.focus();
+          } else if (activePane && activePane.id === 'tab-rules') {
+            document.getElementById('ruleSearchFilter')?.focus();
+          } else {
+            navigateTo('telemetry');
+            setTimeout(() => document.getElementById('telemetryFilter')?.focus(), 50);
+          }
+        }
+      }
+    });
+
     // Toast Notification Hygiene (Max 3, deduplicate within 3s)
     function showToast(msg, type = 'ok') {
       const now = Date.now();
@@ -2210,8 +2400,10 @@
       fetchAlerts();
       fetchRules();
       fetchQuarantineBans();
+      fetchTopActors();
       setInterval(fetchAlerts, 8000);
       setInterval(fetchQuarantineBans, 10000);
+      setInterval(fetchTopActors, 15000);
     });
   </script>
 </body>

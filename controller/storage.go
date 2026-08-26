@@ -855,6 +855,56 @@ func (s *StorageEngine) GetAllSystemConfig() (map[string]string, error) {
 	return res, nil
 }
 
+// TopAttackerRecord represents aggregated top offending threat actor statistics.
+type TopAttackerRecord struct {
+	IP          string `json:"ip"`
+	CountryCode string `json:"country_code"`
+	CountryName string `json:"country_name"`
+	Hits        int    `json:"hits"`
+	PeakScore   int    `json:"peak_score"`
+	LastSeenMs  int64  `json:"last_seen_ms"`
+}
+
+// GetTopAttackers returns top offending threat actors strictly filtered to malicious threats (threat_score >= 40)
+// and excluding whitelisted, loopback, private subnets, and benign recursive DNS resolvers.
+func (s *StorageEngine) GetTopAttackers(limit int) ([]TopAttackerRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if limit <= 0 {
+		limit = 10
+	}
+
+	query := `SELECT client_ip, COUNT(*) as hits, MAX(threat_score) as peak_score, MAX(timestamp_ms) as last_seen
+	          FROM events
+	          WHERE threat_score >= 40
+	            AND client_ip != '' AND client_ip != '-' AND client_ip != '127.0.0.1' AND client_ip != '::1' AND client_ip != 'localhost' AND client_ip != 'local'
+	            AND client_ip NOT LIKE '127.%' AND client_ip NOT LIKE '10.%' AND client_ip NOT LIKE '192.168.%' AND client_ip NOT LIKE '172.16.%' AND client_ip NOT LIKE '172.17.%' AND client_ip NOT LIKE '172.18.%' AND client_ip NOT LIKE '172.19.%' AND client_ip NOT LIKE '172.20.%' AND client_ip NOT LIKE '172.21.%' AND client_ip NOT LIKE '172.22.%' AND client_ip NOT LIKE '172.23.%' AND client_ip NOT LIKE '172.24.%' AND client_ip NOT LIKE '172.25.%' AND client_ip NOT LIKE '172.26.%' AND client_ip NOT LIKE '172.27.%' AND client_ip NOT LIKE '172.28.%' AND client_ip NOT LIKE '172.29.%' AND client_ip NOT LIKE '172.30.%' AND client_ip NOT LIKE '172.31.%' AND client_ip NOT LIKE '100.%'
+	            AND client_ip NOT IN ('8.8.8.8', '8.8.4.4', '1.1.1.1', '1.0.0.1', '1.1.1.2', '1.0.0.2', '9.9.9.9', '149.112.112.112', '208.67.222.222', '208.67.220.220', '213.186.33.99', '213.186.33.100', '37.59.108.186')
+	          GROUP BY client_ip
+	          ORDER BY hits DESC, peak_score DESC
+	          LIMIT ?`
+
+	rows, err := s.db.Query(query, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	geo := geoip.GetDefaultEngine()
+	var list []TopAttackerRecord
+	for rows.Next() {
+		var rec TopAttackerRecord
+		if err := rows.Scan(&rec.IP, &rec.Hits, &rec.PeakScore, &rec.LastSeenMs); err == nil {
+			loc := geo.Lookup(rec.IP)
+			rec.CountryCode = loc.CountryCode
+			rec.CountryName = loc.CountryName
+			list = append(list, rec)
+		}
+	}
+	return list, nil
+}
+
 // Close terminates database connections.
 func (s *StorageEngine) Close() error {
 	s.mu.Lock()
