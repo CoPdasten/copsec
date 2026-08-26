@@ -511,8 +511,11 @@ func (s *CentralServer) processEvent(nodeID string, event *copsecproto.LogEvent)
 	if s.storage != nil {
 		_ = s.storage.InsertEvent(stored)
 
-		// Persist to dedicated Alerts table when threat_score >= 40 (or severity != INFO)
-		if stored.ThreatScore >= 40 || (stored.MitreTechniqueID != "" && stored.MitreTechniqueID != "T1071") || strings.HasPrefix(strings.ToLower(stored.RuleID), "sigma") {
+		// Persist to dedicated Alerts table strictly for actionable threats (threat_score >= 40, non-whitelisted, non-routine-sudo)
+		isWhitelisted := (s.threatEngine != nil && s.threatEngine.IsWhitelisted(stored.ClientIP)) || isProtectedIP(stored.ClientIP)
+		isRoutineSudo := stored.RuleID == "sudo_execution" || (strings.Contains(strings.ToLower(stored.RuleID), "sudo") && stored.ThreatScore < 70)
+		isAlert := stored.ThreatScore >= 40 && !isRoutineSudo && !isWhitelisted
+		if isAlert {
 			_ = s.storage.InsertAlert(stored)
 		}
 	}
@@ -532,7 +535,9 @@ func (s *CentralServer) processEvent(nodeID string, event *copsecproto.LogEvent)
 
 	if hub != nil {
 		hub.Broadcast("event", stored)
-		if stored.ThreatScore >= 40 || (stored.MitreTechniqueID != "" && stored.MitreTechniqueID != "T1071") || strings.HasPrefix(strings.ToLower(stored.RuleID), "sigma") {
+		isWhitelisted := (s.threatEngine != nil && s.threatEngine.IsWhitelisted(stored.ClientIP)) || isProtectedIP(stored.ClientIP)
+		isRoutineSudo := stored.RuleID == "sudo_execution" || (strings.Contains(strings.ToLower(stored.RuleID), "sudo") && stored.ThreatScore < 70)
+		if stored.ThreatScore >= 40 && !isRoutineSudo && !isWhitelisted {
 			hub.Broadcast("ALERT_NEW", stored)
 		}
 	}

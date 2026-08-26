@@ -378,7 +378,9 @@ func (s *StorageEngine) GetRecentAlerts(limit int) ([]*StoredEvent, error) {
 	defer s.mu.RUnlock()
 
 	query := `SELECT id, node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis, analyst_notes, playbook_progress
-	          FROM alerts ORDER BY timestamp_ms DESC LIMIT ?`
+	          FROM alerts
+	          WHERE threat_score >= 40 AND rule_id != 'sudo_execution'
+	          ORDER BY timestamp_ms DESC LIMIT ?`
 	rows, err := s.db.Query(query, limit)
 	if err != nil {
 		return nil, err
@@ -393,7 +395,9 @@ func (s *StorageEngine) GetRecentAlerts(limit int) ([]*StoredEvent, error) {
 	// Fallback to events table with threat_score >= 40 if alerts table is empty
 	if len(alerts) == 0 {
 		fallbackQuery := `SELECT id, node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis, analyst_notes, playbook_progress
-		                  FROM events WHERE threat_score >= 40 OR (mitre_technique_id != '' AND mitre_technique_id NOT LIKE 'T1071%') ORDER BY timestamp_ms DESC LIMIT ?`
+		                  FROM events
+		                  WHERE threat_score >= 40 AND rule_id != 'sudo_execution'
+		                  ORDER BY timestamp_ms DESC LIMIT ?`
 		fbRows, fbErr := s.db.Query(fallbackQuery, limit)
 		if fbErr == nil {
 			defer fbRows.Close()
@@ -908,6 +912,7 @@ func (s *StorageEngine) GetTopAttackers(limit int) ([]TopAttackerRecord, error) 
 	          WHERE threat_score >= 40
 	            AND client_ip != '' AND client_ip != '-' AND client_ip != '127.0.0.1' AND client_ip != '::1' AND client_ip != 'localhost' AND client_ip != 'local'
 	            AND client_ip NOT LIKE '127.%' AND client_ip NOT LIKE '10.%' AND client_ip NOT LIKE '192.168.%' AND client_ip NOT LIKE '172.16.%' AND client_ip NOT LIKE '172.17.%' AND client_ip NOT LIKE '172.18.%' AND client_ip NOT LIKE '172.19.%' AND client_ip NOT LIKE '172.20.%' AND client_ip NOT LIKE '172.21.%' AND client_ip NOT LIKE '172.22.%' AND client_ip NOT LIKE '172.23.%' AND client_ip NOT LIKE '172.24.%' AND client_ip NOT LIKE '172.25.%' AND client_ip NOT LIKE '172.26.%' AND client_ip NOT LIKE '172.27.%' AND client_ip NOT LIKE '172.28.%' AND client_ip NOT LIKE '172.29.%' AND client_ip NOT LIKE '172.30.%' AND client_ip NOT LIKE '172.31.%' AND client_ip NOT LIKE '100.%'
+	            AND client_ip NOT LIKE '2a01:41d0:%'
 	            AND client_ip NOT IN ('8.8.8.8', '8.8.4.4', '1.1.1.1', '1.0.0.1', '1.1.1.2', '1.0.0.2', '9.9.9.9', '149.112.112.112', '208.67.222.222', '208.67.220.220', '213.186.33.99', '213.186.33.100', '37.59.108.186')
 	          GROUP BY client_ip
 	          ORDER BY hits DESC, peak_score DESC

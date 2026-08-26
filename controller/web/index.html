@@ -886,7 +886,7 @@
               </div>
               <div style="display: flex; gap: 6px;">
                 <input type="password" id="cfgIPInfo" class="input-box" style="flex: 1;" placeholder="Default public fallback active" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
-                <button class="btn btn-accent" onclick="saveIPInfoToken()">[Save Token]</button>
+                <button id="btnSaveIPInfo" class="btn btn-accent" onclick="saveIPInfoToken()">[Save Token]</button>
               </div>
             </div>
             <div>
@@ -1110,8 +1110,11 @@
     }
 
     function getSeverityBadge(sev, score) {
-      const s = String(sev || '').toUpperCase();
       const num = Number(score) || 0;
+      const s = String(sev || '').toUpperCase();
+      if (num === 0 || s === 'INFO' || (num < 30 && s !== 'CRITICAL' && s !== 'HIGH' && s !== 'MEDIUM')) {
+        return `<span class="badge badge-info">[INFO] ${num}</span>`;
+      }
       if (s === 'CRITICAL' || num >= 85) return `<span class="badge badge-crit">[CRIT] ${num}</span>`;
       if (s === 'HIGH' || num >= 60) return `<span class="badge badge-high">[HIGH] ${num}</span>`;
       if (s === 'MEDIUM' || num >= 30) return `<span class="badge badge-med">[MED] ${num}</span>`;
@@ -1353,8 +1356,9 @@
         renderTopActors();
       }
 
-      // 4. Recent Incident Feed (if score >= 60 or mitre present)
-      if (ev.threat_score >= 60 || ev.mitre_id) {
+      // 4. Recent Incident Feed (strictly threats >= 40, exclude loopback/local/whitelisted/DNS)
+      const isLoopback = !ev.source_ip || ev.source_ip === '-' || ev.source_ip === '127.0.0.1' || ev.source_ip === '::1' || ev.source_ip === 'localhost' || ev.source_ip.startsWith('127.');
+      if (ev.threat_score >= 40 && !isLoopback && !isDNS) {
         appendDashboardRecentFeed(ev);
       }
     }
@@ -1413,6 +1417,8 @@
 
       const d = new Date(ev.timestamp_ms);
       const timeStr = d.toTimeString().split(' ')[0];
+      const isInfo = ev.threat_score === 0 || ev.severity === 'INFO' || ev.threat_score < 30;
+      const ruleStyle = isInfo ? 'color: var(--text-muted); font-size: 11px;' : 'color: var(--cyan); font-weight: 500;';
 
       tr.innerHTML = `
         <td style="color: var(--text-muted);">${timeStr}</td>
@@ -1420,7 +1426,7 @@
         <td style="font-weight: 600; color: var(--text);">${ev.source_ip}</td>
         <td>${getSeverityBadge(ev.severity, ev.threat_score)}</td>
         <td>${ev.mitre_id ? `<span class="badge badge-mitre">[${ev.mitre_id}]</span>` : '-'}</td>
-        <td style="color: var(--cyan);">${escapeHTML(ev.rule_matched)}</td>
+        <td style="${ruleStyle}">${escapeHTML(ev.rule_matched)}</td>
       `;
 
       tbody.insertBefore(tr, tbody.firstChild);
@@ -1448,6 +1454,8 @@
 
       const d = new Date(ev.timestamp_ms);
       const timeStr = d.toTimeString().split(' ')[0];
+      const isInfo = ev.threat_score === 0 || ev.severity === 'INFO' || ev.threat_score < 30;
+      const ruleStyle = isInfo ? 'color: var(--text-muted); font-size: 11px;' : 'color: var(--cyan); font-weight: 500;';
 
       tr.innerHTML = `
         <td style="color: var(--text-muted);">${timeStr}</td>
@@ -1457,7 +1465,7 @@
         <td>${ev.status_code || '-'}</td>
         <td>${getSeverityBadge(ev.severity, ev.threat_score)}</td>
         <td>${ev.mitre_id ? `<span class="badge badge-mitre">[${ev.mitre_id}]</span>` : '-'}</td>
-        <td style="color: var(--cyan);">${escapeHTML(ev.rule_matched)}</td>
+        <td style="${ruleStyle}">${escapeHTML(ev.rule_matched)}</td>
         <td style="max-width: 380px; overflow: hidden; text-overflow: ellipsis; color: var(--text-muted);">${escapeHTML(ev.raw_line)}</td>
       `;
 
@@ -1813,14 +1821,16 @@
           const input = document.getElementById('cfgIPInfo');
           const badge = document.getElementById('cfgIPInfoStatusBadge');
           const stateLabel = document.getElementById('ipinfoTokenState');
+          const saveBtn = document.getElementById('btnSaveIPInfo');
           if (data.configured) {
             localStorage.setItem('copsec_ipinfo_configured', 'true');
-            if (input) input.placeholder = '●●●●●●●● (Active & Persisted)';
+            if (input) input.placeholder = '●●●●●●●● (Active & Persisted in SQLite)';
             if (badge) {
               badge.className = 'badge badge-green';
               badge.textContent = '[CONFIGURED]';
             }
             if (stateLabel) stateLabel.textContent = `Active (${data.token_masked || '●●●●'})`;
+            if (saveBtn) saveBtn.textContent = '[Saved]';
           } else {
             localStorage.removeItem('copsec_ipinfo_configured');
             if (input) input.placeholder = 'Default public fallback active';
@@ -1829,6 +1839,7 @@
               badge.textContent = '[DEFAULT_FALLBACK]';
             }
             if (stateLabel) stateLabel.textContent = '';
+            if (saveBtn) saveBtn.textContent = '[Save Token]';
           }
         }
       } catch (e) {}
