@@ -18,6 +18,8 @@ import (
 	"github.com/copsec/controller/pkg/healing"
 	"github.com/copsec/controller/pkg/ipinfo"
 	"github.com/copsec/controller/pkg/ml"
+	"github.com/copsec/controller/pkg/models"
+	"github.com/copsec/controller/pkg/rules"
 	"github.com/copsec/controller/pkg/sigma"
 	"github.com/copsec/controller/pkg/soar"
 	"github.com/copsec/controller/pkg/tarpit"
@@ -126,6 +128,9 @@ func (ws *WebSOCServer) Start() error {
 	mux.HandleFunc("/api/alerts", ws.handleAlerts)
 	mux.HandleFunc("/api/alerts/triage", ws.handleAlertsTriage)
 	mux.HandleFunc("/api/bans", ws.handleBans)
+	mux.HandleFunc("/api/quarantine", ws.handleBans)
+	mux.HandleFunc("/api/quarantine/unban", ws.handleSOARUnban)
+	mux.HandleFunc("/api/quarantine/ban", ws.handleSOARBan)
 	mux.HandleFunc("/api/soar/ban", ws.handleSOARBan)
 	mux.HandleFunc("/api/soar/unban", ws.handleSOARUnban)
 	mux.HandleFunc("/api/soar/playbooks", ws.handleSOARPlaybooks)
@@ -134,9 +139,12 @@ func (ws *WebSOCServer) Start() error {
 	mux.HandleFunc("/api/playbooks/runs", ws.handleSOARRuns)
 	mux.HandleFunc("/api/soar/execute", ws.handleSOARExecute)
 	mux.HandleFunc("/api/playbooks/execute", ws.handleSOARExecute)
-	mux.HandleFunc("/api/sigma/rules", ws.handleSigmaRules)
+	mux.HandleFunc("/api/sigma/rules", ws.handleRulesList)
 	mux.HandleFunc("/api/sigma/rule", ws.handleSigmaRuleSubmit)
-	mux.HandleFunc("/api/sigma/toggle", ws.handleSigmaRuleToggle)
+	mux.HandleFunc("/api/sigma/toggle", ws.handleRulesToggle)
+	mux.HandleFunc("/api/rules", ws.handleRulesList)
+	mux.HandleFunc("/api/rules/sync", ws.handleRulesSync)
+	mux.HandleFunc("/api/rules/toggle", ws.handleRulesToggle)
 	mux.HandleFunc("/api/nodes", ws.handleNodes)
 	mux.HandleFunc("/api/whitelist", ws.handleWhitelist)
 	mux.HandleFunc("/api/geoip/stats", ws.handleGeoIPStats)
@@ -448,41 +456,137 @@ func (ws *WebSOCServer) handleSOARUnban(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-func (ws *WebSOCServer) handleSigmaRules(w http.ResponseWriter, r *http.Request) {
+func (ws *WebSOCServer) handleRulesSync(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
-	catalog := sigma.GetDefaultCatalog().List()
-	tracker := sigma.GetBuiltinTracker()
+	if r.Method == http.MethodGet {
+		status := rules.GetDefaultSyncer().GetStatus()
+		json.NewEncoder(w).Encode(status)
+		return
+	}
 
-	type RuleDTO struct {
+	if r.Method == http.MethodPost {
+		syncer := rules.GetDefaultSyncer()
+		go func() {
+			_, _ = syncer.Sync(context.Background())
+		}()
+
+		w.WriteHeader(http.StatusAccepted)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"message": "SigmaHQ background sync triggered from GitHub",
+			"status":  syncer.GetStatus(),
+		})
+		return
+	}
+
+	http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+}
+
+func (ws *WebSOCServer) handleRulesList(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	matcher := rules.GetDefaultMatcher()
+	ruleList := matcher.ListRules()
+
+	type RuleResponseDTO struct {
 		ID          string          `json:"id"`
 		Title       string          `json:"title"`
 		Description string          `json:"description"`
 		Level       string          `json:"level"`
 		ThreatScore int             `json:"threat_score"`
+		Severity    models.Severity `json:"severity"`
 		MitreID     string          `json:"mitre_id"`
-		Tags        []string        `json:"tags"`
-		Scope       sigma.RuleScope `json:"scope"`
+		MitreTactic string          `json:"mitre_tactic"`
+		Origin      string          `json:"origin"` // [BUILTIN] vs [SIGMAHQ]
+		Scope       string          `json:"scope"`
 		Enabled     bool            `json:"enabled"`
+		Tags        []string        `json:"tags,omitempty"`
 	}
 
-	var dtos []RuleDTO
-	for _, cr := range catalog {
-		enabled := tracker.IsRuleEnabled(cr.ID)
-		dtos = append(dtos, RuleDTO{
-			ID:          cr.ID,
-			Title:       cr.Title,
-			Description: cr.Description,
-			Level:       cr.Level,
-			ThreatScore: cr.ThreatScore,
-			MitreID:     cr.MitreID,
-			Tags:        cr.Tags,
-			Scope:       cr.Scope,
-			Enabled:     enabled,
+	seen := make(map[string]bool)
+	var dtos []RuleResponseDTO
+	for _, r := range ruleList {
+		seen[r.ID] = true
+		origin := r.Origin
+		if origin == "" {
+			origin = "[SIGMAHQ]"
+		}
+		dtos = append(dtos, RuleResponseDTO{
+			ID:          r.ID,
+			Title:       r.Title,
+			Description: r.Description,
+			Level:       r.Level,
+			ThreatScore: r.ThreatScore,
+			Severity:    r.Severity,
+			MitreID:     r.MitreTechniqueID,
+			MitreTactic: r.MitreTactic,
+			Origin:      origin,
+			Scope:       r.Scope,
+			Enabled:     r.Enabled,
+			Tags:        r.Tags,
 		})
 	}
 
+	// Also merge any curated catalog rules if not already present
+	catalog := sigma.GetDefaultCatalog().List()
+	tracker := sigma.GetBuiltinTracker()
+	for _, cr := range catalog {
+		if !seen[cr.ID] {
+			enabled := tracker.IsRuleEnabled(cr.ID)
+			dtos = append(dtos, RuleResponseDTO{
+				ID:          cr.ID,
+				Title:       cr.Title,
+				Description: cr.Description,
+				Level:       cr.Level,
+				ThreatScore: cr.ThreatScore,
+				Severity:    models.CalculateSeverity(cr.ThreatScore),
+				MitreID:     cr.MitreID,
+				MitreTactic: "",
+				Origin:      "[BUILTIN]",
+				Scope:       string(cr.Scope),
+				Enabled:     enabled,
+				Tags:        cr.Tags,
+			})
+		}
+	}
+
+	if dtos == nil {
+		dtos = []RuleResponseDTO{}
+	}
+
 	json.NewEncoder(w).Encode(dtos)
+}
+
+func (ws *WebSOCServer) handleRulesToggle(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		RuleID  string `json:"rule_id"`
+		Enabled bool   `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	matcher := rules.GetDefaultMatcher()
+	updated := matcher.SetRuleEnabled(req.RuleID, req.Enabled)
+	sigma.GetBuiltinTracker().SetRuleEnabled(req.RuleID, req.Enabled)
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"rule_id": req.RuleID,
+		"enabled": req.Enabled,
+		"found":   updated,
+	})
+}
+
+func (ws *WebSOCServer) handleSigmaRules(w http.ResponseWriter, r *http.Request) {
+	ws.handleRulesList(w, r)
 }
 
 func (ws *WebSOCServer) handleSigmaRuleSubmit(w http.ResponseWriter, r *http.Request) {
@@ -497,18 +601,18 @@ func (ws *WebSOCServer) handleSigmaRuleSubmit(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	if ws.sigmaEngine == nil {
-		http.Error(w, "Sigma engine not initialized", http.StatusInternalServerError)
-		return
-	}
-
-	rule, err := ws.sigmaEngine.ParseSigmaYAML(req.YAML)
+	rule, err := rules.ParseSigmaRule(req.YAML, "[CUSTOM]")
 	if err != nil {
 		http.Error(w, fmt.Sprintf("YAML parse/compilation failed: %v", err), http.StatusBadRequest)
 		return
 	}
 
-	ws.sigmaEngine.AddRule(rule)
+	rules.GetDefaultMatcher().AddRule(rule)
+	if ws.sigmaEngine != nil {
+		if sRule, err := ws.sigmaEngine.ParseSigmaYAML(req.YAML); err == nil {
+			ws.sigmaEngine.AddRule(sRule)
+		}
+	}
 
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
@@ -517,25 +621,7 @@ func (ws *WebSOCServer) handleSigmaRuleSubmit(w http.ResponseWriter, r *http.Req
 }
 
 func (ws *WebSOCServer) handleSigmaRuleToggle(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	var req struct {
-		RuleID  string `json:"rule_id"`
-		Enabled bool   `json:"enabled"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	sigma.GetBuiltinTracker().SetRuleEnabled(req.RuleID, req.Enabled)
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success": true,
-		"rule_id": req.RuleID,
-		"enabled": req.Enabled,
-	})
+	ws.handleRulesToggle(w, r)
 }
 
 func (ws *WebSOCServer) handleNodes(w http.ResponseWriter, r *http.Request) {

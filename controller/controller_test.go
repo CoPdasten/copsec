@@ -554,3 +554,83 @@ func TestIPInfoRESTLookupAndDrawerEnrichment(t *testing.T) {
 		t.Errorf("Expected country LOC for private IP, got %v", privResp["country"])
 	}
 }
+
+func TestRulesAPIEndpoints(t *testing.T) {
+	tmpDir := t.TempDir()
+	store, _ := NewStorageEngine(filepath.Join(tmpDir, "rules_api_test.db"))
+	defer store.Close()
+
+	analyzer := NewRuleEngine("")
+	server := NewCentralServer(store, analyzer)
+	ttlMgr := NewTTLBanManager(store, server)
+	defer ttlMgr.Stop()
+	wsHub := NewWSHub()
+
+	webSoc := NewWebSOCServer(":0", server, store, ttlMgr, nil, wsHub)
+
+	// 1. Test GET /api/rules -> Returns list of in-memory rules with origin tags
+	req := httptest.NewRequest("GET", "/api/rules", nil)
+	rec := httptest.NewRecorder()
+	webSoc.handleRulesList(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK from GET /api/rules, got %d", rec.Code)
+	}
+
+	var rulesList []map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &rulesList); err != nil {
+		t.Fatalf("Failed to parse /api/rules JSON: %v", err)
+	}
+
+	if len(rulesList) == 0 {
+		t.Fatalf("Expected non-empty rules list from /api/rules")
+	}
+
+	// Verify origin tags exist
+	foundOrigin := false
+	for _, r := range rulesList {
+		if origin, ok := r["origin"].(string); ok && (origin == "[BUILTIN]" || origin == "[SIGMAHQ]" || origin == "[CUSTOM]") {
+			foundOrigin = true
+			break
+		}
+	}
+	if !foundOrigin {
+		t.Errorf("Expected [BUILTIN] or [SIGMAHQ] origin tag in rules response: %+v", rulesList[0])
+	}
+
+	// 2. Test POST /api/rules/toggle -> Toggle specific rule on the fly
+	toggleBody, _ := json.Marshal(map[string]interface{}{
+		"rule_id": "sigma-linux-revshell",
+		"enabled": false,
+	})
+	toggleReq := httptest.NewRequest("POST", "/api/rules/toggle", bytes.NewBuffer(toggleBody))
+	toggleReq.Header.Set("Content-Type", "application/json")
+	toggleRec := httptest.NewRecorder()
+	webSoc.handleRulesToggle(toggleRec, toggleReq)
+
+	if toggleRec.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK from POST /api/rules/toggle, got %d", toggleRec.Code)
+	}
+
+	var toggleResp map[string]interface{}
+	_ = json.Unmarshal(toggleRec.Body.Bytes(), &toggleResp)
+	if toggleResp["enabled"] != false {
+		t.Errorf("Expected enabled = false in toggle response, got %v", toggleResp["enabled"])
+	}
+
+	// 3. Test POST /api/rules/sync -> Trigger background sync
+	syncReq := httptest.NewRequest("POST", "/api/rules/sync", nil)
+	syncRec := httptest.NewRecorder()
+	webSoc.handleRulesSync(syncRec, syncReq)
+
+	if syncRec.Code != http.StatusAccepted {
+		t.Fatalf("Expected 202 Accepted from POST /api/rules/sync, got %d", syncRec.Code)
+	}
+
+	var syncResp map[string]interface{}
+	_ = json.Unmarshal(syncRec.Body.Bytes(), &syncResp)
+	if syncResp["success"] != true {
+		t.Errorf("Expected success = true in sync response, got %v", syncResp)
+	}
+}
+

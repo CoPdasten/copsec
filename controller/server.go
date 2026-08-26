@@ -16,6 +16,7 @@ import (
 	"github.com/copsec/controller/pkg/geoip"
 	"github.com/copsec/controller/pkg/ipinfo"
 	"github.com/copsec/controller/pkg/ml"
+	"github.com/copsec/controller/pkg/models"
 	"github.com/copsec/controller/pkg/sigma"
 	"github.com/copsec/controller/pkg/snort"
 	"github.com/copsec/controller/pkg/soar"
@@ -458,6 +459,7 @@ func (s *CentralServer) processEvent(nodeID string, event *copsecproto.LogEvent)
 		RuleID:             ruleID,
 		MitreTechniqueID:   mitreID,
 		ThreatScore:        threatScore,
+		Severity:           models.CalculateSeverity(threatScore),
 		ScoreBreakdown:     assessment.Breakdown,
 		ThreatTier:         assessment.Tier,
 		CountryCode:        loc.CountryCode,

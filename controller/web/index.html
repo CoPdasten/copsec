@@ -3,31 +3,33 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>CoPSeC // Minimalist SIEM + SOAR Platform</title>
+  <title>CoPSeC // SOC Cockpit & SOAR Engine</title>
   <style>
     :root {
-      --bg: #0d1117;
-      --card: #161b22;
-      --card-hover: #1c2128;
-      --card-border: #30363d;
-      --border-accent: #21262d;
-      --text: #e6edf3;
-      --text-muted: #8b949e;
-      --text-dim: #484f58;
-      --accent: #58a6ff;
-      --accent-dim: rgba(88, 166, 255, 0.15);
-      --red: #f85149;
-      --red-dim: rgba(248, 81, 73, 0.15);
-      --orange: #d29922;
-      --orange-dim: rgba(210, 153, 34, 0.15);
-      --green: #3fb950;
-      --green-dim: rgba(63, 185, 80, 0.15);
-      --purple: #bc8cff;
-      --purple-dim: rgba(188, 140, 255, 0.15);
-      --cyan: #39c5cf;
-      --cyan-dim: rgba(57, 197, 207, 0.15);
+      --bg: #090d16;
+      --surface: #111726;
+      --surface-hover: #161f33;
+      --border: #1e293b;
+      --border-accent: #334155;
+      --text: #f1f5f9;
+      --text-muted: #94a3b8;
+      --text-dim: #64748b;
+      --accent: #38bdf8;
+      --accent-dim: rgba(56, 189, 248, 0.12);
+      --red: #ef4444;
+      --red-dim: rgba(239, 68, 68, 0.14);
+      --orange: #f97316;
+      --orange-dim: rgba(249, 115, 22, 0.14);
+      --yellow: #eab308;
+      --yellow-dim: rgba(234, 179, 8, 0.14);
+      --green: #10b981;
+      --green-dim: rgba(16, 185, 129, 0.14);
+      --purple: #a855f7;
+      --purple-dim: rgba(168, 85, 247, 0.14);
+      --cyan: #06b6d4;
+      --cyan-dim: rgba(6, 182, 212, 0.14);
       --font-mono: "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-      --radius: 6px;
+      --radius: 4px;
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -45,13 +47,13 @@
 
     /* Top Bar */
     header {
-      background: var(--card);
-      border-bottom: 1px solid var(--card-border);
-      padding: 8px 16px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 0 16px;
       display: flex;
       align-items: center;
       justify-content: space-between;
-      height: 48px;
+      height: 46px;
       flex-shrink: 0;
     }
     .brand {
@@ -59,56 +61,65 @@
       align-items: center;
       gap: 12px;
       font-weight: 700;
-      font-size: 14px;
+      font-size: 13px;
       letter-spacing: 0.5px;
     }
     .brand .logo-badge {
       background: #000;
-      border: 1px solid var(--card-border);
-      padding: 2px 8px;
+      border: 1px solid var(--border);
+      padding: 2px 6px;
       border-radius: var(--radius);
-      color: var(--cyan);
+      color: var(--accent);
       font-size: 11px;
     }
     .top-stats {
       display: flex;
       align-items: center;
-      gap: 16px;
+      gap: 12px;
       color: var(--text-muted);
     }
     .stat-pill {
       display: flex;
       align-items: center;
       gap: 6px;
-      background: #0d1117;
-      border: 1px solid var(--card-border);
+      background: #060911;
+      border: 1px solid var(--border);
       padding: 3px 8px;
       border-radius: var(--radius);
       font-size: 11px;
+      cursor: default;
+    }
+    .stat-pill.clickable {
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .stat-pill.clickable:hover {
+      border-color: var(--accent);
+      background: var(--surface-hover);
     }
     .stat-pill .val {
       color: var(--text);
       font-weight: 600;
     }
     .live-dot {
-      width: 7px;
-      height: 7px;
+      width: 6px;
+      height: 6px;
       border-radius: 50%;
       background: var(--green);
-      box-shadow: 0 0 8px var(--green);
+      box-shadow: 0 0 6px var(--green);
       display: inline-block;
     }
     .live-dot.offline {
       background: var(--red);
-      box-shadow: 0 0 8px var(--red);
+      box-shadow: 0 0 6px var(--red);
     }
 
     /* Nav Tabs */
     nav {
       display: flex;
       gap: 2px;
-      background: #090d13;
-      border-bottom: 1px solid var(--card-border);
+      background: #060911;
+      border-bottom: 1px solid var(--border);
       padding: 0 16px;
       flex-shrink: 0;
     }
@@ -119,27 +130,29 @@
       border-bottom: 2px solid transparent;
       padding: 10px 14px;
       font-family: inherit;
-      font-size: 12px;
+      font-size: 11px;
       font-weight: 600;
       cursor: pointer;
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 6px;
       transition: all 0.15s ease;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
     }
     .tab-btn:hover {
       color: var(--text);
-      background: var(--card-hover);
+      background: var(--surface-hover);
     }
     .tab-btn.active {
       color: var(--accent);
       border-bottom-color: var(--accent);
-      background: var(--card);
+      background: var(--surface);
     }
     .tab-badge {
       background: var(--border-accent);
-      border-radius: 10px;
-      padding: 1px 6px;
+      border-radius: 3px;
+      padding: 1px 5px;
       font-size: 10px;
       color: var(--text);
     }
@@ -164,8 +177,8 @@
 
     /* Card Components */
     .card {
-      background: var(--card);
-      border: 1px solid var(--card-border);
+      background: var(--surface);
+      border: 1px solid var(--border);
       border-radius: var(--radius);
       padding: 14px;
       display: flex;
@@ -173,7 +186,7 @@
       gap: 10px;
     }
     .card-title {
-      font-size: 12px;
+      font-size: 11px;
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 0.5px;
@@ -183,12 +196,81 @@
       justify-content: space-between;
     }
 
+    /* Metric Cards Grid */
+    .metric-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+    }
+    .metric-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .metric-card:hover {
+      background: var(--surface-hover);
+      border-color: var(--border-accent);
+      transform: translateY(-1px);
+    }
+    .metric-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+    }
+    .metric-val {
+      font-size: 24px;
+      font-weight: 700;
+      color: var(--text);
+      font-family: inherit;
+    }
+    .metric-desc {
+      font-size: 10px;
+      color: var(--text-dim);
+    }
+
+    /* Standardized Text & Bracket Badges */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1px 5px;
+      border-radius: 3px;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+      white-space: nowrap;
+      text-transform: uppercase;
+    }
+    .badge-iso {
+      background: #000;
+      border: 1px solid var(--border);
+      color: var(--accent);
+    }
+    .badge-crit { background: var(--red-dim); border: 1px solid var(--red); color: var(--red); }
+    .badge-high { background: var(--orange-dim); border: 1px solid var(--orange); color: var(--orange); }
+    .badge-med { background: var(--yellow-dim); border: 1px solid var(--yellow); color: var(--yellow); }
+    .badge-low, .badge-info { background: var(--green-dim); border: 1px solid var(--green); color: var(--green); }
+    .badge-layer { background: rgba(56, 189, 248, 0.1); border: 1px solid var(--accent); color: var(--accent); }
+    .badge-mitre { background: rgba(168, 85, 247, 0.12); border: 1px solid var(--purple); color: var(--purple); }
+    .badge-xdp { background: var(--red-dim); border: 1px solid var(--red); color: var(--red); }
+    .badge-tarpit { background: var(--orange-dim); border: 1px solid var(--orange); color: var(--orange); }
+    .badge-active { background: var(--green-dim); border: 1px solid var(--green); color: var(--green); }
+
     /* Buttons & Inputs */
     .btn {
-      background: var(--border-accent);
+      background: var(--surface);
       color: var(--text);
-      border: 1px solid var(--card-border);
-      padding: 5px 10px;
+      border: 1px solid var(--border);
+      padding: 4px 8px;
       border-radius: var(--radius);
       font-family: inherit;
       font-size: 11px;
@@ -196,13 +278,13 @@
       cursor: pointer;
       display: inline-flex;
       align-items: center;
-      gap: 6px;
+      gap: 5px;
       transition: all 0.15s;
       user-select: none;
     }
     .btn:hover {
-      background: var(--card-hover);
-      border-color: var(--accent);
+      background: var(--surface-hover);
+      border-color: var(--border-accent);
       color: #fff;
     }
     .btn-red {
@@ -212,7 +294,7 @@
     }
     .btn-red:hover {
       background: var(--red);
-      color: #fff;
+      color: #000;
     }
     .btn-orange {
       background: var(--orange-dim);
@@ -232,20 +314,20 @@
       background: var(--green);
       color: #000;
     }
-    .btn-cyan {
-      background: var(--cyan-dim);
-      border-color: var(--cyan);
-      color: var(--cyan);
+    .btn-accent {
+      background: var(--accent-dim);
+      border-color: var(--accent);
+      color: var(--accent);
     }
-    .btn-cyan:hover {
-      background: var(--cyan);
+    .btn-accent:hover {
+      background: var(--accent);
       color: #000;
     }
     .input-box {
-      background: #0d1117;
-      border: 1px solid var(--card-border);
+      background: #060911;
+      border: 1px solid var(--border);
       color: var(--text);
-      padding: 5px 8px;
+      padding: 4px 8px;
       border-radius: var(--radius);
       font-family: inherit;
       font-size: 11px;
@@ -254,26 +336,6 @@
     .input-box:focus {
       border-color: var(--accent);
     }
-
-    /* Badges */
-    .badge {
-      display: inline-block;
-      padding: 2px 6px;
-      border-radius: 4px;
-      font-size: 10px;
-      font-weight: 600;
-      letter-spacing: 0.3px;
-    }
-    .badge-iso {
-      background: #000;
-      border: 1px solid var(--card-border);
-      color: var(--cyan);
-    }
-    .badge-crit { background: var(--red-dim); border: 1px solid var(--red); color: var(--red); }
-    .badge-high { background: var(--orange-dim); border: 1px solid var(--orange); color: var(--orange); }
-    .badge-med { background: var(--purple-dim); border: 1px solid var(--purple); color: var(--purple); }
-    .badge-low { background: var(--green-dim); border: 1px solid var(--green); color: var(--green); }
-    .badge-mitre { background: rgba(88, 166, 255, 0.15); border: 1px solid var(--accent); color: var(--accent); }
 
     /* Tables */
     .table-container {
@@ -287,23 +349,23 @@
       font-size: 11px;
     }
     th {
-      background: #0d1117;
+      background: #060911;
       color: var(--text-muted);
       font-weight: 600;
       text-transform: uppercase;
-      padding: 8px 10px;
-      border-bottom: 1px solid var(--card-border);
+      padding: 7px 10px;
+      border-bottom: 1px solid var(--border);
       position: sticky;
       top: 0;
       z-index: 1;
     }
     td {
-      padding: 7px 10px;
-      border-bottom: 1px solid #1c2128;
+      padding: 6px 10px;
+      border-bottom: 1px solid #141b29;
       white-space: nowrap;
     }
     tr:hover td {
-      background: rgba(88, 166, 255, 0.04);
+      background: rgba(56, 189, 248, 0.03);
     }
 
     /* Toolbar */
@@ -311,7 +373,7 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 12px;
+      gap: 10px;
       flex-wrap: wrap;
     }
     .toolbar-left, .toolbar-right {
@@ -320,17 +382,17 @@
       gap: 8px;
     }
 
-    /* Incident Drawer */
+    /* Drawer */
     #drawer {
       position: fixed;
       top: 0;
-      right: -720px;
-      width: 680px;
+      right: -750px;
+      width: 720px;
       height: 100vh;
-      background: var(--card);
-      border-left: 1px solid var(--card-border);
-      box-shadow: -10px 0 30px rgba(0, 0, 0, 0.85);
-      transition: right 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+      background: var(--surface);
+      border-left: 1px solid var(--border);
+      box-shadow: -10px 0 30px rgba(0, 0, 0, 0.95);
+      transition: right 0.22s cubic-bezier(0.16, 1, 0.3, 1);
       z-index: 1000;
       display: flex;
       flex-direction: column;
@@ -339,12 +401,12 @@
       right: 0;
     }
     .drawer-header {
-      padding: 14px 16px;
-      border-bottom: 1px solid var(--card-border);
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
       display: flex;
       align-items: center;
       justify-content: space-between;
-      background: #11161d;
+      background: #0a0f1c;
       flex-shrink: 0;
     }
     .drawer-body {
@@ -353,27 +415,19 @@
       flex: 1;
       display: flex;
       flex-direction: column;
-      gap: 16px;
+      gap: 14px;
     }
     .terminal-box {
-      background: #090d13;
-      border: 1px solid var(--card-border);
+      background: #060911;
+      border: 1px solid var(--border);
       border-radius: var(--radius);
       padding: 10px;
       font-size: 11px;
-      color: #7ee787;
+      color: #38bdf8;
       word-break: break-all;
       white-space: pre-wrap;
       max-height: 160px;
       overflow-y: auto;
-    }
-    .terminal-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 6px;
-      color: var(--text-muted);
-      font-size: 10px;
     }
     .kv-table {
       width: 100%;
@@ -383,40 +437,42 @@
       width: 140px;
       color: var(--text-muted);
       font-weight: 600;
-      padding: 4px 8px;
+      padding: 4px 6px;
+      border-bottom: 1px solid #141b29;
     }
     .kv-table td:last-child {
       color: var(--text);
-      padding: 4px 8px;
+      padding: 4px 6px;
       word-break: break-word;
+      border-bottom: 1px solid #141b29;
     }
 
     /* Playbook Step UI */
     .pb-step-card {
-      background: #0d1117;
-      border: 1px solid var(--card-border);
+      background: #090d16;
+      border: 1px solid var(--border);
       border-radius: var(--radius);
-      padding: 12px;
+      padding: 10px;
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      gap: 6px;
     }
     .pb-step-card.active-run {
       border-color: var(--orange);
-      background: rgba(210, 153, 34, 0.04);
+      background: rgba(249, 115, 22, 0.03);
     }
     .pb-step-card.completed-run {
       border-color: var(--green);
-      background: rgba(63, 185, 80, 0.04);
+      background: rgba(16, 185, 129, 0.03);
     }
     .step-item {
-      background: #161b22;
-      border: 1px solid var(--card-border);
-      border-radius: 4px;
-      padding: 8px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      padding: 6px 8px;
       display: flex;
       flex-direction: column;
-      gap: 4px;
+      gap: 3px;
     }
     .step-item.step-done {
       border-color: var(--green);
@@ -427,62 +483,62 @@
       border-left: 3px solid var(--orange);
     }
 
-    /* Toasts */
+    /* Toast Container */
     #toast-container {
       position: fixed;
-      bottom: 20px;
-      right: 20px;
+      bottom: 16px;
+      right: 16px;
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      gap: 6px;
       z-index: 9999;
       pointer-events: none;
     }
     .toast {
-      background: var(--card);
-      border: 1px solid var(--card-border);
+      background: var(--surface);
+      border: 1px solid var(--border);
       color: var(--text);
-      padding: 8px 12px;
+      padding: 6px 10px;
       border-radius: var(--radius);
       box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6);
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 6px;
       font-size: 11px;
       animation: slideIn 0.2s ease-out;
       pointer-events: auto;
       max-width: 340px;
     }
-    .toast.crit { border-color: var(--red); color: #ff7b72; }
-    .toast.ok { border-color: var(--green); color: #7ee787; }
+    .toast.crit { border-color: var(--red); color: #fca5a5; }
+    .toast.ok { border-color: var(--green); color: #86efac; }
     @keyframes slideIn {
       from { transform: translateX(100%); opacity: 0; }
       to { transform: translateX(0); opacity: 1; }
     }
 
-    /* Toggle Switch */
+    /* Switch */
     .switch {
       position: relative;
       display: inline-block;
-      width: 34px;
-      height: 18px;
+      width: 30px;
+      height: 16px;
     }
     .switch input { opacity: 0; width: 0; height: 0; }
     .slider {
       position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
-      background-color: var(--border-accent);
+      background-color: #1e293b;
       transition: .2s;
-      border-radius: 18px;
-      border: 1px solid var(--card-border);
+      border-radius: 16px;
+      border: 1px solid var(--border);
     }
     .slider:before {
-      position: absolute; content: ""; height: 12px; width: 12px; left: 2px; bottom: 2px;
+      position: absolute; content: ""; height: 10px; width: 10px; left: 2px; bottom: 2px;
       background-color: var(--text-muted);
       transition: .2s;
       border-radius: 50%;
     }
     input:checked + .slider { background-color: var(--green); border-color: var(--green); }
-    input:checked + .slider:before { transform: translateX(16px); background-color: #000; }
+    input:checked + .slider:before { transform: translateX(14px); background-color: #000; }
   </style>
 </head>
 <body>
@@ -490,52 +546,198 @@
   <!-- Top Bar -->
   <header>
     <div class="brand">
-      <span class="logo-badge">CoPSeC</span>
-      <span>SOC COCKPIT</span>
+      <span class="logo-badge">[COPSEC]</span>
+      <span>MONOCHROME SOC COCKPIT</span>
       <span id="liveStatus" class="stat-pill"><span class="live-dot" id="liveDot"></span> <span id="connLabel">STREAM CONNECTED</span></span>
     </div>
     <div class="top-stats">
       <div class="stat-pill">EPS: <span class="val" id="statEPS">0</span></div>
       <div class="stat-pill">TOTAL EVENTS: <span class="val" id="statTotal">0</span></div>
       <div class="stat-pill">FLEET NODES: <span class="val" id="statNodes">0</span></div>
-      <div class="stat-pill">ACTIVE BANS (XDP): <span class="val" id="statBans" style="color: var(--red);">0</span></div>
+      <div class="stat-pill clickable" onclick="openQuarantineModal()" title="View and manage kernel XDP quarantine list">
+        ACTIVE BANS (XDP): <span class="val" id="statBans" style="color: var(--red);">0</span>
+      </div>
     </div>
   </header>
 
   <!-- Navigation Tabs -->
   <nav>
-    <button class="tab-btn active" onclick="switchTab('telemetry')">📡 Live Telemetry <span class="tab-badge" id="badgeTelemetry">0</span></button>
-    <button class="tab-btn" onclick="switchTab('alerts')">🚨 Active Alerts <span class="tab-badge" id="badgeAlerts" style="background: var(--red); color:#fff;">0</span></button>
-    <button class="tab-btn" onclick="switchTab('soar')">📘 SOAR Playbooks <span class="tab-badge" id="badgeSOAR">4</span></button>
-    <button class="tab-btn" onclick="switchTab('rules')">📋 Detection Rules <span class="tab-badge" id="badgeRules">13</span></button>
-    <button class="tab-btn" onclick="switchTab('settings')">⚙️ Settings & Fleet</button>
+    <button class="tab-btn active" onclick="navigateTo('dashboard')">[DASHBOARD]</button>
+    <button class="tab-btn" onclick="navigateTo('telemetry')">[TELEMETRY] <span class="tab-badge" id="badgeTelemetry">0</span></button>
+    <button class="tab-btn" onclick="navigateTo('alerts')">[ALERTS] <span class="tab-badge" id="badgeAlerts" style="background: var(--red); color:#fff;">0</span></button>
+    <button class="tab-btn" onclick="navigateTo('soar')">[SOAR PLAYBOOKS] <span class="tab-badge" id="badgeSOAR">0</span></button>
+    <button class="tab-btn" onclick="navigateTo('rules')">[DETECTION RULES] <span class="tab-badge" id="badgeRules">0</span></button>
+    <button class="tab-btn" onclick="navigateTo('settings')">[FLEET & SETTINGS]</button>
   </nav>
 
   <!-- Main Content Areas -->
   <main>
 
+    <!-- Tab 0: Master Executive Dashboard -->
+    <div id="tab-dashboard" class="tab-pane active">
+      <!-- 1. Severity Overview Metric Cards -->
+      <div class="metric-grid">
+        <div class="metric-card" onclick="navigateTo('alerts', { severity: 'CRITICAL' })">
+          <div class="metric-header">
+            <span>CRITICAL SEVERITY</span>
+            <span class="badge badge-crit">[CRIT]</span>
+          </div>
+          <div class="metric-val" id="dashCritCount" style="color: var(--red);">0</div>
+          <div class="metric-desc">Immediate threat incidents (Score &ge; 85)</div>
+        </div>
+        <div class="metric-card" onclick="navigateTo('alerts', { severity: 'HIGH' })">
+          <div class="metric-header">
+            <span>HIGH SEVERITY</span>
+            <span class="badge badge-high">[HIGH]</span>
+          </div>
+          <div class="metric-val" id="dashHighCount" style="color: var(--orange);">0</div>
+          <div class="metric-desc">High-fidelity detections (Score 60-84)</div>
+        </div>
+        <div class="metric-card" onclick="navigateTo('alerts', { severity: 'MEDIUM' })">
+          <div class="metric-header">
+            <span>MEDIUM SEVERITY</span>
+            <span class="badge badge-med">[MED]</span>
+          </div>
+          <div class="metric-val" id="dashMedCount" style="color: var(--yellow);">0</div>
+          <div class="metric-desc">Suspicious probes & triage (Score 30-59)</div>
+        </div>
+        <div class="metric-card" onclick="navigateTo('telemetry', { severity: 'INFO' })">
+          <div class="metric-header">
+            <span>INFORMATIONAL / BENIGN</span>
+            <span class="badge badge-info">[INFO]</span>
+          </div>
+          <div class="metric-val" id="dashInfoCount" style="color: var(--green);">0</div>
+          <div class="metric-desc">Normalized telemetry baseline events</div>
+        </div>
+      </div>
+
+      <!-- 2-Column Split: Layers & Top Actors | Recent Feed -->
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; flex: 1;">
+        <!-- Left: Defense Layers & Top Offending Actors -->
+        <div style="display: flex; flex-direction: column; gap: 16px;">
+          <!-- 2. Defense Layers & Status -->
+          <div class="card">
+            <div class="card-title">
+              <span>Defense Layers & Status (24H Inspection)</span>
+              <span style="font-size: 10px; color: var(--text-muted);">Click layer to inspect telemetry</span>
+            </div>
+            <div class="table-container">
+              <table>
+                <thead>
+                  <tr>
+                    <th style="width: 80px;">LAYER</th>
+                    <th>DOMAIN DESCRIPTION</th>
+                    <th style="width: 85px;">24H HITS</th>
+                    <th style="width: 80px;">STATUS</th>
+                  </tr>
+                </thead>
+                <tbody id="dashLayersTableBody">
+                  <tr style="cursor: pointer;" onclick="navigateTo('telemetry', { layer: 'WAF' })">
+                    <td><span class="badge badge-layer">[WAF]</span></td>
+                    <td style="color: var(--text);">Web App Firewall (SQLi, XSS, Path Traversal, RCE)</td>
+                    <td id="hitsWAF" style="font-weight: 600;">0</td>
+                    <td><span class="badge badge-active">[ACTIVE]</span></td>
+                  </tr>
+                  <tr style="cursor: pointer;" onclick="navigateTo('telemetry', { layer: 'EDR' })">
+                    <td><span class="badge badge-layer">[EDR]</span></td>
+                    <td style="color: var(--text);">Endpoint & Kernel Integrity (eBPF, Memory, FIM)</td>
+                    <td id="hitsEDR" style="font-weight: 600;">0</td>
+                    <td><span class="badge badge-active">[ACTIVE]</span></td>
+                  </tr>
+                  <tr style="cursor: pointer;" onclick="navigateTo('telemetry', { layer: 'AUTH' })">
+                    <td><span class="badge badge-layer">[AUTH]</span></td>
+                    <td style="color: var(--text);">Authentication & SSH Guard (Bruteforce, Sudo Escalation)</td>
+                    <td id="hitsAUTH" style="font-weight: 600;">0</td>
+                    <td><span class="badge badge-active">[ACTIVE]</span></td>
+                  </tr>
+                  <tr style="cursor: pointer;" onclick="navigateTo('telemetry', { layer: 'NET' })">
+                    <td><span class="badge badge-layer">[NET]</span></td>
+                    <td style="color: var(--text);">Network & DNS Resolver (Port Scans, Snort ML, C2 Sinkhole)</td>
+                    <td id="hitsNET" style="font-weight: 600;">0</td>
+                    <td><span class="badge badge-active">[ACTIVE]</span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- 3. Top Offending Actors -->
+          <div class="card" style="flex: 1;">
+            <div class="card-title">
+              <span>Top Offending Threat Actors</span>
+              <div style="display: flex; gap: 6px;">
+                <button class="btn btn-red" style="padding: 2px 6px;" onclick="openQuarantineModal()">[QUARANTINE VAULT]</button>
+              </div>
+            </div>
+            <div class="table-container">
+              <table>
+                <thead>
+                  <tr>
+                    <th style="width: 120px;">SOURCE IP</th>
+                    <th style="width: 60px;">GEO</th>
+                    <th style="width: 65px;">HITS</th>
+                    <th style="width: 80px;">SCORE</th>
+                    <th>CONTAINMENT STATE</th>
+                  </tr>
+                </thead>
+                <tbody id="dashTopActorsBody">
+                  <tr><td colspan="5" style="text-align: center; color: var(--text-muted); padding: 14px;">No active threat actors detected</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right: 4. Recent Incident Feed -->
+        <div class="card" style="flex: 1; display: flex; flex-direction: column;">
+          <div class="card-title">
+            <span>Recent High-Fidelity Incidents</span>
+            <button class="btn btn-accent" style="padding: 2px 6px;" onclick="navigateTo('alerts')">View All Alerts &rarr;</button>
+          </div>
+          <div class="table-container" style="flex: 1;">
+            <table>
+              <thead>
+                <tr>
+                  <th style="width: 70px;">TIME</th>
+                  <th style="width: 55px;">GEO</th>
+                  <th style="width: 110px;">SOURCE IP</th>
+                  <th style="width: 70px;">SEV</th>
+                  <th style="width: 80px;">MITRE</th>
+                  <th>RULE IDENTIFIER</th>
+                </tr>
+              </thead>
+              <tbody id="dashRecentFeedBody">
+                <tr><td colspan="6" style="text-align: center; color: var(--text-muted); padding: 20px;">Awaiting incident telemetry stream...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Tab 1: Live Telemetry Stream -->
-    <div id="tab-telemetry" class="tab-pane active">
+    <div id="tab-telemetry" class="tab-pane">
       <div class="toolbar">
         <div class="toolbar-left">
-          <input type="text" id="telemetryFilter" class="input-box" placeholder="Filter telemetry (e.g. sqli, 404, nginx, T1190)..." style="width: 280px;" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" oninput="applyTelemetryFilter()">
+          <input type="text" id="telemetryFilter" class="input-box" placeholder="Filter telemetry (e.g. sqli, 404, nginx, T1190)..." style="width: 260px;" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" oninput="applyTelemetryFilter()">
           <select id="filterSource" class="input-box" onchange="applyTelemetryFilter()">
-            <option value="">All Sources</option>
-            <option value="nginx">Nginx</option>
-            <option value="auth">Auth / SSH</option>
-            <option value="suricata">Suricata</option>
-            <option value="audit">Auditd</option>
+            <option value="">ALL LAYERS</option>
+            <option value="waf">WAF (Web Server)</option>
+            <option value="edr">EDR (Host / eBPF / FIM)</option>
+            <option value="auth">AUTH (SSH / Sudo)</option>
+            <option value="net">NET (Network / DNS / Suricata)</option>
           </select>
           <select id="filterTier" class="input-box" onchange="applyTelemetryFilter()">
-            <option value="">All Tiers</option>
-            <option value="CRITICAL">Critical (Score 80+)</option>
-            <option value="HIGH">High (Score 60+)</option>
-            <option value="NORMAL">Normal</option>
+            <option value="">ALL SEVERITIES</option>
+            <option value="CRITICAL">[CRIT] Critical (85+)</option>
+            <option value="HIGH">[HIGH] High (60+)</option>
+            <option value="MEDIUM">[MED] Medium (30+)</option>
+            <option value="INFO">[INFO] Informational</option>
           </select>
         </div>
         <div class="toolbar-right">
-          <button class="btn" id="btnAutoScroll" onclick="toggleAutoScroll()">⏸️ Auto-Scroll: ON</button>
-          <button class="btn" onclick="clearTelemetryFeed()">🧹 Clear Stream</button>
+          <button class="btn" id="btnAutoScroll" onclick="toggleAutoScroll()">AUTO-SCROLL: ON</button>
+          <button class="btn" onclick="clearTelemetryFeed()">CLEAR STREAM</button>
         </div>
       </div>
 
@@ -543,15 +745,15 @@
         <table>
           <thead>
             <tr>
-              <th style="width: 75px;">TIME</th>
-              <th style="width: 50px;">ISO</th>
-              <th style="width: 110px;">CLIENT IP</th>
-              <th style="width: 70px;">SOURCE</th>
-              <th style="width: 55px;">STATUS</th>
-              <th style="width: 65px;">SCORE</th>
-              <th style="width: 90px;">MITRE ID</th>
-              <th style="width: 140px;">RULE</th>
-              <th>PAYLOAD / TELEMETRY RAW</th>
+              <th style="width: 70px;">TIME</th>
+              <th style="width: 50px;">GEO</th>
+              <th style="width: 110px;">SOURCE IP</th>
+              <th style="width: 65px;">LAYER</th>
+              <th style="width: 50px;">HTTP</th>
+              <th style="width: 75px;">SCORE</th>
+              <th style="width: 85px;">MITRE ID</th>
+              <th style="width: 150px;">RULE MATCHED</th>
+              <th>RAW TELEMETRY / PAYLOAD</th>
             </tr>
           </thead>
           <tbody id="telemetryTableBody">
@@ -565,10 +767,16 @@
     <div id="tab-alerts" class="tab-pane">
       <div class="toolbar">
         <div class="toolbar-left">
-          <span style="color: var(--text-muted); font-size: 11px;">Actionable Security Incidents (De-noised, score &ge; 40 or validated MITRE technique)</span>
+          <input type="text" id="alertsFilter" class="input-box" placeholder="Filter alerts by IP, rule, or technique..." style="width: 260px;" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" oninput="applyAlertsFilter()">
+          <select id="alertsSeverityFilter" class="input-box" onchange="applyAlertsFilter()">
+            <option value="">ALL SEVERITIES</option>
+            <option value="CRITICAL">[CRIT] Critical</option>
+            <option value="HIGH">[HIGH] High</option>
+            <option value="MEDIUM">[MED] Medium</option>
+          </select>
         </div>
         <div class="toolbar-right">
-          <button class="btn" onclick="fetchAlerts()">🔄 Refresh Alerts</button>
+          <button class="btn" onclick="fetchAlerts()">REFRESH ALERTS</button>
         </div>
       </div>
 
@@ -576,14 +784,14 @@
         <table>
           <thead>
             <tr>
-              <th style="width: 75px;">TIME</th>
-              <th style="width: 55px;">ISO</th>
-              <th style="width: 120px;">CLIENT IP</th>
-              <th style="width: 75px;">SCORE</th>
-              <th style="width: 90px;">MITRE ID</th>
-              <th style="width: 180px;">RULE IDENTIFIER</th>
+              <th style="width: 70px;">TIME</th>
+              <th style="width: 55px;">GEO</th>
+              <th style="width: 120px;">SOURCE IP</th>
+              <th style="width: 80px;">SEVERITY</th>
+              <th style="width: 85px;">MITRE ID</th>
+              <th style="width: 180px;">RULE MATCHED</th>
               <th style="width: 125px;">CONTAINMENT</th>
-              <th style="width: 250px; text-align: right;">TRIAGE ACTIONS</th>
+              <th style="width: 220px; text-align: right;">TRIAGE ACTIONS</th>
             </tr>
           </thead>
           <tbody id="alertsTableBody">
@@ -598,23 +806,25 @@
       <!-- Manual Emergency Triggers -->
       <div class="card">
         <div class="card-title">
-          <span>⚡ Emergency Mitigation Dispatch</span>
-          <span style="font-size: 11px; color: var(--text-muted);">Fleet-wide real-time kernel & network containment</span>
+          <span>Manual SOAR Mitigation Dispatch</span>
+          <div style="display: flex; gap: 6px;">
+            <button class="btn btn-red" style="padding: 2px 6px;" onclick="openQuarantineModal()">[QUARANTINE VAULT]</button>
+          </div>
         </div>
-        <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
           <input type="text" id="manualActionIP" class="input-box" placeholder="Target Attacker IP (e.g. 198.51.100.99)" style="width: 220px;" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
-          <button class="btn btn-red" onclick="executeSOARAction('XDP_BLACKHOLE')">⚡ Enforce Fleet-Wide XDP Drop</button>
-          <button class="btn btn-orange" onclick="executeSOARAction('TARPIT_TRAP')">🕳️ Route TCP to Zero-Window Tarpit</button>
-          <button class="btn btn-cyan" onclick="executeSOARAction('ISOLATE_HOST')">🛡️ Isolate Compromised Node</button>
-          <button class="btn btn-green" onclick="executeSOARAction('WHITELIST_IP')">🔓 Unban & Whitelist IP</button>
+          <button class="btn btn-red" onclick="executeSOARAction('XDP_BLACKHOLE')">[XDP_DROP] Enforce Drop</button>
+          <button class="btn btn-orange" onclick="executeSOARAction('TARPIT_TRAP')">[TARPIT] Zero-Window</button>
+          <button class="btn btn-accent" onclick="executeSOARAction('ISOLATE_HOST')">[ISOLATE] Node Service</button>
+          <button class="btn btn-green" onclick="executeSOARAction('WHITELIST_IP')">[ALLOW] Unban & Whitelist</button>
         </div>
       </div>
 
       <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; flex: 1;">
         <!-- Curated Playbook Catalog -->
         <div class="card" style="overflow-y: auto;">
-          <div class="card-title">Curated Incident Playbook Catalog</div>
-          <div id="playbookCatalogList" style="display: flex; flex-direction: column; gap: 10px;">
+          <div class="card-title">Live SOAR Playbook Catalog</div>
+          <div id="playbookCatalogList" style="display: flex; flex-direction: column; gap: 8px;">
             <!-- Rendered playbooks -->
           </div>
         </div>
@@ -622,10 +832,10 @@
         <!-- Active Execution Runs -->
         <div class="card" style="overflow-y: auto;">
           <div class="card-title">
-            <span>Live Playbook Execution Instances</span>
-            <button class="btn" style="padding: 2px 6px;" onclick="fetchSOARRuns()">🔄 Refresh Runs</button>
+            <span>Real-Time Execution Instances</span>
+            <button class="btn" style="padding: 2px 6px;" onclick="fetchSOARRuns()">REFRESH RUNS</button>
           </div>
-          <div id="playbookRunsList" style="display: flex; flex-direction: column; gap: 12px;">
+          <div id="playbookRunsList" style="display: flex; flex-direction: column; gap: 10px;">
             <div style="color: var(--text-muted); padding: 12px; text-align: center;">No active execution runs</div>
           </div>
         </div>
@@ -636,10 +846,12 @@
     <div id="tab-rules" class="tab-pane">
       <div class="toolbar">
         <div class="toolbar-left">
+          <input type="text" id="ruleSearchFilter" class="input-box" placeholder="Search rules (e.g. revshell, sqli, T1059)..." style="width: 240px;" oninput="applyRulesFilter()">
           <span style="color: var(--text-muted); font-size: 11px;">In-Memory Compiled SigmaHQ & Curated Rulepack</span>
         </div>
         <div class="toolbar-right">
-          <button class="btn btn-cyan" onclick="openRuleModal()">➕ Submit Custom Sigma Rule (YAML)</button>
+          <button class="btn btn-green" onclick="triggerRulesSync()">[SYNC] Pull Latest SigmaHQ</button>
+          <button class="btn btn-accent" onclick="openRuleModal()">[ADD] Custom YAML Rule</button>
         </div>
       </div>
 
@@ -647,13 +859,14 @@
         <table>
           <thead>
             <tr>
-              <th style="width: 50px;">STATE</th>
+              <th style="width: 45px;">STATE</th>
+              <th style="width: 75px;">ORIGIN</th>
               <th style="width: 140px;">RULE ID</th>
               <th style="width: 220px;">RULE TITLE</th>
               <th style="width: 70px;">SEVERITY</th>
-              <th style="width: 60px;">SCORE</th>
-              <th style="width: 90px;">MITRE ID</th>
-              <th style="width: 80px;">SCOPE</th>
+              <th style="width: 55px;">SCORE</th>
+              <th style="width: 85px;">MITRE ID</th>
+              <th style="width: 70px;">SCOPE</th>
               <th>DESCRIPTION</th>
             </tr>
           </thead>
@@ -695,18 +908,18 @@
           <div class="card-title">SIEM Platform Parameters</div>
           <div style="display: flex; flex-direction: column; gap: 10px;">
             <div>
-              <label style="color: var(--text-muted); font-size: 10px; display: block; margin-bottom: 3px;">gRPC INGESTION BIND ADDRESS</label>
+              <label style="color: var(--text-muted); font-size: 10px; display: block; margin-bottom: 2px;">gRPC INGESTION BIND ADDRESS</label>
               <input type="text" id="cfgGRPC" class="input-box" style="width: 100%;" value="0.0.0.0:8443" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
             </div>
             <div>
-              <label style="color: var(--text-muted); font-size: 10px; display: block; margin-bottom: 3px;">IPINFO.IO THREAT INTEL API TOKEN</label>
+              <label style="color: var(--text-muted); font-size: 10px; display: block; margin-bottom: 2px;">IPINFO.IO THREAT INTEL API TOKEN</label>
               <input type="text" id="cfgIPInfo" class="input-box" style="width: 100%;" placeholder="Default public fallback active" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
             </div>
             <div>
-              <label style="color: var(--text-muted); font-size: 10px; display: block; margin-bottom: 3px;">SOAR AUTONOMOUS BAN THREAT SCORE THRESHOLD (DEFAULT: 80)</label>
+              <label style="color: var(--text-muted); font-size: 10px; display: block; margin-bottom: 2px;">SOAR AUTONOMOUS BAN THREAT SCORE THRESHOLD</label>
               <input type="number" id="cfgAutoban" class="input-box" style="width: 100%;" value="80" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
             </div>
-            <button class="btn btn-cyan" style="align-self: flex-start;" onclick="saveConfig()">💾 Save Runtime Settings</button>
+            <button class="btn btn-accent" style="align-self: flex-start;" onclick="saveConfig()">Save Runtime Settings</button>
           </div>
         </div>
       </div>
@@ -715,11 +928,11 @@
       <div class="card">
         <div class="card-title">
           <span>Global Protected Infrastructure Whitelist (Never Scored / Banned)</span>
-          <span style="font-size: 11px; color: var(--green);">Recursive Resolvers, RFC1918, CGNAT, Tailscale Overlay</span>
+          <span style="font-size: 10px; color: var(--green);">Recursive Resolvers, RFC1918, CGNAT, Tailscale Overlay</span>
         </div>
-        <div style="display: flex; gap: 10px; align-items: center;">
+        <div style="display: flex; gap: 8px; align-items: center;">
           <input type="text" id="whitelistCIDRInput" class="input-box" placeholder="Add Custom CIDR (e.g. 10.100.0.0/16 or 1.2.3.4)" style="width: 280px;" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
-          <button class="btn btn-green" onclick="addWhitelistCIDR()">🛡️ Add Protected CIDR</button>
+          <button class="btn btn-green" onclick="addWhitelistCIDR()">Add Protected CIDR</button>
         </div>
         <div id="whitelistTags" style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px;">
           <!-- Whitelist badges -->
@@ -729,110 +942,151 @@
 
   </main>
 
-  <!-- Incident Payload Inspector Drawer -->
+  <!-- Forensic Slide-Over Drawer -->
   <div id="drawer">
     <div class="drawer-header">
       <div style="display: flex; align-items: center; gap: 8px;">
-        <span style="font-weight: 700; color: var(--accent);" id="drawerTitle">INCIDENT INSPECTOR</span>
-        <span id="drawerScoreBadge" class="badge badge-crit">SCORE 95</span>
-        <span id="drawerMitreBadge" class="badge badge-mitre">T1190</span>
-        <span id="drawerISOBadge" class="badge badge-iso">[NL]</span>
+        <span style="font-weight: 700; color: var(--accent);" id="drawerTitle">FORENSIC INSPECTOR</span>
+        <span id="drawerScoreBadge" class="badge badge-crit">[CRIT] 95</span>
+        <span id="drawerMitreBadge" class="badge badge-mitre">[T1190]</span>
+        <span id="drawerISOBadge" class="badge badge-iso">[LOCAL]</span>
       </div>
-      <button class="btn" onclick="closeDrawer()">✕ Close</button>
+      <button class="btn" onclick="closeDrawer()">[CLOSE]</button>
     </div>
     <div class="drawer-body">
-      <!-- Root Cause & Evidence Analysis -->
-      <div class="card" style="border-color: var(--accent); background: rgba(88, 166, 255, 0.03);">
-        <div style="color: var(--accent); font-size: 11px; font-weight: 700; text-transform: uppercase;">🔍 Root Cause & Evidence Analysis</div>
-        <div id="drawerRootCause" style="font-size: 11px; line-height: 1.6; color: var(--text);">
-          <!-- Dynamic evidence analysis -->
+      <!-- 1. IPinfo Metadata Box (LRU Cached Live Lookup) -->
+      <div class="card" style="border-color: var(--accent); background: rgba(56, 189, 248, 0.03);">
+        <div class="card-title">
+          <span>Threat Intelligence & IPinfo Metadata</span>
+          <span id="drawerIPInfoStatus" style="font-size: 10px; color: var(--text-dim);">SYNCED</span>
         </div>
-      </div>
-
-      <!-- Forensic KV Table -->
-      <div>
-        <div style="color: var(--text-muted); font-size: 10px; font-weight: 700; margin-bottom: 6px; text-transform: uppercase;">Forensic Incident Metadata</div>
-        <table class="kv-table card">
+        <table class="kv-table">
           <tbody>
-            <tr><td>Target Node</td><td id="dNode">-</td></tr>
-            <tr><td>Client IP</td><td id="dIP">-</td></tr>
-            <tr><td>Geo Location</td><td id="dGeo">-</td></tr>
-            <tr><td>Source Subsystem</td><td id="dSource">-</td></tr>
-            <tr><td>Detection Rule</td><td id="dRule">-</td></tr>
-            <tr><td>Timestamp</td><td id="dTime">-</td></tr>
+            <tr><td>SOURCE IP / HOST</td><td id="dIP" style="font-weight: 700; color: var(--accent);">127.0.0.1</td></tr>
+            <tr><td>ORGANIZATION / ISP</td><td id="dOrg">Loading IP intelligence...</td></tr>
+            <tr><td>ASN ROUTING</td><td id="dASN">-</td></tr>
+            <tr><td>GEOGRAPHY / CITY</td><td id="dGeo">-</td></tr>
+            <tr><td>DATACENTER / PROXY</td><td id="dHosting"><span class="badge badge-iso">[STANDARD]</span></td></tr>
           </tbody>
         </table>
       </div>
 
-      <!-- Raw Log Terminal Box -->
-      <div>
-        <div class="terminal-header">
-          <span>RAW TELEMETRY PAYLOAD</span>
+      <!-- 2. Evidence Analysis Table (Matched substrings, target URLs, process commandlines) -->
+      <div class="card">
+        <div class="card-title">Evidence & Offending Payload Analysis</div>
+        <table class="kv-table">
+          <tbody>
+            <tr><td>OFFENDING SUBSTRING</td><td id="dEvidencePayload" style="color: var(--red); font-weight: 600;">-</td></tr>
+            <tr><td>TARGET URI / URL</td><td id="dEvidenceURI" style="color: var(--cyan);">-</td></tr>
+            <tr><td>PROCESS COMMAND LINE</td><td id="dEvidenceCmd" style="color: #7ee787;">-</td></tr>
+            <tr><td>PID / SUBSYSTEM</td><td id="dEvidenceProc">-</td></tr>
+            <tr><td>RULE MATCHED</td><td id="dRule" style="color: var(--accent);">-</td></tr>
+            <tr><td>EVENT TIMESTAMP</td><td id="dTime" style="color: var(--text-muted);">-</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- 3. Raw Log Console (Syntax-highlighted viewer + Copy / Prettify) -->
+      <div class="card">
+        <div class="card-title">
+          <span>Raw Telemetry Log Console</span>
           <div style="display: flex; gap: 6px;">
-            <button class="btn" style="padding: 2px 6px;" onclick="copyRawLog()">📋 Copy</button>
-            <button class="btn" style="padding: 2px 6px;" onclick="prettifyRawLog()">✨ Prettify</button>
+            <button class="btn" style="padding: 2px 6px;" onclick="copyRawLog()">[Copy Raw]</button>
+            <button class="btn" style="padding: 2px 6px;" onclick="prettifyRawLog()">[Format JSON]</button>
           </div>
         </div>
-        <div class="terminal-box" id="dRaw">-</div>
+        <div class="terminal-box" id="dRaw"></div>
       </div>
 
-      <!-- Contextual MITRE Investigation Checklist & Commands -->
-      <div>
-        <div style="color: var(--text-muted); font-size: 10px; font-weight: 700; margin-bottom: 6px; text-transform: uppercase;">Contextual MITRE Triage Checklist & CLI Commands</div>
-        <div class="card" id="drawerCommandsList" style="gap: 8px;">
-          <!-- Dynamically populated based on MITRE technique -->
+      <!-- 4. Contextual MITRE Investigation Runbook Checklist -->
+      <div class="card">
+        <div class="card-title">
+          <span>Contextual Investigation Runbook</span>
+          <span id="drawerMitreTechniqueLabel" style="font-size: 10px; color: var(--purple);">[T1190]</span>
         </div>
+        <div id="drawerCommandsList" style="display: flex; flex-direction: column; gap: 8px;"></div>
       </div>
 
-      <!-- Persistent Analyst Notes -->
-      <div>
-        <div style="color: var(--text-muted); font-size: 10px; font-weight: 700; margin-bottom: 6px; text-transform: uppercase;">Analyst Notes (Persisted to SQLite)</div>
-        <textarea id="drawerNotes" class="input-box" rows="3" style="width: 100%; resize: vertical;" placeholder="Add investigative triage notes or containment rationale..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
-        <button class="btn btn-cyan" style="margin-top: 6px;" onclick="saveDrawerNotes()">💾 Save Analyst Note</button>
+      <!-- 5. Analyst Case Notes (Saved directly to SQLite via /api/alerts/notes) -->
+      <div class="card">
+        <div class="card-title">Analyst Incident Notes (SQLite Persisted)</div>
+        <textarea id="drawerNotes" class="input-box" rows="3" style="width: 100%; font-family: inherit; font-size: 11px;" placeholder="Add forensic observation notes..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
+        <button class="btn btn-accent" style="align-self: flex-start;" onclick="saveDrawerNotes()">Save Notes</button>
       </div>
 
-      <!-- Quick Triage Mitigation Actions -->
-      <div>
-        <div style="color: var(--text-muted); font-size: 10px; font-weight: 700; margin-bottom: 6px; text-transform: uppercase;">One-Click Remediation</div>
+      <!-- Quick Triage Action Footer -->
+      <div class="card" style="border-color: var(--border-accent);">
+        <div class="card-title">Immediate Mitigation Actions</div>
         <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-          <button class="btn btn-red" onclick="quickDrawerBan()">⚡ Fleet-Wide XDP Drop</button>
-          <button class="btn btn-orange" onclick="quickDrawerTarpit()">🕳️ Route to Tarpit</button>
-          <button class="btn btn-green" onclick="quickDrawerWhitelist()">🛡️ Whitelist IP</button>
+          <button class="btn btn-red" onclick="quickDrawerBan()">[XDP_DROP] Enforce Ban</button>
+          <button class="btn btn-orange" onclick="quickDrawerTarpit()">[TARPIT] Zero-Window</button>
+          <button class="btn btn-green" onclick="quickDrawerWhitelist()">[ALLOW] Whitelist IP</button>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- Launch Playbook Target IP Prompt Modal -->
-  <div id="playbookModal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.75); z-index: 2000; align-items: center; justify-content: center;">
+  <!-- Active Quarantine Vault Modal -->
+  <div id="quarantineModal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 2000; align-items: center; justify-content: center;">
+    <div class="card" style="width: 760px; max-height: 80vh;">
+      <div class="card-title">
+        <span>Active Kernel XDP Quarantine Vault</span>
+        <button class="btn" onclick="closeQuarantineModal()">[X]</button>
+      </div>
+      <div style="color: var(--text-muted); font-size: 11px;">Kernel eBPF XDP Fast-Path Drop Active Banned IPs & Remaining Quarantine TTL:</div>
+      <div class="table-container" style="max-height: 380px; margin-top: 6px;">
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 130px;">BANNED IP</th>
+              <th style="width: 80px;">REASON</th>
+              <th style="width: 120px;">BANNED AT</th>
+              <th style="width: 110px;">REMAINING TTL</th>
+              <th style="width: 90px; text-align: right;">ACTION</th>
+            </tr>
+          </thead>
+          <tbody id="quarantineTableBody">
+            <tr><td colspan="5" style="text-align: center; color: var(--text-muted); padding: 18px;">No active quarantined IPs</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px;">
+        <button class="btn" onclick="closeQuarantineModal()">Close</button>
+        <button class="btn btn-accent" onclick="fetchQuarantineBans()">Refresh Vault</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Launch Playbook Modal -->
+  <div id="playbookModal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 2000; align-items: center; justify-content: center;">
     <div class="card" style="width: 440px;">
       <div class="card-title">
         <span id="pbModalTitle">Launch SOAR Playbook</span>
-        <button class="btn" onclick="closePlaybookModal()">✕</button>
+        <button class="btn" onclick="closePlaybookModal()">[X]</button>
       </div>
       <div style="color: var(--text-muted); font-size: 11px;" id="pbModalDesc">Specify target node or attacker IP to contain:</div>
       <div>
-        <label style="color: var(--text-muted); font-size: 10px; display: block; margin-bottom: 3px;">TARGET IP / HOSTNAME</label>
+        <label style="color: var(--text-muted); font-size: 10px; display: block; margin-bottom: 2px;">TARGET IP / HOSTNAME</label>
         <input type="text" id="pbModalTargetIP" class="input-box" style="width: 100%;" placeholder="e.g. 198.51.100.99 or 127.0.0.1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
       </div>
-      <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px;">
+      <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px;">
         <button class="btn" onclick="closePlaybookModal()">Cancel</button>
-        <button class="btn btn-red" onclick="confirmLaunchPlaybook()">⚡ Launch Run</button>
+        <button class="btn btn-red" onclick="confirmLaunchPlaybook()">Launch Run</button>
       </div>
     </div>
   </div>
 
   <!-- Submit Sigma Rule Modal -->
-  <div id="ruleModal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.75); z-index: 2000; align-items: center; justify-content: center;">
+  <div id="ruleModal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 2000; align-items: center; justify-content: center;">
     <div class="card" style="width: 600px; max-height: 80vh;">
       <div class="card-title">
         <span>Submit Custom SigmaHQ Rule (YAML)</span>
-        <button class="btn" onclick="closeRuleModal()">✕</button>
+        <button class="btn" onclick="closeRuleModal()">[X]</button>
       </div>
-      <textarea id="customRuleYAML" class="input-box" rows="14" style="width: 100%; font-family: inherit; font-size: 11px;" placeholder="title: Suspicious Web Shell Execution&#10;id: custom-webshell&#10;level: critical&#10;detection:&#10;  selection:&#10;    _raw|contains: 'c99.php'&#10;  condition: selection" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
+      <textarea id="customRuleYAML" class="input-box" rows="14" style="width: 100%; font-family: inherit; font-size: 11px;" placeholder="title: Suspicious Web Shell Execution&#10;id: custom-webshell&#10;level: critical&#10;detection:&#10;  selection:&#10;    raw|contains: 'c99.php'&#10;  condition: selection" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
       <div style="display: flex; justify-content: flex-end; gap: 8px;">
         <button class="btn" onclick="closeRuleModal()">Cancel</button>
-        <button class="btn btn-cyan" onclick="submitCustomRule()">Compile & Load Rule</button>
+        <button class="btn btn-accent" onclick="submitCustomRule()">Compile & Load Rule</button>
       </div>
     </div>
   </div>
@@ -840,7 +1094,7 @@
   <!-- Toast Notification Container -->
   <div id="toast-container"></div>
 
-  <!-- Core Dashboard Application Script -->
+  <!-- Core Dashboard, Routing & SOAR Execution Application Script -->
   <script>
     // State
     let ws = null;
@@ -851,61 +1105,145 @@
     let lastToasts = new Map();
     let telemetryEvents = [];
     let activeAlertsList = [];
+    let allRulesList = [];
     let pendingLaunchPB = null;
 
-    // Normalization Helpers
+    // LRU IPInfo Cache
+    const ipinfoCache = new Map();
+
+    // Layer counters
+    let layerCounts = { WAF: 0, EDR: 0, AUTH: 0, NET: 0 };
+    let severityCounts = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, INFO: 0 };
+    let actorMap = new Map();
+
+    // Standardized Badge Helpers (No Emojis)
     function getISOBadge(code) {
       if (!code || code === "-" || code === "LOC" || code === "LOCAL") return `<span class="badge badge-iso">[LOCAL]</span>`;
       return `<span class="badge badge-iso">[${String(code).toUpperCase()}]</span>`;
     }
 
-    function getScoreBadge(score) {
+    function getLayerBadge(layer) {
+      const l = String(layer || 'NET').toUpperCase();
+      return `<span class="badge badge-layer">[${l}]</span>`;
+    }
+
+    function getSeverityBadge(sev, score) {
+      const s = String(sev || '').toUpperCase();
       const num = Number(score) || 0;
-      if (num >= 80) return `<span class="badge badge-crit">${num} CRIT</span>`;
-      if (num >= 60) return `<span class="badge badge-high">${num} HIGH</span>`;
-      if (num >= 35) return `<span class="badge badge-med">${num} MED</span>`;
-      return `<span class="badge badge-low">${num} LOW</span>`;
+      if (s === 'CRITICAL' || num >= 85) return `<span class="badge badge-crit">[CRIT] ${num}</span>`;
+      if (s === 'HIGH' || num >= 60) return `<span class="badge badge-high">[HIGH] ${num}</span>`;
+      if (s === 'MEDIUM' || num >= 30) return `<span class="badge badge-med">[MED] ${num}</span>`;
+      return `<span class="badge badge-info">[INFO] ${num}</span>`;
+    }
+
+    function getContainmentBadge(state) {
+      const st = String(state || 'ACTIVE').toUpperCase();
+      if (st.includes('XDP') || st.includes('BAN') || st.includes('DROP')) return `<span class="badge badge-xdp">[XDP_DROP]</span>`;
+      if (st.includes('TARPIT')) return `<span class="badge badge-tarpit">[TARPIT]</span>`;
+      if (st.includes('HOST')) return `<span class="badge badge-layer">[HOST_CONTAINED]</span>`;
+      return `<span class="badge badge-active">[ACTIVE]</span>`;
     }
 
     function normalizeEvent(raw) {
       if (!raw) return {};
       const score = raw.threat_score !== undefined ? raw.threat_score : (raw.score !== undefined ? raw.score : (raw.peak_score !== undefined ? raw.peak_score : 0));
-      const ip = raw.client_ip || raw.target_ip || raw.ip || raw.src_ip || "-";
-      const rule = raw.rule_id || raw.rule_identifier || raw.rule || raw.rule_name || "SECURITY_ALERT";
-      const mitre = raw.mitre_technique_id || raw.mitre_id || raw.mitre || "";
-      const timeMs = raw.timestamp_ms || raw.timestamp || raw.first_seen_ms || raw.last_seen_ms || Date.now();
-      const country = raw.country_code || raw.country || raw.geo_country || "LOC";
-      const containment = raw.containment_state || (raw.is_banned ? "BANNED (XDP)" : (raw.is_host_local ? "HOST CONTAINED" : "UNMITIGATED"));
+      const ip = raw.source_ip || raw.client_ip || raw.target_ip || raw.ip || raw.src_ip || "-";
+      const rule = raw.rule_matched || raw.rule_id || raw.rule_identifier || raw.rule || "SECURITY_EVENT";
+      const mitre = raw.mitre_id || raw.mitre_technique_id || raw.mitre || "";
+      const timeMs = raw.timestamp_ms || (raw.timestamp ? new Date(raw.timestamp).getTime() : Date.now());
+      const country = raw.country_code || raw.country || "LOC";
+      const layer = raw.layer || (raw.source ? normalizeLayerName(raw.source) : "NET");
+      const severity = raw.severity || (score >= 85 ? "CRITICAL" : (score >= 60 ? "HIGH" : (score >= 30 ? "MEDIUM" : "INFO")));
+      const containment = raw.containment_state || (raw.is_banned ? "XDP_DROP" : (raw.is_host_local ? "HOST_CONTAINED" : "ACTIVE"));
 
       return {
-        id: raw.id || raw.event_id || raw.incident_id || 0,
-        node_id: raw.node_id || "node-edge-primary",
-        source: raw.source || "telemetry",
-        raw_line: raw.raw_line || raw.raw || raw.message || raw.payload || "",
+        id: raw.id || 0,
+        node_id: raw.source_node || raw.node_id || "node-vds",
+        source: raw.source || layer.toLowerCase(),
+        layer: layer,
+        raw_line: raw.raw_payload || raw.raw_line || raw.raw || raw.message || "",
+        source_ip: ip,
         client_ip: ip,
+        source_port: raw.source_port || 0,
+        dest_ip: raw.dest_ip || "",
+        dest_port: raw.dest_port || 0,
+        protocol: raw.protocol || "TCP",
         status_code: raw.status_code || 0,
         timestamp_ms: timeMs,
+        rule_matched: rule,
         rule_id: rule,
+        mitre_id: mitre,
         mitre_technique_id: mitre,
         threat_score: Number(score),
-        threat_tier: raw.threat_tier || (Number(score) >= 80 ? "CRITICAL" : (Number(score) >= 60 ? "HIGH" : "NORMAL")),
+        severity: severity,
         country_code: country,
         country_name: raw.country_name || (country === "LOC" ? "Local Infrastructure" : ""),
         city: raw.city || "",
         asn: raw.asn || "",
         containment_state: containment,
-        is_host_local: raw.is_host_local || ip === "127.0.0.1" || ip === "local",
-        analyst_notes: raw.analyst_notes || raw.notes || "",
+        is_host_local: raw.is_host_local || ip === "127.0.0.1" || ip === "::1" || ip === "local",
+        analyst_notes: raw.analyst_notes || "",
         score_breakdown: raw.score_breakdown || ""
       };
     }
 
-    // Tab Switching
+    function normalizeLayerName(src) {
+      const s = String(src || '').toLowerCase();
+      if (s.includes('nginx') || s.includes('waf') || s.includes('web') || s.includes('http')) return 'WAF';
+      if (s.includes('edr') || s.includes('ebpf') || s.includes('fim') || s.includes('audit')) return 'EDR';
+      if (s.includes('auth') || s.includes('ssh') || s.includes('pam') || s.includes('login')) return 'AUTH';
+      return 'NET';
+    }
+
+    // Client-Side Router with Interactive View Filtering
+    function navigateTo(tabId, filterParams = {}) {
+      switchTab(tabId);
+
+      if (tabId === 'telemetry') {
+        if (filterParams.layer) {
+          const srcSelect = document.getElementById('filterSource');
+          if (srcSelect) {
+            srcSelect.value = filterParams.layer.toLowerCase();
+            applyTelemetryFilter();
+          }
+        }
+        if (filterParams.source_ip) {
+          const filterInput = document.getElementById('telemetryFilter');
+          if (filterInput) {
+            filterInput.value = filterParams.source_ip;
+            applyTelemetryFilter();
+          }
+        }
+        if (filterParams.severity) {
+          const tierSelect = document.getElementById('filterTier');
+          if (tierSelect) {
+            tierSelect.value = filterParams.severity.toUpperCase();
+            applyTelemetryFilter();
+          }
+        }
+      } else if (tabId === 'alerts') {
+        if (filterParams.source_ip) {
+          const alertFilter = document.getElementById('alertsFilter');
+          if (alertFilter) {
+            alertFilter.value = filterParams.source_ip;
+            applyAlertsFilter();
+          }
+        }
+        if (filterParams.severity) {
+          const sevFilter = document.getElementById('alertsSeverityFilter');
+          if (sevFilter) {
+            sevFilter.value = filterParams.severity.toUpperCase();
+            applyAlertsFilter();
+          }
+        }
+      }
+    }
+
     function switchTab(tabId) {
       document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
       document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
 
-      const btn = Array.from(document.querySelectorAll('.tab-btn')).find(b => b.getAttribute('onclick')?.includes(tabId));
+      const btn = Array.from(document.querySelectorAll('.tab-btn')).find(b => b.getAttribute('onclick')?.includes(`'${tabId}'`));
       if (btn) btn.classList.add('active');
 
       const pane = document.getElementById(`tab-${tabId}`);
@@ -958,8 +1296,10 @@
       } else if (type === 'event') {
         const ev = normalizeEvent(payload);
         appendTelemetryRow(ev);
+        updateDashboardAggregates(ev);
+
         if (ev.threat_score >= 80) {
-          showToast(`🚨 High Threat: ${ev.rule_id} from ${ev.client_ip}`, 'crit');
+          showToast(`[ALERT] ${ev.rule_id} from ${ev.source_ip}`, 'crit');
           fetchAlerts();
         }
       } else if (type === 'PLAYBOOK_RUN_UPDATE' || type === 'soar_playbook_run') {
@@ -968,7 +1308,101 @@
         else if (payload.run) fetchSOARRuns();
       } else if (type === 'ban_change') {
         const ip = payload.ban?.ip || 'IP';
-        showToast(`⚡ XDP Quarantine ${String(payload.action).toUpperCase()}: ${ip}`, 'ok');
+        showToast(`[XDP_DROP] Quarantine ${String(payload.action).toUpperCase()}: ${ip}`, 'ok');
+        fetchQuarantineBans();
+      }
+    }
+
+    // Dashboard State Updates
+    function updateDashboardAggregates(ev) {
+      // 1. Severity Counter
+      const sev = ev.severity || 'INFO';
+      if (severityCounts[sev] !== undefined) severityCounts[sev]++;
+      else severityCounts.INFO++;
+
+      document.getElementById('dashCritCount').textContent = severityCounts.CRITICAL || 0;
+      document.getElementById('dashHighCount').textContent = severityCounts.HIGH || 0;
+      document.getElementById('dashMedCount').textContent = severityCounts.MEDIUM || 0;
+      document.getElementById('dashInfoCount').textContent = severityCounts.INFO || 0;
+
+      // 2. Layer Counter
+      const lyr = ev.layer || 'NET';
+      if (layerCounts[lyr] !== undefined) layerCounts[lyr]++;
+      else layerCounts.NET++;
+
+      document.getElementById('hitsWAF').textContent = layerCounts.WAF || 0;
+      document.getElementById('hitsEDR').textContent = layerCounts.EDR || 0;
+      document.getElementById('hitsAUTH').textContent = layerCounts.AUTH || 0;
+      document.getElementById('hitsNET').textContent = layerCounts.NET || 0;
+
+      // 3. Top Actor Counter (Ignore loopback)
+      if (ev.source_ip && ev.source_ip !== '-' && ev.source_ip !== '127.0.0.1' && ev.source_ip !== '::1') {
+        let actor = actorMap.get(ev.source_ip) || {
+          ip: ev.source_ip,
+          country_code: ev.country_code,
+          hits: 0,
+          peak_score: 0,
+          containment_state: ev.containment_state
+        };
+        actor.hits++;
+        if (ev.threat_score > actor.peak_score) actor.peak_score = ev.threat_score;
+        actor.containment_state = ev.containment_state;
+        actorMap.set(ev.source_ip, actor);
+        renderTopActors();
+      }
+
+      // 4. Recent Incident Feed (if score >= 60 or mitre present)
+      if (ev.threat_score >= 60 || ev.mitre_id) {
+        appendDashboardRecentFeed(ev);
+      }
+    }
+
+    function renderTopActors() {
+      const sorted = Array.from(actorMap.values()).sort((a, b) => b.hits - a.hits).slice(0, 5);
+      const tbody = document.getElementById('dashTopActorsBody');
+      if (sorted.length === 0) return;
+
+      tbody.innerHTML = '';
+      sorted.forEach(act => {
+        const tr = document.createElement('tr');
+        tr.style.cursor = 'pointer';
+        tr.onclick = () => navigateTo('alerts', { source_ip: act.ip });
+        tr.innerHTML = `
+          <td style="font-weight: 600; color: var(--text);">${act.ip}</td>
+          <td>${getISOBadge(act.country_code)}</td>
+          <td style="font-weight: 600;">${act.hits}</td>
+          <td>${getSeverityBadge('', act.peak_score)}</td>
+          <td>${getContainmentBadge(act.containment_state)}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    function appendDashboardRecentFeed(ev) {
+      const tbody = document.getElementById('dashRecentFeedBody');
+      if (tbody.children.length === 1 && tbody.children[0].textContent.includes('Awaiting')) {
+        tbody.innerHTML = '';
+      }
+
+      const tr = document.createElement('tr');
+      tr.style.cursor = 'pointer';
+      tr.onclick = () => openDrawer(ev);
+
+      const d = new Date(ev.timestamp_ms);
+      const timeStr = d.toTimeString().split(' ')[0];
+
+      tr.innerHTML = `
+        <td style="color: var(--text-muted);">${timeStr}</td>
+        <td>${getISOBadge(ev.country_code)}</td>
+        <td style="font-weight: 600; color: var(--text);">${ev.source_ip}</td>
+        <td>${getSeverityBadge(ev.severity, ev.threat_score)}</td>
+        <td>${ev.mitre_id ? `<span class="badge badge-mitre">[${ev.mitre_id}]</span>` : '-'}</td>
+        <td style="color: var(--cyan);">${escapeHTML(ev.rule_matched)}</td>
+      `;
+
+      tbody.insertBefore(tr, tbody.firstChild);
+      while (tbody.children.length > 8) {
+        tbody.removeChild(tbody.lastChild);
       }
     }
 
@@ -989,12 +1423,12 @@
       tr.innerHTML = `
         <td style="color: var(--text-muted);">${timeStr}</td>
         <td>${getISOBadge(ev.country_code)}</td>
-        <td style="font-weight: 600; color: var(--text);">${ev.client_ip}</td>
-        <td style="color: var(--text-muted);">${ev.source}</td>
+        <td style="font-weight: 600; color: var(--text);">${ev.source_ip}</td>
+        <td>${getLayerBadge(ev.layer)}</td>
         <td>${ev.status_code || '-'}</td>
-        <td>${getScoreBadge(ev.threat_score)}</td>
-        <td>${ev.mitre_technique_id ? `<span class="badge badge-mitre">${ev.mitre_technique_id}</span>` : '-'}</td>
-        <td style="color: var(--cyan);">${ev.rule_id}</td>
+        <td>${getSeverityBadge(ev.severity, ev.threat_score)}</td>
+        <td>${ev.mitre_id ? `<span class="badge badge-mitre">[${ev.mitre_id}]</span>` : '-'}</td>
+        <td style="color: var(--cyan);">${escapeHTML(ev.rule_matched)}</td>
         <td style="max-width: 380px; overflow: hidden; text-overflow: ellipsis; color: var(--text-muted);">${escapeHTML(ev.raw_line)}</td>
       `;
 
@@ -1011,7 +1445,7 @@
 
     function toggleAutoScroll() {
       autoScroll = !autoScroll;
-      document.getElementById('btnAutoScroll').textContent = autoScroll ? '⏸️ Auto-Scroll: ON' : '▶️ Auto-Scroll: OFF';
+      document.getElementById('btnAutoScroll').textContent = autoScroll ? 'AUTO-SCROLL: ON' : 'AUTO-SCROLL: OFF';
     }
 
     function clearTelemetryFeed() {
@@ -1023,16 +1457,15 @@
     function applyTelemetryFilter() {
       const q = document.getElementById('telemetryFilter').value.toLowerCase();
       const src = document.getElementById('filterSource').value.toLowerCase();
-      const tier = document.getElementById('filterTier').value;
+      const tier = document.getElementById('filterTier').value.toUpperCase();
 
       const rows = document.getElementById('telemetryTableBody').getElementsByTagName('tr');
       for (let r of rows) {
         const text = r.textContent.toLowerCase();
         let match = true;
         if (q && !text.includes(q)) match = false;
-        if (src && !text.includes(src)) match = false;
-        if (tier === 'CRITICAL' && !text.includes('crit')) match = false;
-        if (tier === 'HIGH' && !text.includes('high') && !text.includes('crit')) match = false;
+        if (src && !text.includes(`[${src}]`)) match = false;
+        if (tier && !text.includes(`[${tier.substring(0, 4)}]`)) match = false;
 
         r.style.display = match ? '' : 'none';
       }
@@ -1064,35 +1497,43 @@
         const d = new Date(a.timestamp_ms);
         const timeStr = d.toTimeString().split(' ')[0];
 
-        let containmentBadge = `<span class="badge badge-low">UNMITIGATED</span>`;
-        if (a.containment_state === 'BANNED (XDP)') {
-          containmentBadge = `<span class="badge badge-crit">BANNED (XDP)</span>`;
-        } else if (a.containment_state === 'HOST CONTAINED') {
-          containmentBadge = `<span class="badge badge-cyan">HOST CONTAINED</span>`;
-        }
-
         tr.innerHTML = `
           <td style="color: var(--text-muted);">${timeStr}</td>
           <td>${getISOBadge(a.country_code)}</td>
-          <td style="font-weight: 600; color: var(--text); cursor: pointer;" onclick="openDrawerFromAlert('${a.client_ip}')">${a.client_ip}</td>
-          <td>${getScoreBadge(a.threat_score)}</td>
-          <td>${a.mitre_technique_id ? `<span class="badge badge-mitre">${a.mitre_technique_id}</span>` : '-'}</td>
-          <td style="color: var(--cyan);">${a.rule_id}</td>
-          <td>${containmentBadge}</td>
+          <td style="font-weight: 600; color: var(--text); cursor: pointer;" onclick="openDrawerFromAlert('${a.source_ip}')">${a.source_ip}</td>
+          <td>${getSeverityBadge(a.severity, a.threat_score)}</td>
+          <td>${a.mitre_id ? `<span class="badge badge-mitre">[${a.mitre_id}]</span>` : '-'}</td>
+          <td style="color: var(--cyan);">${escapeHTML(a.rule_matched)}</td>
+          <td>${getContainmentBadge(a.containment_state)}</td>
           <td style="text-align: right;">
-            <button class="btn btn-red" onclick="triageAction('ban', '${a.client_ip}')">⚡ Ban</button>
-            <button class="btn btn-orange" onclick="triageAction('tarpit', '${a.client_ip}')">🕳️ Tarpit</button>
-            <button class="btn btn-cyan" onclick="openDrawerFromAlert('${a.client_ip}')">🔍 Inspect</button>
+            <button class="btn btn-red" onclick="triageAction('ban', '${a.source_ip}')">[BAN]</button>
+            <button class="btn btn-orange" onclick="triageAction('tarpit', '${a.source_ip}')">[TARPIT]</button>
+            <button class="btn btn-accent" onclick="openDrawerFromAlert('${a.source_ip}')">[INSPECT]</button>
           </td>
         `;
         tbody.appendChild(tr);
       });
     }
 
+    function applyAlertsFilter() {
+      const q = (document.getElementById('alertsFilter').value || '').toLowerCase();
+      const sev = (document.getElementById('alertsSeverityFilter').value || '').toUpperCase();
+
+      const rows = document.getElementById('alertsTableBody').getElementsByTagName('tr');
+      for (let r of rows) {
+        const text = r.textContent.toLowerCase();
+        let match = true;
+        if (q && !text.includes(q)) match = false;
+        if (sev && !text.includes(`[${sev.substring(0, 4)}]`)) match = false;
+
+        r.style.display = match ? '' : 'none';
+      }
+    }
+
     function openDrawerFromAlert(ip) {
-      const matched = activeAlertsList.find(a => a.client_ip === ip) || telemetryEvents.find(e => e.client_ip === ip);
+      const matched = activeAlertsList.find(a => a.source_ip === ip) || telemetryEvents.find(e => e.source_ip === ip);
       if (matched) openDrawer(matched);
-      else openDrawer({ client_ip: ip, threat_score: 85, mitre_technique_id: 'T1190', rule_id: 'Active Alert' });
+      else openDrawer({ source_ip: ip, threat_score: 85, mitre_id: 'T1190', rule_matched: 'Active Alert' });
     }
 
     async function triageAction(action, ip) {
@@ -1102,30 +1543,33 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action, ip })
         });
-        showToast(`Triage Action ${action.toUpperCase()} enforced for ${ip}`, 'ok');
+        showToast(`[ACTION] ${action.toUpperCase()} enforced on ${ip}`, 'ok');
         fetchAlerts();
       } catch (e) {}
     }
 
-    // SOAR Playbooks Engine
+    // SOAR Playbooks Engine & Execution Instances
     async function fetchSOARPlaybooks() {
       try {
-        const res = await fetch('/api/soar/playbooks');
+        const res = await fetch('/api/playbooks');
         const data = await res.json();
+        const list = Array.isArray(data.playbooks) ? data.playbooks : (Array.isArray(data) ? data : []);
+        document.getElementById('badgeSOAR').textContent = list.length;
         const catalogContainer = document.getElementById('playbookCatalogList');
         catalogContainer.innerHTML = '';
-        (data.playbooks || []).forEach(pb => {
+
+        list.forEach(pb => {
           const div = document.createElement('div');
           div.className = 'pb-step-card';
           div.innerHTML = `
             <div style="display: flex; justify-content: space-between; align-items: center;">
-              <span style="font-weight: 700; color: var(--accent);">${pb.id}: ${pb.name}</span>
-              <span class="badge badge-mitre">${pb.mitre_techniques?.join(', ') || ''}</span>
+              <span style="font-weight: 700; color: var(--accent);">${pb.id}: ${escapeHTML(pb.name)}</span>
+              <span class="badge badge-mitre">[${pb.mitre_techniques?.join(', ') || ''}]</span>
             </div>
-            <div style="color: var(--text-muted); font-size: 11px;">${pb.description}</div>
+            <div style="color: var(--text-muted); font-size: 11px;">${escapeHTML(pb.description)}</div>
             <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px;">
-              <span style="font-size: 10px; color: var(--text-dim);">SLA Target: ${pb.sla_target_seconds}s &bull; ${pb.steps?.length || 4} Steps</span>
-              <button class="btn btn-red" onclick="promptLaunchPlaybook('${pb.id}', '${escapeHTML(pb.name)}')">▶ Run Playbook</button>
+              <span style="font-size: 10px; color: var(--text-dim);">SLA: ${pb.sla_target_seconds}s &bull; ${pb.steps?.length || 4} Steps</span>
+              <button class="btn btn-red" onclick="promptLaunchPlaybook('${pb.id}', '${escapeHTML(pb.name)}')">Execute</button>
             </div>
           `;
           catalogContainer.appendChild(div);
@@ -1135,16 +1579,17 @@
 
     async function fetchSOARRuns() {
       try {
-        const res = await fetch('/api/soar/runs');
+        const res = await fetch('/api/playbooks/runs');
         const data = await res.json();
-        renderPlaybookRuns(data.runs || []);
+        const runs = Array.isArray(data.runs) ? data.runs : (Array.isArray(data) ? data : []);
+        renderPlaybookRuns(runs);
       } catch (e) {}
     }
 
     function renderPlaybookRuns(runs) {
       const runsContainer = document.getElementById('playbookRunsList');
       if (!runs || runs.length === 0) {
-        runsContainer.innerHTML = `<div style="color: var(--text-muted); padding: 12px; text-align: center;">No active execution runs</div>`;
+        runsContainer.innerHTML = `<div style="color: var(--text-muted); padding: 14px; text-align: center;">No active execution instances</div>`;
         return;
       }
       runsContainer.innerHTML = '';
@@ -1152,9 +1597,17 @@
       runs.forEach(run => {
         const isDone = run.status === 'COMPLETED';
         const isRunning = run.status === 'RUNNING' || run.status === 'IN_PROGRESS';
-        const cardClass = isDone ? 'pb-step-card completed-run' : 'pb-step-card active-run';
+        const isFailed = run.status === 'FAILED';
+        const cardClass = isDone ? 'pb-step-card completed-run' : (isFailed ? 'pb-step-card' : 'pb-step-card active-run');
 
         const elapsedSec = run.start_time_ms ? Math.floor((Date.now() - run.start_time_ms) / 1000) : 0;
+        const slaSeconds = run.sla_target_seconds || 60;
+        const remainingSLA = Math.max(0, slaSeconds - elapsedSec);
+
+        const statusBadge = isDone ? `<span class="badge badge-low">[COMPLETED]</span>` :
+                            (isFailed ? `<span class="badge badge-crit">[FAILED]</span>` :
+                            (isRunning ? `<span class="badge badge-high">[RUNNING]</span>` : `<span class="badge badge-iso">[PENDING]</span>`));
+
         const div = document.createElement('div');
         div.className = cardClass;
 
@@ -1162,20 +1615,21 @@
         (run.steps || []).forEach((s, idx) => {
           const stepDone = s.status === 'COMPLETED';
           const stepCurrent = idx === run.current_step_idx && isRunning;
-          const statusBadge = stepDone ? `<span class="badge badge-low">DONE</span>` : (stepCurrent ? `<span class="badge badge-high">ACTIVE</span>` : `<span class="badge badge-iso">PENDING</span>`);
+          const sBadge = stepDone ? `<span class="badge badge-low">[DONE]</span>` :
+                         (stepCurrent ? `<span class="badge badge-high">[ACTIVE]</span>` : `<span class="badge badge-iso">[PENDING]</span>`);
 
           stepsHTML += `
             <div class="step-item ${stepDone ? 'step-done' : (stepCurrent ? 'step-current' : '')}">
               <div style="display: flex; justify-content: space-between; align-items: center;">
-                <span style="font-weight: 600; font-size: 11px;">${s.badge || 'STEP ' + (idx+1)}: ${s.title}</span>
-                ${statusBadge}
+                <span style="font-weight: 600; font-size: 11px;">${s.badge || 'STEP ' + (idx+1)}: ${escapeHTML(s.title)}</span>
+                ${sBadge}
               </div>
-              <div style="font-size: 10px; color: var(--text-muted);">${s.description}</div>
-              ${s.output ? `<div style="font-size: 10px; color: #7ee787;">Output: ${escapeHTML(s.output)}</div>` : ''}
+              <div style="font-size: 10px; color: var(--text-muted);">${escapeHTML(s.description)}</div>
+              ${s.output ? `<div style="font-size: 10px; color: var(--accent);">Output: ${escapeHTML(s.output)}</div>` : ''}
               ${stepCurrent ? `
                 <div style="display: flex; gap: 6px; margin-top: 4px;">
-                  <button class="btn btn-green" style="padding: 2px 6px;" onclick="advancePlaybookStep('${run.run_id}', ${idx}, 'COMPLETED')">✓ Mark Step Complete</button>
-                  <button class="btn btn-orange" style="padding: 2px 6px;" onclick="copyText('${escapeHTML(s.command)}')">📋 Copy Step Cmd</button>
+                  <button class="btn btn-green" style="padding: 2px 6px;" onclick="advancePlaybookStep('${run.run_id}', ${idx}, 'COMPLETED')">Complete Step</button>
+                  <button class="btn btn-orange" style="padding: 2px 6px;" onclick="copyText('${escapeHTML(s.command)}')">Copy Cmd</button>
                 </div>
               ` : ''}
             </div>
@@ -1184,12 +1638,12 @@
 
         div.innerHTML = `
           <div style="display: flex; justify-content: space-between; align-items: center;">
-            <span style="font-weight: 700; color: ${isRunning ? 'var(--orange)' : 'var(--green)'};">${run.run_id} (${run.playbook_id})</span>
-            <span class="badge ${isRunning ? 'badge-high' : 'badge-low'}">${run.status}</span>
+            <span style="font-weight: 700; color: ${isRunning ? 'var(--orange)' : (isDone ? 'var(--green)' : 'var(--text)')};">${run.run_id} (${run.playbook_id})</span>
+            ${statusBadge}
           </div>
-          <div style="font-size: 11px;">Target: <strong>${run.target_ip}</strong> | Node: ${run.node_id} | Elapsed: ${elapsedSec}s</div>
+          <div style="font-size: 11px;">Target: <strong>${run.target_ip}</strong> &bull; Node: ${run.node_id} &bull; SLA Countdown: <strong>${remainingSLA}s</strong> remaining</div>
           <div style="color: var(--text-muted); font-size: 10px;">Trigger Reason: ${escapeHTML(run.trigger_reason)}</div>
-          <div style="display: flex; flex-direction: column; gap: 6px; margin-top: 4px;">
+          <div style="display: flex; flex-direction: column; gap: 4px; margin-top: 4px;">
             ${stepsHTML}
           </div>
         `;
@@ -1201,7 +1655,7 @@
       pendingLaunchPB = pbID;
       const topIP = document.getElementById('manualActionIP').value.trim();
       document.getElementById('pbModalTitle').textContent = `Launch Playbook: ${pbID}`;
-      document.getElementById('pbModalDesc').textContent = `Execute ${pbName} remediation workflow:`;
+      document.getElementById('pbModalDesc').textContent = `Execute ${pbName} containment workflow:`;
       document.getElementById('pbModalTargetIP').value = topIP || currentEventIP || '';
       document.getElementById('playbookModal').style.display = 'flex';
       document.getElementById('pbModalTargetIP').focus();
@@ -1218,18 +1672,17 @@
       closePlaybookModal();
 
       try {
-        const res = await fetch('/api/soar/execute', {
+        await fetch('/api/playbooks/execute', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             action_type: 'START_PLAYBOOK',
             playbook_id: pbID,
             target_ip: targetIP,
-            reason: `Manual Analyst Launch [${pbID}] on ${targetIP}`
+            reason: `Manual Operator Launch [${pbID}] on ${targetIP}`
           })
         });
-        const data = await res.json();
-        showToast(`Playbook ${pbID} launched successfully`, 'ok');
+        showToast(`[SOAR] Playbook ${pbID} launched on ${targetIP}`, 'ok');
         fetchSOARRuns();
       } catch (e) {
         showToast('Launch failed: ' + e.message, 'crit');
@@ -1238,7 +1691,7 @@
 
     async function advancePlaybookStep(runID, stepIdx, status) {
       try {
-        await fetch('/api/soar/execute', {
+        await fetch('/api/playbooks/execute', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -1248,7 +1701,7 @@
             output: `Step ${stepIdx + 1} verified by operator`
           })
         });
-        showToast(`Advanced Step ${stepIdx + 1} for ${runID}`, 'ok');
+        showToast(`[SOAR] Step ${stepIdx + 1} completed`, 'ok');
         fetchSOARRuns();
       } catch (e) {}
     }
@@ -1272,47 +1725,138 @@
       }
     }
 
-    // Detection Rules
-    async function fetchRules() {
+    // Active Quarantine Vault (Kernel XDP Banned IPs)
+    async function fetchQuarantineBans() {
       try {
-        const res = await fetch('/api/sigma/rules');
-        const rules = await res.json();
-        const tbody = document.getElementById('rulesTableBody');
+        const res = await fetch('/api/quarantine');
+        const bans = await res.json();
+        const tbody = document.getElementById('quarantineTableBody');
         tbody.innerHTML = '';
-        document.getElementById('badgeRules').textContent = rules.length;
 
-        rules.forEach(r => {
+        if (!bans || bans.length === 0) {
+          tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--text-muted); padding: 18px;">No active quarantined IPs in kernel XDP map</td></tr>`;
+          document.getElementById('statBans').textContent = '0';
+          return;
+        }
+
+        document.getElementById('statBans').textContent = bans.length;
+
+        bans.forEach(b => {
           const tr = document.createElement('tr');
-          const checked = r.enabled ? 'checked' : '';
+          const elapsed = Math.floor((Date.now() - (b.banned_at_ms || Date.now())) / 1000);
+          const totalTTL = b.duration_seconds || 86400;
+          const remainingSec = Math.max(0, totalTTL - elapsed);
+          const bannedDate = new Date(b.banned_at_ms || Date.now()).toLocaleTimeString();
+
           tr.innerHTML = `
-            <td>
-              <label class="switch">
-                <input type="checkbox" ${checked} onchange="toggleRule('${r.id}', this.checked)">
-                <span class="slider"></span>
-              </label>
+            <td style="font-weight: 600; color: var(--red);">${b.ip}</td>
+            <td style="color: var(--text-muted);">${escapeHTML(b.reason || 'Threshold Exceeded')}</td>
+            <td>${bannedDate}</td>
+            <td><strong>${remainingSec}s</strong> remaining</td>
+            <td style="text-align: right;">
+              <button class="btn btn-green" onclick="unbanQuarantineIP('${b.ip}')">[Unban]</button>
             </td>
-            <td style="font-weight: 600; color: var(--accent);">${r.id}</td>
-            <td>${r.title}</td>
-            <td><span class="badge ${r.level === 'critical' ? 'badge-crit' : 'badge-high'}">${String(r.level).toUpperCase()}</span></td>
-            <td>${r.threat_score}</td>
-            <td>${r.mitre_id ? `<span class="badge badge-mitre">${r.mitre_id}</span>` : '-'}</td>
-            <td><span class="badge badge-iso">${r.scope === 1 ? 'HOST' : 'NETWORK'}</span></td>
-            <td style="color: var(--text-muted);">${r.description}</td>
           `;
           tbody.appendChild(tr);
         });
       } catch (e) {}
     }
 
+    async function unbanQuarantineIP(ip) {
+      try {
+        await fetch('/api/quarantine/unban', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ip })
+        });
+        showToast(`[XDP_UNBAN] Purged ${ip} from quarantine vault`, 'ok');
+        fetchQuarantineBans();
+      } catch (e) {
+        showToast('Unban failed: ' + e.message, 'crit');
+      }
+    }
+
+    function openQuarantineModal() {
+      fetchQuarantineBans();
+      document.getElementById('quarantineModal').style.display = 'flex';
+    }
+    function closeQuarantineModal() {
+      document.getElementById('quarantineModal').style.display = 'none';
+    }
+
+    // Detection Rules (SigmaHQ & In-Memory Matcher)
+    async function fetchRules() {
+      try {
+        const res = await fetch('/api/rules');
+        const rules = await res.json();
+        allRulesList = Array.isArray(rules) ? rules : [];
+        document.getElementById('badgeRules').textContent = allRulesList.length;
+        renderRules(allRulesList);
+      } catch (e) {}
+    }
+
+    function renderRules(rules) {
+      const tbody = document.getElementById('rulesTableBody');
+      tbody.innerHTML = '';
+
+      rules.forEach(r => {
+        const tr = document.createElement('tr');
+        const checked = r.enabled ? 'checked' : '';
+        const originTag = r.origin === '[SIGMAHQ]' ? `<span class="badge badge-layer">[SIGMAHQ]</span>` : `<span class="badge badge-iso">[BUILTIN]</span>`;
+        const scopeBadge = r.scope === 'SCOPE_HOST_LOCAL' || r.scope === 1 ? `<span class="badge badge-iso">[HOST]</span>` : `<span class="badge badge-layer">[NET]</span>`;
+
+        tr.innerHTML = `
+          <td>
+            <label class="switch">
+              <input type="checkbox" ${checked} onchange="toggleRule('${r.id}', this.checked)">
+              <span class="slider"></span>
+            </label>
+          </td>
+          <td>${originTag}</td>
+          <td style="font-weight: 600; color: var(--accent);">${r.id}</td>
+          <td style="color: var(--text);">${escapeHTML(r.title)}</td>
+          <td>${getSeverityBadge(r.severity || r.level, r.threat_score)}</td>
+          <td style="font-weight: 600;">${r.threat_score}</td>
+          <td>${r.mitre_id ? `<span class="badge badge-mitre">[${r.mitre_id}]</span>` : '-'}</td>
+          <td>${scopeBadge}</td>
+          <td style="color: var(--text-muted);">${escapeHTML(r.description)}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    function applyRulesFilter() {
+      const q = (document.getElementById('ruleSearchFilter').value || '').toLowerCase();
+      const filtered = allRulesList.filter(r => {
+        return (r.id && r.id.toLowerCase().includes(q)) ||
+               (r.title && r.title.toLowerCase().includes(q)) ||
+               (r.mitre_id && r.mitre_id.toLowerCase().includes(q)) ||
+               (r.description && r.description.toLowerCase().includes(q));
+      });
+      renderRules(filtered);
+    }
+
     async function toggleRule(ruleId, enabled) {
       try {
-        await fetch('/api/sigma/toggle', {
+        await fetch('/api/rules/toggle', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ rule_id: ruleId, enabled })
         });
-        showToast(`Rule ${ruleId} set to ${enabled ? 'ENABLED' : 'DISABLED'}`, 'ok');
+        showToast(`Rule ${ruleId} -> ${enabled ? '[ENABLED]' : '[DISABLED]'}`, 'ok');
       } catch (e) {}
+    }
+
+    async function triggerRulesSync() {
+      showToast('[SIGMAHQ] Syncing latest rules from GitHub...', 'ok');
+      try {
+        const res = await fetch('/api/rules/sync', { method: 'POST' });
+        const data = await res.json();
+        showToast(data.message || 'Sync complete', 'ok');
+        setTimeout(fetchRules, 1500);
+      } catch (e) {
+        showToast('Sync failed: ' + e.message, 'crit');
+      }
     }
 
     function openRuleModal() { document.getElementById('ruleModal').style.display = 'flex'; }
@@ -1329,7 +1873,7 @@
         });
         const data = await res.json();
         if (data.success) {
-          showToast('Custom Sigma rule compiled and loaded!', 'ok');
+          showToast('Custom Sigma rule compiled and loaded', 'ok');
           closeRuleModal();
           fetchRules();
         } else {
@@ -1358,13 +1902,13 @@
         nodes.forEach(n => {
           const tr = document.createElement('tr');
           tr.innerHTML = `
-            <td style="font-weight: 600; color: var(--cyan);">${n.node_id}</td>
+            <td style="font-weight: 600; color: var(--accent);">${n.node_id}</td>
             <td>${n.hostname || '-'}</td>
             <td>${n.group_name || 'DEFAULT'}</td>
             <td style="color: var(--text-muted);">${n.remote_addr || '-'}</td>
             <td>${(n.cpu_usage || 0).toFixed(1)}%</td>
             <td>${(n.memory_usage || 0).toFixed(1)}%</td>
-            <td><span class="badge badge-low">${n.status || 'ACTIVE'}</span></td>
+            <td><span class="badge badge-low">[${n.status || 'ACTIVE'}]</span></td>
           `;
           fleetBody.appendChild(tr);
         });
@@ -1379,7 +1923,7 @@
         [...(wl.resolvers || []), ...(wl.subnets || [])].forEach(w => {
           const sp = document.createElement('span');
           sp.className = 'badge badge-iso';
-          sp.textContent = w;
+          sp.textContent = `[${w}]`;
           wlContainer.appendChild(sp);
         });
       } catch (e) {}
@@ -1415,73 +1959,124 @@
       } catch (e) {}
     }
 
-    // Fully Hydrated Incident Drawer
-    function openDrawer(rawEvent) {
+    // Fully Hydrated Forensic Slide-Over Drawer
+    async function openDrawer(rawEvent) {
       const ev = normalizeEvent(rawEvent);
       currentDrawerEvent = ev;
-      currentEventIP = ev.client_ip || '';
+      currentEventIP = ev.source_ip || '';
 
       document.getElementById('drawerTitle').textContent = `INCIDENT #${ev.id || 'LIVE'}`;
-      document.getElementById('drawerScoreBadge').innerHTML = getScoreBadge(ev.threat_score);
-      document.getElementById('drawerMitreBadge').textContent = ev.mitre_technique_id || 'T1190';
+      document.getElementById('drawerScoreBadge').innerHTML = getSeverityBadge(ev.severity, ev.threat_score);
+      document.getElementById('drawerMitreBadge').innerHTML = ev.mitre_id ? `<span class="badge badge-mitre">[${ev.mitre_id}]</span>` : '<span class="badge badge-iso">[-]</span>';
       document.getElementById('drawerISOBadge').innerHTML = getISOBadge(ev.country_code);
 
-      document.getElementById('dNode').textContent = ev.node_id;
-      document.getElementById('dIP').textContent = ev.client_ip;
-      document.getElementById('dGeo').textContent = `${ev.country_name || 'Local'} (${ev.city || 'LAN'}) - ${ev.asn || 'Internal Network'}`;
-      document.getElementById('dSource').textContent = `${ev.source} (HTTP ${ev.status_code || 200})`;
-      document.getElementById('dRule').textContent = `${ev.rule_id} [${ev.threat_tier}]`;
+      document.getElementById('dIP').textContent = ev.source_ip;
+      document.getElementById('dRule').textContent = `${ev.rule_matched} [${ev.severity}]`;
       document.getElementById('dTime').textContent = new Date(ev.timestamp_ms).toISOString();
-
       document.getElementById('dRaw').textContent = ev.raw_line;
       document.getElementById('drawerNotes').value = ev.analyst_notes;
 
-      // 1. Root Cause & Evidence Analysis
-      hydrateRootCauseAnalysis(ev);
+      // Extract Evidence Analysis details
+      hydrateEvidenceTable(ev);
 
-      // 2. Contextual MITRE Investigation Commands
+      // Hydrate MITRE Investigation Commands
       hydrateMitreCommands(ev);
+
+      // Fetch / Retrieve LRU Cached IPinfo Metadata
+      fetchDrawerIPInfo(ev.source_ip);
 
       document.getElementById('drawer').classList.add('open');
     }
 
-    function hydrateRootCauseAnalysis(ev) {
+    function hydrateEvidenceTable(ev) {
       const raw = ev.raw_line || '';
       const rawLower = raw.toLowerCase();
-      let matchedEvidence = 'Pattern matched in raw stream';
 
-      if (rawLower.includes('union select')) matchedEvidence = 'SQL Injection keyword: "UNION SELECT"';
-      else if (rawLower.includes("' or 1=1")) matchedEvidence = 'SQL Auth Bypass token: "\' OR 1=1"';
-      else if (rawLower.includes(';id') || rawLower.includes('; id')) matchedEvidence = 'Command chaining separator: ";id"';
-      else if (rawLower.includes('|whoami') || rawLower.includes('| whoami')) matchedEvidence = 'Pipe command execution: "|whoami"';
-      else if (rawLower.includes('/dev/tcp')) matchedEvidence = 'Interactive Reverse Shell descriptor: "/dev/tcp"';
-      else if (rawLower.includes('../..')) matchedEvidence = 'Directory traversal sequence: "../.."';
-      else if (rawLower.includes('/etc/passwd')) matchedEvidence = 'Sensitive system file probe: "/etc/passwd"';
-      else if (rawLower.includes('failed password')) matchedEvidence = 'Authentication failure event: "Failed password"';
-      else if (rawLower.includes('ptrace') || rawLower.includes('process_vm_writev')) matchedEvidence = 'Memory tampering syscall: "process_vm_writev / ptrace"';
-      else if (rawLower.includes('syn probe') || rawLower.includes('port scan') || rawLower.includes('dst_port')) matchedEvidence = 'Port probe sequence in telemetry stream';
+      // 1. Offending substring
+      let matchedSub = 'Pattern hit in telemetry event';
+      if (rawLower.includes('union select')) matchedSub = 'SQL Injection keyword: "UNION SELECT"';
+      else if (rawLower.includes("' or 1=1")) matchedSub = 'Auth Bypass: "\' OR 1=1"';
+      else if (rawLower.includes(';id') || rawLower.includes('; id')) matchedSub = 'Command chain separator: ";id"';
+      else if (rawLower.includes('|whoami') || rawLower.includes('| whoami')) matchedSub = 'Pipe shell exec: "|whoami"';
+      else if (rawLower.includes('/dev/tcp')) matchedSub = 'Interactive RevShell socket: "/dev/tcp"';
+      else if (rawLower.includes('../..')) matchedSub = 'Path traversal: "../.."';
+      else if (rawLower.includes('/etc/passwd')) matchedSub = 'System credential target: "/etc/passwd"';
+      else if (rawLower.includes('failed password')) matchedSub = 'SSH brute-force token: "Failed password"';
+      else if (rawLower.includes('ptrace') || rawLower.includes('process_vm_writev')) matchedSub = 'Memory tampering syscall: "ptrace / injection"';
+      else if (rawLower.includes('syn probe') || rawLower.includes('port scan')) matchedSub = 'Port probe sequence in TCP headers';
+      document.getElementById('dEvidencePayload').textContent = matchedSub;
 
-      let intentSummary = 'Uncategorized network reconnaissance or anomaly.';
-      const mitre = (ev.mitre_technique_id || '').toUpperCase();
-      if (mitre.includes('T1190')) intentSummary = 'Exploit Public-Facing Application: Attacker attempting SQLi, LFI, or injection via HTTP parameters.';
-      else if (mitre.includes('T1059')) intentSummary = 'Command and Scripting Interpreter: Attacker attempting remote shellcode execution or binary spawn.';
-      else if (mitre.includes('T1110')) intentSummary = 'Credential Access: High-velocity dictionary attack / password guessing against edge authentication services.';
-      else if (mitre.includes('T1014') || mitre.includes('T1055')) intentSummary = 'Host & Kernel Tampering: Unauthorized memory injection, syscall hook, or rootkit persistence attempt.';
-      else if (mitre.includes('T1046') || mitre.includes('T1595')) intentSummary = 'Active Discovery: Automated port enumeration and service banner grabbing.';
-      else if (mitre.includes('T1071') || mitre.includes('T1568')) intentSummary = 'Command and Control: Outbound beaconing, DGA domain resolution, or high-entropy DNS tunneling.';
+      // 2. Target URI / URL
+      let targetURI = '-';
+      if (raw.includes('GET ') || raw.includes('POST ') || raw.includes('PUT ') || raw.includes('HEAD ')) {
+        const parts = raw.split(' ');
+        if (parts.length >= 2) targetURI = parts[1];
+      }
+      document.getElementById('dEvidenceURI').textContent = targetURI;
 
-      document.getElementById('drawerRootCause').innerHTML = `
-        <div style="margin-bottom: 4px;">• <strong>Offending Evidence:</strong> <span style="color: var(--red);">${escapeHTML(matchedEvidence)}</span></div>
-        <div style="margin-bottom: 4px;">• <strong>Log Source & Subsystem:</strong> <span style="color: var(--cyan);">${escapeHTML(ev.source.toUpperCase())}</span> (Status: ${ev.status_code || 200})</div>
-        <div style="margin-bottom: 4px;">• <strong>Scoring Breakdown:</strong> Score ${ev.threat_score}/100 &bull; ${ev.threat_tier} Risk Tier &bull; Whitelist Evaluated: Passed</div>
-        <div>• <strong>Assessed Threat Intent:</strong> ${intentSummary}</div>
-      `;
+      // 3. Process Command Line
+      let cmdLine = '-';
+      if (ev.layer === 'EDR' || raw.includes('cmdline') || raw.includes('sh') || raw.includes('bash')) {
+        cmdLine = raw.length > 80 ? raw.substring(0, 80) + '...' : raw;
+      }
+      document.getElementById('dEvidenceCmd').textContent = cmdLine;
+
+      // 4. Subsystem / Process
+      document.getElementById('dEvidenceProc').textContent = `${ev.node_id} / ${ev.layer} (${ev.source}) - Protocol: ${ev.protocol} ${ev.status_code ? '[HTTP ' + ev.status_code + ']' : ''}`;
+    }
+
+    async function fetchDrawerIPInfo(ip) {
+      document.getElementById('dOrg').textContent = 'Querying IP intelligence...';
+      document.getElementById('dASN').textContent = '-';
+      document.getElementById('dGeo').textContent = '-';
+      document.getElementById('dHosting').innerHTML = `<span class="badge badge-iso">[QUERYING]</span>`;
+
+      if (!ip || ip === '-' || ip === '127.0.0.1' || ip === '::1' || ip.startsWith('10.') || ip.startsWith('192.168.')) {
+        document.getElementById('dOrg').textContent = 'Local Protected Infrastructure';
+        document.getElementById('dASN').textContent = 'RFC1918 / Loopback';
+        document.getElementById('dGeo').textContent = 'Internal Network (LOC)';
+        document.getElementById('dHosting').innerHTML = `<span class="badge badge-green">[TRUSTED_LOCAL]</span>`;
+        return;
+      }
+
+      if (ipinfoCache.has(ip)) {
+        applyIPInfoData(ipinfoCache.get(ip));
+        return;
+      }
+
+      try {
+        const res = await fetch(`/api/ipinfo/lookup?ip=${encodeURIComponent(ip)}`);
+        if (res.ok) {
+          const data = await res.json();
+          ipinfoCache.set(ip, data);
+          applyIPInfoData(data);
+        } else {
+          document.getElementById('dOrg').textContent = 'Public Network Host';
+        }
+      } catch (e) {
+        document.getElementById('dOrg').textContent = 'Lookup unavailable';
+      }
+    }
+
+    function applyIPInfoData(info) {
+      const org = info.org || info.company || info.isp || 'Public IP Host';
+      const asn = info.asn || 'AS-UNKNOWN';
+      const city = info.city || '';
+      const region = info.region || '';
+      const country = info.country || info.country_code || 'LOC';
+      const isDatacenter = info.is_datacenter || info.hosting || (asn && (asn.includes('AMAZON') || asn.includes('HETZNER') || asn.includes('OVH') || asn.includes('DIGITALOCEAN')));
+
+      document.getElementById('dOrg').textContent = org;
+      document.getElementById('dASN').textContent = asn;
+      document.getElementById('dGeo').textContent = `${city}${city && region ? ', ' : ''}${region} [${country}]`;
+      document.getElementById('dHosting').innerHTML = isDatacenter ? `<span class="badge badge-crit">[DATACENTER / CLOUD]</span>` : `<span class="badge badge-iso">[RESIDENTIAL / ISP]</span>`;
     }
 
     function hydrateMitreCommands(ev) {
       const container = document.getElementById('drawerCommandsList');
-      const ip = ev.client_ip || '127.0.0.1';
-      const mitre = (ev.mitre_technique_id || '').toUpperCase();
+      const ip = ev.source_ip || '127.0.0.1';
+      const mitre = (ev.mitre_id || '').toUpperCase();
+      document.getElementById('drawerMitreTechniqueLabel').textContent = mitre ? `[${mitre}]` : '[T1190]';
       let cmds = [];
 
       if (mitre.includes('T1190')) {
@@ -1528,13 +2123,13 @@
         row.style.display = 'flex';
         row.style.justifyContent = 'space-between';
         row.style.alignItems = 'center';
-        row.style.gap = '8px';
+        row.style.gap = '6px';
         row.innerHTML = `
           <div style="flex: 1; overflow: hidden;">
-            <div style="font-size: 11px; font-weight: 600;">${item.title}:</div>
-            <div style="font-size: 10px; color: #7ee787; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHTML(item.cmd)}</div>
+            <div style="font-size: 10px; font-weight: 600;">${item.title}:</div>
+            <div style="font-size: 10px; color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHTML(item.cmd)}</div>
           </div>
-          <button class="btn" onclick="copyText('${escapeHTML(item.cmd)}')">📋 Copy Cmd</button>
+          <button class="btn" style="padding: 2px 5px;" onclick="copyText('${escapeHTML(item.cmd)}')">Copy</button>
         `;
         container.appendChild(row);
       });
@@ -1554,9 +2149,9 @@
       try {
         const obj = JSON.parse(el.textContent);
         el.textContent = JSON.stringify(obj, null, 2);
-        showToast('JSON formatted successfully', 'ok');
+        showToast('JSON formatted', 'ok');
       } catch (e) {
-        showToast('Log is plain-text / not JSON', 'crit');
+        showToast('Log is plain-text', 'crit');
       }
     }
 
@@ -1569,7 +2164,7 @@
       if (!currentDrawerEvent) return;
       const notes = document.getElementById('drawerNotes').value;
       try {
-        await fetch('/api/events/notes', {
+        await fetch('/api/alerts/notes', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ id: currentDrawerEvent.id, notes })
@@ -1607,7 +2202,7 @@
 
       setTimeout(() => {
         if (toast.parentElement) toast.parentElement.removeChild(toast);
-      }, 3500);
+      }, 3000);
     }
 
     function escapeHTML(str) {
@@ -1621,9 +2216,13 @@
     window.addEventListener('DOMContentLoaded', () => {
       connectWS();
       fetchAlerts();
+      fetchRules();
       fetchSOARPlaybooks();
+      fetchSOARRuns();
+      fetchQuarantineBans();
       setInterval(fetchAlerts, 8000);
       setInterval(fetchSOARRuns, 5000);
+      setInterval(fetchQuarantineBans, 10000);
     });
   </script>
 </body>

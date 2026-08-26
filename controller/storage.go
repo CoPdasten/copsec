@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/copsec/controller/pkg/geoip"
+	"github.com/copsec/controller/pkg/models"
 	_ "modernc.org/sqlite"
 )
 
@@ -24,10 +25,11 @@ type StoredEvent struct {
 	ClientIP         string `json:"client_ip"`
 	StatusCode       int    `json:"status_code"`
 	TimestampMs      int64  `json:"timestamp_ms"`
-	RuleID           string `json:"rule_id"`
-	MitreTechniqueID string `json:"mitre_technique_id"`
-	ThreatScore      int    `json:"threat_score"`
-	AIAnalysis       string `json:"ai_analysis,omitempty"`
+	RuleID           string          `json:"rule_id"`
+	MitreTechniqueID string          `json:"mitre_technique_id"`
+	ThreatScore      int             `json:"threat_score"`
+	Severity         models.Severity `json:"severity,omitempty"`
+	AIAnalysis       string          `json:"ai_analysis,omitempty"`
 	AnalystNotes     string `json:"analyst_notes,omitempty"`
 	PlaybookProgress string `json:"playbook_progress,omitempty"`
 	CountryCode      string `json:"country_code,omitempty"`
@@ -46,6 +48,43 @@ type StoredEvent struct {
 	SnortAnomalyScore float64 `json:"snort_anomaly_score,omitempty"`
 	SnortConfidence  float64 `json:"snort_confidence,omitempty"`
 	SnortPriority    int     `json:"snort_priority,omitempty"`
+}
+
+// ToUnifiedTelemetry converts a StoredEvent into the canonical UnifiedTelemetry contract.
+func (ev *StoredEvent) ToUnifiedTelemetry() *models.UnifiedTelemetry {
+	sev := ev.Severity
+	if sev == "" {
+		sev = models.CalculateSeverity(ev.ThreatScore)
+	}
+
+	layer := models.NormalizeLayer(ev.Source)
+
+	return &models.UnifiedTelemetry{
+		ID:          fmt.Sprintf("%d", ev.ID),
+		Timestamp:   time.UnixMilli(ev.TimestampMs),
+		SourceNode:  ev.NodeID,
+		Layer:       layer,
+		SourceIP:    ev.ClientIP,
+		SourcePort:  0,
+		DestIP:      "",
+		DestPort:    0,
+		Protocol:    ev.Source,
+		ThreatScore: ev.ThreatScore,
+		Severity:    sev,
+		MitreID:     ev.MitreTechniqueID,
+		RuleMatched: ev.RuleID,
+		RawPayload:  ev.RawLine,
+		Metadata: map[string]interface{}{
+			"status_code":   ev.StatusCode,
+			"country_code":  ev.CountryCode,
+			"country_name":  ev.CountryName,
+			"city":          ev.City,
+			"asn":           ev.ASN,
+			"threat_tier":   ev.ThreatTier,
+			"ml_anomaly":    ev.MLAnomaly,
+			"analyst_notes": ev.AnalystNotes,
+		},
+	}
 }
 
 // ActiveBanRecord represents an IP quarantined in the SOAR Jail.
@@ -632,6 +671,7 @@ func scanEvents(rows *sql.Rows) ([]*StoredEvent, error) {
 		var notes sql.NullString
 		var pb sql.NullString
 		if err := rows.Scan(&ev.ID, &ev.NodeID, &ev.Source, &ev.RawLine, &ev.ClientIP, &ev.StatusCode, &ev.TimestampMs, &ev.RuleID, &ev.MitreTechniqueID, &ev.ThreatScore, &ev.AIAnalysis, &notes, &pb); err == nil {
+			ev.Severity = models.CalculateSeverity(ev.ThreatScore)
 			ev.AnalystNotes = notes.String
 			ev.PlaybookProgress = pb.String
 			if ev.ClientIP != "" && ev.ClientIP != "-" {

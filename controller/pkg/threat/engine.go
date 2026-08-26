@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/copsec/controller/pkg/ipinfo"
+	"github.com/copsec/controller/pkg/models"
 )
 
 // ThreatAction defines the recommended mitigation action from the engine.
@@ -32,33 +33,87 @@ type MicroEvent struct {
 
 // EntityState tracks the dynamic behavioral and scoring history of an IP.
 type EntityState struct {
-	IP                     string       `json:"ip"`
-	FirstSeenMs            int64        `json:"first_seen_ms"`
-	LastSeenMs             int64        `json:"last_seen_ms"`
-	CurrentScore           float64      `json:"current_score"`
-	RecentEvents           []MicroEvent `json:"recent_events"`
-	ConsecutiveAuthFails   int          `json:"consecutive_auth_fails"`
-	RecentWeb4xxCount      int          `json:"recent_web_4xx_count"`
-	RecentDNSAnomalyCount  int          `json:"recent_dns_anomaly_count"`
-	TotalIncidents         int          `json:"total_incidents"`
-	IsDatacenterASN        bool         `json:"is_datacenter_asn"`
-	LastASNInfo            string       `json:"last_asn_info"`
-	Quarantined            bool         `json:"quarantined"`
+	IP                    string       `json:"ip"`
+	FirstSeenMs           int64        `json:"first_seen_ms"`
+	LastSeenMs            int64        `json:"last_seen_ms"`
+	CurrentScore          float64      `json:"current_score"`
+	RecentEvents          []MicroEvent `json:"recent_events"`
+	ConsecutiveAuthFails  int          `json:"consecutive_auth_fails"`
+	RecentWeb4xxCount     int          `json:"recent_web_4xx_count"`
+	RecentDNSAnomalyCount int          `json:"recent_dns_anomaly_count"`
+	TotalIncidents        int          `json:"total_incidents"`
+	IsDatacenterASN       bool         `json:"is_datacenter_asn"`
+	LastASNInfo           string       `json:"last_asn_info"`
+	Quarantined           bool         `json:"quarantined"`
 }
 
 // ThreatAssessment encapsulates the real-time scoring breakdown and recommendation.
 type ThreatAssessment struct {
-	IP                  string       `json:"ip"`
-	FinalScore          int          `json:"final_score"`
-	BaseScore           int          `json:"base_score"`
-	DecayedScore        float64      `json:"decayed_score"`
-	CumulativeIncrement float64      `json:"cumulative_increment"`
-	RiskMultiplier      float64      `json:"risk_multiplier"`
-	IsWhitelisted       bool         `json:"is_whitelisted"`
-	Action              ThreatAction `json:"action"`
-	Tier                string       `json:"tier"`
-	Breakdown           string       `json:"breakdown"`
-	TimestampMs         int64        `json:"timestamp_ms"`
+	IP                  string          `json:"ip"`
+	FinalScore          int             `json:"final_score"`
+	BaseScore           int             `json:"base_score"`
+	DecayedScore        float64         `json:"decayed_score"`
+	CumulativeIncrement float64         `json:"cumulative_increment"`
+	RiskMultiplier      float64         `json:"risk_multiplier"`
+	IsWhitelisted       bool            `json:"is_whitelisted"`
+	Action              ThreatAction    `json:"action"`
+	Tier                string          `json:"tier"`
+	Breakdown           string          `json:"breakdown"`
+	Severity            models.Severity `json:"severity"`
+	MitreID             string          `json:"mitre_id,omitempty"`
+	TimestampMs         int64           `json:"timestamp_ms"`
+}
+
+// Immutable Whitelist Tables
+var (
+	// Immutable recursive public DNS resolver IPs
+	immutablePublicDNS = map[string]bool{
+		"1.1.1.1":              true,
+		"1.0.0.1":              true,
+		"1.1.1.2":              true,
+		"1.0.0.2":              true,
+		"1.1.1.3":              true,
+		"1.0.0.3":              true,
+		"8.8.8.8":              true,
+		"8.8.4.4":              true,
+		"9.9.9.9":              true,
+		"149.112.112.112":      true,
+		"208.67.222.222":       true,
+		"208.67.220.220":       true,
+		"213.186.33.99":        true, // OVH Primary DNS
+		"213.186.33.100":       true, // OVH Secondary DNS
+		"2001:41d0:3:163::1":   true, // OVH IPv6
+		"2001:4860:4860::8888": true,
+		"2001:4860:4860::8844": true,
+		"2606:4700:4700::1111": true,
+		"2606:4700:4700::1001": true,
+		"2620:fe::fe":          true,
+		"2620:fe::9":           true,
+		"2620:119:35::35":      true,
+		"2620:119:53::53":      true,
+	}
+
+	// Immutable CIDR ranges for Local, Loopback, RFC1918, and Tailscale / CGNAT
+	immutableCIDRs []*net.IPNet
+)
+
+func init() {
+	rawCIDRs := []string{
+		"127.0.0.0/8",        // IPv4 Loopback
+		"::1/128",             // IPv6 Loopback
+		"10.0.0.0/8",          // RFC1918 Private
+		"172.16.0.0/12",       // RFC1918 Private
+		"192.168.0.0/16",      // RFC1918 Private
+		"100.64.0.0/10",       // Tailscale / CGNAT (100.64.0.0 - 100.127.255.255)
+		"fd7a:115c:a1e0::/48", // Tailscale IPv6 Overlay
+		"169.254.0.0/16",      // IPv4 Link-Local
+		"fe80::/10",           // IPv6 Link-Local
+	}
+	for _, c := range rawCIDRs {
+		if _, ipNet, err := net.ParseCIDR(c); err == nil {
+			immutableCIDRs = append(immutableCIDRs, ipNet)
+		}
+	}
 }
 
 // ShardedThreatStore holds state across 64 lock-striped shards to maximize multi-core throughput.
@@ -75,11 +130,11 @@ type threatShard struct {
 
 // ScoringEngine coordinates dynamic sliding-window scoring, exponential decay, and multi-tier correlation.
 type ScoringEngine struct {
-	store             *ShardedThreatStore
-	banThreshold      int
-	tarpitThreshold   int
-	halfLifeSeconds   float64 // default: 180s (3 minutes)
-	slidingWindowMs   int64   // default: 60,000ms (60s)
+	store           *ShardedThreatStore
+	banThreshold    int
+	tarpitThreshold int
+	halfLifeSeconds float64 // default: 180s (3 minutes)
+	slidingWindowMs int64   // default: 60,000ms (60s)
 }
 
 var (
@@ -110,46 +165,6 @@ func NewScoringEngine(banThreshold, tarpitThreshold int) *ScoringEngine {
 	for i := 0; i < 64; i++ {
 		store.shards[i] = &threatShard{
 			entities: make(map[string]*EntityState),
-		}
-	}
-
-	// Initialize default private/local/DNS CIDRs to whitelist
-	defaultCIDRs := []string{
-		"127.0.0.0/8",
-		"::1/128",
-		"10.0.0.0/8",
-		"172.16.0.0/12",
-		"192.168.0.0/16",
-		"100.64.0.0/10",   // Tailscale / CGNAT
-		"fd7a:115c:a1e0::/48", // Tailscale IPv6 Overlay
-		"169.254.0.0/16",  // Link-local
-		"8.8.8.8/32",      // Google Primary DNS
-		"8.8.4.4/32",      // Google Secondary DNS
-		"1.1.1.1/32",      // Cloudflare Primary DNS
-		"1.0.0.1/32",      // Cloudflare Secondary DNS
-		"1.1.1.2/32",      // Cloudflare Security DNS
-		"1.0.0.2/32",
-		"1.1.1.3/32",      // Cloudflare Family DNS
-		"1.0.0.3/32",
-		"9.9.9.9/32",      // Quad9 DNS
-		"149.112.112.112/32",
-		"208.67.222.222/32", // OpenDNS
-		"208.67.220.220/32",
-		"213.186.33.99/32",  // OVH Primary DNS
-		"213.186.33.100/32", // OVH Secondary DNS
-		"2001:41d0:3:163::1/128", // OVH IPv6
-		"2001:4860:4860::8888/128",
-		"2001:4860:4860::8844/128",
-		"2606:4700:4700::1111/128",
-		"2606:4700:4700::1001/128",
-		"2620:fe::fe/128",
-		"2620:fe::9/128",
-		"2620:119:35::35/128",
-		"2620:119:53::53/128",
-	}
-	for _, cidr := range defaultCIDRs {
-		if _, ipNet, err := net.ParseCIDR(cidr); err == nil {
-			store.whitelist = append(store.whitelist, ipNet)
 		}
 	}
 
@@ -184,13 +199,43 @@ func (se *ScoringEngine) AddWhitelistCIDR(cidr string) error {
 	return nil
 }
 
-// IsWhitelisted checks if an IP is in the whitelist.
+// IsWhitelisted checks if an IP belongs to immutable network whitelists, private subnets, or dynamic ranges.
 func (se *ScoringEngine) IsWhitelisted(ipStr string) bool {
-	ip := net.ParseIP(strings.TrimSpace(ipStr))
+	cleanIP := strings.TrimSpace(ipStr)
+	if cleanIP == "" || cleanIP == "-" || cleanIP == "127.0.0.1" || cleanIP == "::1" || cleanIP == "localhost" || cleanIP == "local" {
+		return true
+	}
+
+	// 1. Immutable Public DNS Check
+	if immutablePublicDNS[cleanIP] {
+		return true
+	}
+
+	ip := net.ParseIP(cleanIP)
 	if ip == nil {
 		return false
 	}
 
+	// 2. Standard Loopback / Private / Link-Local / Unspecified Check
+	if ip.IsLoopback() || ip.IsPrivate() || ip.IsUnspecified() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+		return true
+	}
+
+	// 3. Tailscale / Carrier-Grade NAT (100.64.0.0/10)
+	if ip4 := ip.To4(); ip4 != nil {
+		if ip4[0] == 100 && (ip4[1]&0xC0) == 64 {
+			return true
+		}
+	}
+
+	// 4. Immutable CIDRs check (127.0.0.0/8, ::1/128, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, etc.)
+	for _, cidr := range immutableCIDRs {
+		if cidr.Contains(ip) {
+			return true
+		}
+	}
+
+	// 5. Dynamic User-Configured Whitelist CIDRs
 	se.store.whiteMu.RLock()
 	defer se.store.whiteMu.RUnlock()
 
@@ -238,22 +283,53 @@ func (se *ScoringEngine) Evaluate(
 	ipStr = strings.TrimSpace(ipStr)
 	now := time.Now().UnixMilli()
 
-	// 1. Whitelist check: instant zero-score bypass
+	// 1. Strict Whitelist Gating: Instant Zero-Score Bypass & Blocklist Invalidation
 	if ipStr == "" || se.IsWhitelisted(ipStr) {
 		return ThreatAssessment{
-			IP:            ipStr,
-			FinalScore:    0,
-			BaseScore:     rawScore,
-			IsWhitelisted: true,
-			Action:        ActionAllow,
-			Tier:          "WHITELISTED",
-			Breakdown:     "IP belongs to trusted whitelist/private subnet (Protected)",
-			TimestampMs:   now,
+			IP:                  ipStr,
+			FinalScore:          0,
+			BaseScore:           0,
+			DecayedScore:        0,
+			CumulativeIncrement: 0,
+			RiskMultiplier:      1.0,
+			IsWhitelisted:       true,
+			Severity:            models.SeverityInfo,
+			MitreID:             "",
+			Action:              ActionAllow,
+			Tier:                "WHITELISTED",
+			Breakdown:           "IP belongs to trusted whitelist/private subnet (Protected)",
+			TimestampMs:         now,
 		}
 	}
 
-	// 0. Background Benign Telemetry Bypass (suricata_flow, suricata_dns, benign queries)
 	rLower := strings.ToLower(ruleID)
+	mUpper := strings.ToUpper(mitreID)
+
+	// 2. De-noising: Standard Port 53 DNS Traffic & Generic System Audit Events
+	// Standard DNS traffic and generic audit events must NOT be assigned T1190 or arbitrary exploit tags.
+	isStandardDNS := rLower == "suricata_dns" || rLower == "dns_query" || rLower == "dns_resolution" ||
+		strings.Contains(rLower, "dest_port:53") || strings.Contains(rLower, "port 53") ||
+		strings.Contains(rLower, "dns_flow")
+	isGenericAudit := rLower == "audit" || rLower == "generic_audit" || rLower == "system_audit" ||
+		strings.HasPrefix(rLower, "audit_") || rLower == "audit_event"
+
+	if isStandardDNS && !isDNSAnomaly(ruleID, mitreID) {
+		if mUpper == "T1190" || strings.HasPrefix(mUpper, "T1190") {
+			mitreID = ""
+		}
+		rawScore = 0
+	}
+
+	if isGenericAudit && !isTier1Rule(ruleID, mitreID) {
+		if mUpper == "T1190" || strings.HasPrefix(mUpper, "T1190") {
+			mitreID = ""
+		}
+		if rawScore < 60 {
+			rawScore = 0
+		}
+	}
+
+	// 3. Background Benign Telemetry Bypass (suricata_flow, suricata_dns, benign queries)
 	if rLower == "suricata_flow" || rLower == "suricata_dns" || rLower == "dns_query" || rLower == "dns_resolution" || (rawScore == 0 && mitreID == "") {
 		return ThreatAssessment{
 			IP:                  ipStr,
@@ -263,6 +339,8 @@ func (se *ScoringEngine) Evaluate(
 			CumulativeIncrement: 0,
 			RiskMultiplier:      1.0,
 			IsWhitelisted:       false,
+			Severity:            models.SeverityInfo,
+			MitreID:             "",
 			Action:              ActionAllow,
 			Tier:                "NORMAL",
 			Breakdown:           fmt.Sprintf("Benign Background Telemetry [%s] (Score: 0)", ruleID),
@@ -301,7 +379,7 @@ func (se *ScoringEngine) Evaluate(
 		}
 	}
 
-	// 2. Exponential Half-Life Score Decay (Auto-Forgiveness)
+	// 4. Exponential Half-Life Score Decay (Auto-Forgiveness)
 	// S_t = S_0 * 0.5^(deltaT / 180s)
 	deltaSeconds := float64(now-state.LastSeenMs) / 1000.0
 	if deltaSeconds > 0 && state.CurrentScore > 0 {
@@ -313,7 +391,7 @@ func (se *ScoringEngine) Evaluate(
 	}
 	decayedScore := state.CurrentScore
 
-	// 3. Prune events outside sliding 60s window
+	// 5. Prune events outside sliding 60s window
 	cutoff := now - se.slidingWindowMs
 	activeEvents := make([]MicroEvent, 0, len(state.RecentEvents))
 	for _, ev := range state.RecentEvents {
@@ -323,7 +401,7 @@ func (se *ScoringEngine) Evaluate(
 	}
 	state.RecentEvents = activeEvents
 
-	// 4. Categorize Event & Determine Base Increment
+	// 6. Categorize Event & Determine Base Increment
 	var eventType string
 	var baseIncrement float64
 	var tier string
@@ -466,6 +544,8 @@ func (se *ScoringEngine) Evaluate(
 		CumulativeIncrement: adjustedIncrement,
 		RiskMultiplier:      riskMultiplier,
 		IsWhitelisted:       false,
+		Severity:            models.CalculateSeverity(finalScoreInt),
+		MitreID:             mitreID,
 		Action:              action,
 		Tier:                tier,
 		Breakdown:           formattedBreakdown,
