@@ -120,7 +120,6 @@ func (c *ControllerClient) runStreamLoop(ctx context.Context, wg *sync.WaitGroup
 		conn, client, err := c.connect(ctx)
 		if err != nil {
 			atomic.StoreInt32(&c.isConnected, 0)
-			edgeEngine.SetControllerConnection(false)
 			if c.fallbackEngine != nil {
 				c.fallbackEngine.SetFallbackActive(true)
 			}
@@ -137,7 +136,6 @@ func (c *ControllerClient) runStreamLoop(ctx context.Context, wg *sync.WaitGroup
 		c.conn = conn
 		c.client = client
 		atomic.StoreInt32(&c.isConnected, 1)
-		edgeEngine.SetControllerConnection(true)
 		if c.fallbackEngine != nil {
 			c.fallbackEngine.SetFallbackActive(false)
 		}
@@ -149,7 +147,6 @@ func (c *ControllerClient) runStreamLoop(ctx context.Context, wg *sync.WaitGroup
 		// 2. Stream live events
 		if err := c.streamLive(ctx, client); err != nil {
 			atomic.StoreInt32(&c.isConnected, 0)
-			edgeEngine.SetControllerConnection(false)
 			if c.fallbackEngine != nil {
 				c.fallbackEngine.SetFallbackActive(true)
 			}
@@ -308,7 +305,6 @@ func (c *ControllerClient) drainIncomingToBuffer(ctx context.Context, duration t
 			return
 		case event := <-c.incomingChan:
 			_ = c.buffer.Enqueue(event)
-			edgeEngine.InspectRawLine(event.RawLine, event.Source)
 			if c.fallbackEngine != nil {
 				c.fallbackEngine.InspectOffline(event.RawLine, event.Source)
 			}

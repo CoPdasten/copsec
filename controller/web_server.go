@@ -12,16 +12,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/copsec/controller/pkg/ai_agent"
-	"github.com/copsec/controller/pkg/ai_report"
 	"github.com/copsec/controller/pkg/dns"
 	"github.com/copsec/controller/pkg/ebpf"
 	"github.com/copsec/controller/pkg/geoip"
 	"github.com/copsec/controller/pkg/healing"
 	"github.com/copsec/controller/pkg/ipinfo"
 	"github.com/copsec/controller/pkg/ml"
-	"github.com/copsec/controller/pkg/notifier"
-	"github.com/copsec/controller/pkg/p2p"
 	"github.com/copsec/controller/pkg/sigma"
 	"github.com/copsec/controller/pkg/soar"
 	"github.com/copsec/controller/pkg/tarpit"
@@ -32,43 +28,29 @@ import (
 //go:embed web/*
 var embeddedWebFS embed.FS
 
-// WebSOCServer hosts the embedded Web SOC, REST APIs, Deception routes, and WebSocket hub.
+// WebSOCServer hosts the embedded Minimalist Web SOC, REST APIs, and WebSocket hub.
 type WebSOCServer struct {
-	mu              sync.RWMutex
-	listenAddr      string
-	server          *CentralServer
-	storage         *StorageEngine
-	ttlManager      *TTLBanManager
-	sigmaEngine     *SigmaEngine
-	wsHub           *WSHub
-	deceptionRouter *HoneyDeceptionRouter
-	rateLimiter     *TokenBucketRateLimiter
-	httpServer      *http.Server
-	honeypotSSH     *HoneypotSSHServer
-	p2pMesh         *p2p.GossipMesh
+	mu          sync.RWMutex
+	listenAddr  string
+	server      *CentralServer
+	storage     *StorageEngine
+	ttlManager  *TTLBanManager
+	sigmaEngine *SigmaEngine
+	wsHub       *WSHub
+	httpServer  *http.Server
 
-	aiAgent         *ai_agent.Agent
-	notifier        *notifier.Dispatcher
-	integrityGuard  *ebpf.IntegrityGuard
-	yaraScanner     *yara.MemoryScanner
-	tarpitEngine    *tarpit.TarpitEngine
-	dnsSinkhole     *dns.DNSSinkholeEngine
-	fimHealing      *healing.FIMHealingEngine
+	integrityGuard *ebpf.IntegrityGuard
+	yaraScanner    *yara.MemoryScanner
+	tarpitEngine   *tarpit.TarpitEngine
+	dnsSinkhole    *dns.DNSSinkholeEngine
+	fimHealing     *healing.FIMHealingEngine
 }
 
 // SystemConfigDTO represents the runtime configuration schema.
 type SystemConfigDTO struct {
 	GRPCAddr         string `json:"grpc_addr"`
-	TelegramToken    string `json:"telegram_token"`
-	TelegramChat     string `json:"telegram_chat"`
-	DiscordWebhook   string `json:"discord_webhook"`
 	IPInfoToken      string `json:"ipinfo_token"`
-	LLMAPIKey        string `json:"llm_api_key"`
-	LLMModel         string `json:"llm_model"`
-	LLMProvider      string `json:"llm_provider"`
-	HoneypotSSHAddr  string `json:"honeypot_ssh_addr"`
 	AutoBanThreshold int    `json:"autoban_threshold"`
-	ThreatIntelKey   string `json:"threat_intel_key"`
 	Configured       bool   `json:"configured"`
 }
 
@@ -80,27 +62,19 @@ func NewWebSOCServer(
 	ttlManager *TTLBanManager,
 	sigmaEngine *SigmaEngine,
 	wsHub *WSHub,
-	deceptionRouter *HoneyDeceptionRouter,
-	rateLimiter *TokenBucketRateLimiter,
-	honeypotSSH *HoneypotSSHServer,
 ) *WebSOCServer {
 	ws := &WebSOCServer{
-		listenAddr:      listenAddr,
-		server:          server,
-		storage:         storage,
-		ttlManager:      ttlManager,
-		sigmaEngine:     sigmaEngine,
-		wsHub:           wsHub,
-		deceptionRouter: deceptionRouter,
-		rateLimiter:     rateLimiter,
-		honeypotSSH:     honeypotSSH,
-		aiAgent:         ai_agent.GetDefaultAgent(),
-		notifier:        notifier.GetDefaultDispatcher(),
-		integrityGuard:  ebpf.GetDefaultIntegrityGuard(),
-		yaraScanner:     yara.GetDefaultScanner(),
-		tarpitEngine:    tarpit.GetDefaultTarpit(),
-		dnsSinkhole:     dns.GetDefaultSinkhole(),
-		fimHealing:      healing.GetDefaultFIMEngine(),
+		listenAddr:     listenAddr,
+		server:         server,
+		storage:        storage,
+		ttlManager:     ttlManager,
+		sigmaEngine:    sigmaEngine,
+		wsHub:          wsHub,
+		integrityGuard: ebpf.GetDefaultIntegrityGuard(),
+		yaraScanner:    yara.GetDefaultScanner(),
+		tarpitEngine:   tarpit.GetDefaultTarpit(),
+		dnsSinkhole:    dns.GetDefaultSinkhole(),
+		fimHealing:     healing.GetDefaultFIMEngine(),
 	}
 	ws.applyRuntimeConfig(ws.loadSystemConfig())
 
@@ -108,7 +82,7 @@ func NewWebSOCServer(
 	soarEngine := soar.GetDefaultEngine()
 	soarEngine.SetActionHook(func(actionType, actorIP, nodeID, param string) (string, error) {
 		switch actionType {
-		case "XDP_BLACKHOLE", "BAN_IP":
+		case "XDP_BLACKHOLE", "BAN_IP", "FLEET_BAN":
 			if ws.ttlManager != nil && actorIP != "" {
 				_, err := ws.ttlManager.BanIP(actorIP, "Playbook Remediation: Fleet-Wide XDP Blackhole", 86400, TierAutoBanSOAR)
 				return fmt.Sprintf("NIC XDP fast-path drop enforced on %s", actorIP), err
@@ -118,19 +92,6 @@ func NewWebSOCServer(
 			}
 		case "TARPIT_TRAP":
 			return fmt.Sprintf("TCP stream from %s diverted into Zero-Window Deception Tarpit", actorIP), nil
-		case "SWARM_SYNC":
-			if ws.p2pMesh != nil && actorIP != "" {
-				ws.p2pMesh.BroadcastThreat(p2p.ThreatBroadcast{
-					TargetIP:     actorIP,
-					ThreatScore:  95,
-					RuleID:       "PB_SWARM_SYNC",
-					MitreID:      "T1110",
-					OriginNodeID: "controller",
-					Reason:       "Playbook Remediation: Swarm Threat Sync",
-					TTLSeconds:   86400,
-				})
-				return fmt.Sprintf("Zero-trust gossip broadcast dispatched across mesh for %s", actorIP), nil
-			}
 		case "ISOLATE_HOST":
 			if ws.server != nil {
 				dispatched := ws.server.BroadcastSOARCommandWithReason("ISOLATE_HOST", actorIP, "Playbook Remediation: Host Service Isolation", 3600)
@@ -149,11 +110,6 @@ func NewWebSOCServer(
 	})
 
 	return ws
-}
-
-// SetP2PMesh links the decentralized collective defense swarm.
-func (ws *WebSOCServer) SetP2PMesh(mesh *p2p.GossipMesh) {
-	ws.p2pMesh = mesh
 }
 
 // Start runs the HTTP listener in the background.
@@ -177,21 +133,14 @@ func (ws *WebSOCServer) Start() error {
 	mux.HandleFunc("/api/soar/execute", ws.handleSOARExecute)
 	mux.HandleFunc("/api/sigma/rules", ws.handleSigmaRules)
 	mux.HandleFunc("/api/sigma/rule", ws.handleSigmaRuleSubmit)
-	mux.HandleFunc("/api/honeypot/logs", ws.handleHoneypotLogs)
+	mux.HandleFunc("/api/sigma/toggle", ws.handleSigmaRuleToggle)
 	mux.HandleFunc("/api/nodes", ws.handleNodes)
+	mux.HandleFunc("/api/whitelist", ws.handleWhitelist)
 	mux.HandleFunc("/api/geoip/stats", ws.handleGeoIPStats)
 	mux.HandleFunc("/api/geoip/lookup", ws.handleGeoIPLookup)
 	mux.HandleFunc("/api/ipinfo/lookup", ws.handleIPInfoLookup)
-	mux.HandleFunc("/api/report/incident", ws.handleIncidentReport)
-	mux.HandleFunc("/api/report/export", ws.handleExportReport)
 	mux.HandleFunc("/api/events/notes", ws.handleEventNotes)
 	mux.HandleFunc("/api/alerts/notes", ws.handleEventNotes)
-	mux.HandleFunc("/api/ai/agent/latest", ws.handleAIAgentLatest)
-	mux.HandleFunc("/api/ai/agent/test-dispatch", ws.handleAIAgentTestDispatch)
-	mux.HandleFunc("/api/p2p/topology", ws.handleP2PTopology)
-	mux.HandleFunc("/api/p2p/crdt", ws.handleP2PCRDT)
-	mux.HandleFunc("/api/p2p/logs", ws.handleP2PLogs)
-	mux.HandleFunc("/api/p2p/broadcast", ws.handleP2PBroadcast)
 	mux.HandleFunc("/api/security/stats", ws.handleSecurityStats)
 	mux.HandleFunc("/api/security/tarpit", ws.handleSecurityTarpit)
 	mux.HandleFunc("/api/security/fim", ws.handleSecurityFIM)
@@ -201,37 +150,17 @@ func (ws *WebSOCServer) Start() error {
 	mux.HandleFunc("/api/threat/inspect", ws.handleThreatInspect)
 	mux.HandleFunc("/api/ml/stats", ws.handleMLStats)
 
-	// 3. Embedded Web SOC and Deception Traps
-	mux.HandleFunc("/", ws.handleRootOrTrap)
-
-	// Wrap handler with Token Bucket Rate Limiter
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		clientIP, _ := parseRemoteAddr(r.RemoteAddr)
-		if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
-			parts := strings.Split(forwarded, ",")
-			clientIP = strings.TrimSpace(parts[0])
-		}
-
-		if ws.rateLimiter != nil {
-			allowed, retryAfter := ws.rateLimiter.Allow(clientIP)
-			if !allowed {
-				w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
-				http.Error(w, "Too Many Requests (Rate Limit Exceeded)", http.StatusTooManyRequests)
-				return
-			}
-		}
-
-		mux.ServeHTTP(w, r)
-	})
+	// 3. Embedded Web SOC Static Files
+	mux.HandleFunc("/", ws.handleStaticFiles)
 
 	ws.httpServer = &http.Server{
 		Addr:         ws.listenAddr,
-		Handler:      handler,
+		Handler:      mux,
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 15 * time.Second,
 	}
 
-	log.Printf("[INFO] 🌐 Embedded Zero-Config Web SOC Console listening on http://%s", ws.listenAddr)
+	log.Printf("[INFO] 🌐 Minimalist SOC Web Interface listening on http://%s", ws.listenAddr)
 
 	go func() {
 		if err := ws.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -242,13 +171,7 @@ func (ws *WebSOCServer) Start() error {
 	return nil
 }
 
-func (ws *WebSOCServer) handleRootOrTrap(w http.ResponseWriter, r *http.Request) {
-	// Check if requested path is a honey-URL deception route
-	if ws.deceptionRouter != nil && ws.deceptionRouter.IsHoneyURL(r.URL.Path) {
-		ws.deceptionRouter.HandleHoneyProbe(w, r)
-		return
-	}
-
+func (ws *WebSOCServer) handleStaticFiles(w http.ResponseWriter, r *http.Request) {
 	// Serve embedded UI for root or SPA fallback
 	if r.URL.Path == "/" || r.URL.Path == "/index.html" || !strings.Contains(r.URL.Path, ".") {
 		data, err := embeddedWebFS.ReadFile("web/index.html")
@@ -317,11 +240,8 @@ func (ws *WebSOCServer) handleConfig(w http.ResponseWriter, r *http.Request) {
 func (ws *WebSOCServer) loadSystemConfig() *SystemConfigDTO {
 	dto := &SystemConfigDTO{
 		GRPCAddr:         "0.0.0.0:8443",
-		HoneypotSSHAddr:  ":2222",
-		AutoBanThreshold: 50,
+		AutoBanThreshold: 80,
 		IPInfoToken:      ipinfo.DefaultIPInfoToken,
-		LLMModel:         "gemini-2.5-flash",
-		LLMProvider:      "local",
 		Configured:       false,
 	}
 
@@ -337,32 +257,8 @@ func (ws *WebSOCServer) loadSystemConfig() *SystemConfigDTO {
 	if v, ok := cfgMap["grpc_addr"]; ok && v != "" {
 		dto.GRPCAddr = v
 	}
-	if v, ok := cfgMap["telegram_token"]; ok {
-		dto.TelegramToken = v
-	}
-	if v, ok := cfgMap["telegram_chat"]; ok {
-		dto.TelegramChat = v
-	}
-	if v, ok := cfgMap["discord_webhook"]; ok {
-		dto.DiscordWebhook = v
-	}
 	if v, ok := cfgMap["ipinfo_token"]; ok && v != "" {
 		dto.IPInfoToken = v
-	}
-	if v, ok := cfgMap["llm_api_key"]; ok {
-		dto.LLMAPIKey = v
-	}
-	if v, ok := cfgMap["llm_model"]; ok && v != "" {
-		dto.LLMModel = v
-	}
-	if v, ok := cfgMap["llm_provider"]; ok && v != "" {
-		dto.LLMProvider = v
-	}
-	if v, ok := cfgMap["honeypot_ssh_addr"]; ok && v != "" {
-		dto.HoneypotSSHAddr = v
-	}
-	if v, ok := cfgMap["threat_intel_key"]; ok {
-		dto.ThreatIntelKey = v
 	}
 	if v, ok := cfgMap["autoban_threshold"]; ok {
 		if t, err := strconv.Atoi(v); err == nil && t > 0 {
@@ -387,18 +283,10 @@ func (ws *WebSOCServer) saveSystemConfig(cfg *SystemConfigDTO) error {
 	}
 
 	cfgMap := map[string]string{
-		"grpc_addr":          cfg.GRPCAddr,
-		"telegram_token":     cfg.TelegramToken,
-		"telegram_chat":      cfg.TelegramChat,
-		"discord_webhook":    cfg.DiscordWebhook,
-		"ipinfo_token":       tok,
-		"llm_api_key":        cfg.LLMAPIKey,
-		"llm_model":          cfg.LLMModel,
-		"llm_provider":       cfg.LLMProvider,
-		"honeypot_ssh_addr":  cfg.HoneypotSSHAddr,
-		"autoban_threshold":  strconv.Itoa(cfg.AutoBanThreshold),
-		"threat_intel_key":   cfg.ThreatIntelKey,
-		"configured":         "true",
+		"grpc_addr":         cfg.GRPCAddr,
+		"ipinfo_token":      tok,
+		"autoban_threshold": strconv.Itoa(cfg.AutoBanThreshold),
+		"configured":        "true",
 	}
 
 	return ws.storage.SaveSystemConfig(cfgMap)
@@ -408,37 +296,12 @@ func (ws *WebSOCServer) applyRuntimeConfig(cfg *SystemConfigDTO) {
 	if ws.server != nil {
 		ws.server.SetAutoBanPolicy(true, cfg.AutoBanThreshold)
 
-		// Reconfigure Telegram SOAR Bot dynamically
-		if cfg.TelegramToken != "" && cfg.TelegramChat != "" {
-			tgBot := NewTelegramSOARBot(TelegramBotConfig{
-				BotToken: cfg.TelegramToken,
-				ChatID:   cfg.TelegramChat,
-			}, ws.server)
-			ws.server.SetTelegramBot(tgBot)
-			log.Printf("[CONFIG] Telegram SOAR Bot dynamically updated (Chat ID: %s)", cfg.TelegramChat)
-		}
-
-		// Reconfigure Notifier dynamically
-		if ws.notifier != nil {
-			ws.notifier.UpdateConfig(notifier.Config{
-				TelegramBotToken: cfg.TelegramToken,
-				TelegramChatID:   cfg.TelegramChat,
-				DiscordWebhook:   cfg.DiscordWebhook,
-			})
-		}
-
 		// Reconfigure IPinfo Token dynamically
 		tok := cfg.IPInfoToken
 		if tok == "" {
 			tok = ipinfo.DefaultIPInfoToken
 		}
 		ipinfo.GetDefaultClient().SetToken(tok)
-		log.Printf("[CONFIG] IPinfo Token dynamically updated (Token: %s)", tok)
-
-		// Reconfigure LLM AI Agent dynamically
-		if ws.aiAgent != nil && (cfg.LLMAPIKey != "" || cfg.LLMModel != "" || cfg.LLMProvider != "") {
-			ws.aiAgent.UpdateConfig(cfg.LLMAPIKey, cfg.LLMModel, cfg.LLMProvider)
-		}
 	}
 }
 
@@ -585,13 +448,38 @@ func (ws *WebSOCServer) handleSOARUnban(w http.ResponseWriter, r *http.Request) 
 func (ws *WebSOCServer) handleSigmaRules(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
-	if ws.sigmaEngine == nil {
-		json.NewEncoder(w).Encode([]*CompiledSigmaRule{})
-		return
+	catalog := sigma.GetDefaultCatalog().List()
+	tracker := sigma.GetBuiltinTracker()
+
+	type RuleDTO struct {
+		ID          string          `json:"id"`
+		Title       string          `json:"title"`
+		Description string          `json:"description"`
+		Level       string          `json:"level"`
+		ThreatScore int             `json:"threat_score"`
+		MitreID     string          `json:"mitre_id"`
+		Tags        []string        `json:"tags"`
+		Scope       sigma.RuleScope `json:"scope"`
+		Enabled     bool            `json:"enabled"`
 	}
 
-	rules := ws.sigmaEngine.GetRules()
-	json.NewEncoder(w).Encode(rules)
+	var dtos []RuleDTO
+	for _, cr := range catalog {
+		enabled := tracker.IsRuleEnabled(cr.ID)
+		dtos = append(dtos, RuleDTO{
+			ID:          cr.ID,
+			Title:       cr.Title,
+			Description: cr.Description,
+			Level:       cr.Level,
+			ThreatScore: cr.ThreatScore,
+			MitreID:     cr.MitreID,
+			Tags:        cr.Tags,
+			Scope:       cr.Scope,
+			Enabled:     enabled,
+		})
+	}
+
+	json.NewEncoder(w).Encode(dtos)
 }
 
 func (ws *WebSOCServer) handleSigmaRuleSubmit(w http.ResponseWriter, r *http.Request) {
@@ -625,27 +513,26 @@ func (ws *WebSOCServer) handleSigmaRuleSubmit(w http.ResponseWriter, r *http.Req
 	})
 }
 
-func (ws *WebSOCServer) handleHoneypotLogs(w http.ResponseWriter, r *http.Request) {
+func (ws *WebSOCServer) handleSigmaRuleToggle(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-
-	if ws.storage == nil {
-		json.NewEncoder(w).Encode([]*HoneypotEvent{})
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-
-	limitStr := r.URL.Query().Get("limit")
-	limit := 50
-	if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
-		limit = l
+	var req struct {
+		RuleID  string `json:"rule_id"`
+		Enabled bool   `json:"enabled"`
 	}
-
-	logs, err := ws.storage.GetHoneypotLogs(limit)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-
-	json.NewEncoder(w).Encode(logs)
+	sigma.GetBuiltinTracker().SetRuleEnabled(req.RuleID, req.Enabled)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"rule_id": req.RuleID,
+		"enabled": req.Enabled,
+	})
 }
 
 func (ws *WebSOCServer) handleNodes(w http.ResponseWriter, r *http.Request) {
@@ -684,6 +571,39 @@ func (ws *WebSOCServer) handleNodes(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode([]NodeRegistryRecord{})
 }
 
+func (ws *WebSOCServer) handleWhitelist(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method == http.MethodPost {
+		var req struct {
+			CIDR string `json:"cidr"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if ws.server != nil && ws.server.threatEngine != nil && req.CIDR != "" {
+			_ = ws.server.threatEngine.AddWhitelistCIDR(req.CIDR)
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"cidr":    req.CIDR,
+		})
+		return
+	}
+
+	// GET: Return default protected resolvers & subnets
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"resolvers": []string{
+			"1.1.1.1", "1.0.0.1", "8.8.8.8", "8.8.4.4", "9.9.9.9",
+			"208.67.222.222", "213.186.33.99", "213.186.33.100", "2001:41d0:3:163::1",
+		},
+		"subnets": []string{
+			"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
+			"127.0.0.0/8", "::1/128", "100.64.0.0/10", "fd7a:115c:a1e0::/48",
+		},
+	})
+}
+
 func (ws *WebSOCServer) handleGeoIPStats(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	stats := geoip.GetDefaultEngine().GetAttackOriginDensity(10)
@@ -699,234 +619,6 @@ func (ws *WebSOCServer) handleGeoIPLookup(w http.ResponseWriter, r *http.Request
 	}
 	loc := geoip.GetDefaultEngine().Lookup(ip)
 	json.NewEncoder(w).Encode(loc)
-}
-
-func (ws *WebSOCServer) handleIncidentReport(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
-	report := ws.buildIncidentReportFromRequest(r)
-	if report == nil {
-		http.Error(w, "incident not found or invalid parameters", http.StatusNotFound)
-		return
-	}
-
-	json.NewEncoder(w).Encode(report)
-}
-
-func (ws *WebSOCServer) handleExportReport(w http.ResponseWriter, r *http.Request) {
-	format := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("format")))
-	if format == "" {
-		format = "html"
-	}
-
-	report := ws.buildIncidentReportFromRequest(r)
-	if report == nil {
-		http.Error(w, "incident not found or invalid parameters", http.StatusNotFound)
-		return
-	}
-
-	if format == "markdown" || format == "md" {
-		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
-		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"copsec-incident-%s.md\"", report.IncidentID))
-		w.Write([]byte(report.ToMarkdown()))
-		return
-	}
-
-	// Default HTML format (Printable Executive Report)
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(report.ToHTML()))
-}
-
-func (ws *WebSOCServer) buildIncidentReportFromRequest(r *http.Request) *ai_report.IncidentForensicReport {
-	idStr := r.URL.Query().Get("id")
-	ipStr := r.URL.Query().Get("ip")
-
-	reportGen := ai_report.NewReportGenerator(geoip.GetDefaultEngine())
-
-	// If event ID is specified and DB is available
-	if idStr != "" && ws.storage != nil {
-		id, err := strconv.ParseInt(idStr, 10, 64)
-		if err == nil && id > 0 {
-			events, err := ws.storage.SearchEvents(fmt.Sprintf("ip:%s", ipStr), 10)
-			var matched *StoredEvent
-			if err == nil {
-				for _, ev := range events {
-					if ev.ID == id {
-						matched = ev
-						break
-					}
-				}
-			}
-			if matched != nil {
-				var timeline []ai_report.TimelineEvent
-				for _, e := range events {
-					timeline = append(timeline, ai_report.TimelineEvent{
-						TimestampMs: e.TimestampMs,
-						TimeStr:     time.UnixMilli(e.TimestampMs).Format("15:04:05"),
-						Source:      e.Source,
-						Event:       fmt.Sprintf("%s (MITRE: %s)", e.RuleID, e.MitreTechniqueID),
-						ThreatScore: e.ThreatScore,
-					})
-				}
-				return reportGen.GenerateIncidentReport(
-					fmt.Sprintf("INC-%d", matched.ID),
-					matched.ClientIP,
-					matched.NodeID,
-					matched.Source,
-					matched.ThreatScore,
-					matched.RuleID,
-					matched.MitreTechniqueID,
-					matched.RawLine,
-					matched.AIAnalysis,
-					matched.TimestampMs,
-					timeline,
-				)
-			}
-		}
-	}
-
-	// Fallback dynamic generation from query params
-	if ipStr == "" {
-		ipStr = "198.51.100.45"
-	}
-	ruleID := r.URL.Query().Get("rule")
-	if ruleID == "" {
-		ruleID = "sqli_union_injection"
-	}
-	mitreID := r.URL.Query().Get("mitre")
-	if mitreID == "" {
-		mitreID = "T1190"
-	}
-	scoreStr := r.URL.Query().Get("score")
-	score := 85
-	if s, err := strconv.Atoi(scoreStr); err == nil && s > 0 {
-		score = s
-	}
-	raw := r.URL.Query().Get("raw")
-	if raw == "" {
-		raw = fmt.Sprintf("GET /api/v1/users?id=1' UNION SELECT username,password_hash FROM users-- HTTP/1.1 from %s", ipStr)
-	}
-
-	return reportGen.GenerateIncidentReport(
-		fmt.Sprintf("INC-LIVE-%d", time.Now().UnixMilli()),
-		ipStr,
-		"edge-cluster-1",
-		"suricata",
-		score,
-		ruleID,
-		mitreID,
-		raw,
-		"• Intent: Automated SQL Injection and Database Reconnaissance\n• Root Cause: Unsanitized HTTP parameter in edge application",
-		time.Now().UnixMilli(),
-		nil,
-	)
-}
-
-func (ws *WebSOCServer) handleP2PTopology(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	if ws.p2pMesh == nil {
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"status":          "STANDALONE",
-			"local_node_id":   "controller",
-			"bind_addr":       ":7946",
-			"total_peers":     0,
-			"active_peers":    0,
-			"average_rtt_ms":  0,
-			"gossip_msg_rate": 0,
-			"crdt_bans_count": 0,
-			"peers":           []p2p.PeerInfo{},
-		})
-		return
-	}
-	json.NewEncoder(w).Encode(ws.p2pMesh.GetTopology())
-}
-
-func (ws *WebSOCServer) handleP2PCRDT(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	if ws.p2pMesh == nil {
-		json.NewEncoder(w).Encode([]p2p.CRDTBanEntry{})
-		return
-	}
-	bans := ws.p2pMesh.GetCRDTJail().GetActiveBans()
-	json.NewEncoder(w).Encode(bans)
-}
-
-func (ws *WebSOCServer) handleP2PLogs(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	if ws.p2pMesh == nil {
-		json.NewEncoder(w).Encode([]p2p.SwarmEventLog{})
-		return
-	}
-	logs := ws.p2pMesh.GetEventLogs()
-	json.NewEncoder(w).Encode(logs)
-}
-
-func (ws *WebSOCServer) handleP2PBroadcast(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var req struct {
-		TargetIP    string `json:"target_ip"`
-		ThreatScore int    `json:"threat_score"`
-		RuleID      string `json:"rule_id"`
-		MitreID     string `json:"mitre_id"`
-		Reason      string `json:"reason"`
-		TTLSeconds  int64  `json:"ttl_seconds"`
-	}
-
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	if req.TargetIP == "" {
-		http.Error(w, "missing target_ip", http.StatusBadRequest)
-		return
-	}
-	if req.TTLSeconds <= 0 {
-		req.TTLSeconds = 86400
-	}
-	if req.ThreatScore <= 0 {
-		req.ThreatScore = 80
-	}
-	if req.RuleID == "" {
-		req.RuleID = "manual_soc_operator_broadcast"
-	}
-	if req.MitreID == "" {
-		req.MitreID = "T1190"
-	}
-
-	loc := geoip.GetDefaultEngine().Lookup(req.TargetIP)
-
-	tb := p2p.ThreatBroadcast{
-		TargetIP:     req.TargetIP,
-		ThreatScore:  req.ThreatScore,
-		RuleID:       req.RuleID,
-		MitreID:      req.MitreID,
-		CountryCode:  loc.CountryCode,
-		AttackerASN:  loc.ASN,
-		TTLSeconds:   req.TTLSeconds,
-		Reason:       req.Reason,
-		OriginNodeID: "controller-soc",
-	}
-
-	if ws.p2pMesh != nil {
-		ws.p2pMesh.BroadcastThreat(tb)
-	}
-
-	// Also record locally in TTL manager
-	if ws.ttlManager != nil {
-		_, _ = ws.ttlManager.BanIP(req.TargetIP, req.Reason, req.TTLSeconds, "")
-	}
-
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success": true,
-		"message": fmt.Sprintf("Threat broadcast for IP %s gossiped across P2P swarm mesh", req.TargetIP),
-		"threat":  tb,
-	})
 }
 
 func (ws *WebSOCServer) handleSecurityStats(w http.ResponseWriter, r *http.Request) {
@@ -1187,100 +879,6 @@ func (ws *WebSOCServer) handleAlertsTriage(w http.ResponseWriter, r *http.Reques
 		"success": true,
 		"action":  req.Action,
 		"ip":      cleanIP,
-	})
-}
-
-func (ws *WebSOCServer) handleAIAgentLatest(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	if ws.aiAgent == nil {
-		json.NewEncoder(w).Encode([]*ai_agent.AITriageBrief{})
-		return
-	}
-	limit := 50
-	if q := r.URL.Query().Get("limit"); q != "" {
-		if l, err := strconv.Atoi(q); err == nil && l > 0 {
-			limit = l
-		}
-	}
-	briefs := ws.aiAgent.GetRecentBriefs(limit)
-	json.NewEncoder(w).Encode(briefs)
-}
-
-func (ws *WebSOCServer) handleAIAgentTestDispatch(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var req struct {
-		NodeID           string `json:"node_id"`
-		Source           string `json:"source"`
-		RawLine          string `json:"raw_line"`
-		ClientIP         string `json:"client_ip"`
-		ThreatScore      int    `json:"threat_score"`
-		RuleID           string `json:"rule_id"`
-		MitreTechniqueID string `json:"mitre_technique_id"`
-	}
-
-	_ = json.NewDecoder(r.Body).Decode(&req)
-	if req.NodeID == "" {
-		req.NodeID = "node-soc-edge"
-	}
-	if req.ClientIP == "" {
-		req.ClientIP = "198.51.100.44"
-	}
-	if req.ThreatScore <= 0 {
-		req.ThreatScore = 95
-	}
-	if req.RuleID == "" {
-		req.RuleID = "sigma-web-sqli"
-	}
-	if req.MitreTechniqueID == "" {
-		req.MitreTechniqueID = "T1190"
-	}
-	if req.RawLine == "" {
-		req.RawLine = "GET /api/v1/auth?user=admin' UNION SELECT 1,password,3 FROM users-- HTTP/1.1"
-	}
-
-	geo := geoip.GetDefaultEngine().Lookup(req.ClientIP)
-	ic := &ai_agent.IncidentContext{
-		NodeID:           req.NodeID,
-		Source:           req.Source,
-		RawLine:          req.RawLine,
-		ClientIP:         req.ClientIP,
-		ThreatScore:      req.ThreatScore,
-		RuleID:           req.RuleID,
-		MitreTechniqueID: req.MitreTechniqueID,
-		CountryCode:      geo.CountryCode,
-		CountryName:      geo.CountryName,
-		FlagEmoji:        geo.FlagEmoji,
-		ASN:              geo.ASN,
-		ContainmentState: "XDP_DROP (eBPF Swarm Fast-Path Active)",
-	}
-
-	agent := ws.aiAgent
-	if agent == nil {
-		agent = ai_agent.GetDefaultAgent()
-	}
-
-	brief, err := agent.AnalyzeIncident(r.Context(), ic)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("AI analysis failed: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	disp := ws.notifier
-	if disp == nil {
-		disp = notifier.GetDefaultDispatcher()
-	}
-
-	dispatchRes := disp.DispatchTriageAlert(r.Context(), brief)
-
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success":         true,
-		"brief":           brief,
-		"dispatch_result": dispatchRes,
 	})
 }
 

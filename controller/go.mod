@@ -6,7 +6,6 @@ replace github.com/copsec/collector => ../collector
 
 require (
 	github.com/copsec/collector v0.0.0-00010101000000-000000000000
-	golang.org/x/crypto v0.55.0
 	golang.org/x/net v0.58.0
 	google.golang.org/grpc v1.83.1
 	gopkg.in/yaml.v3 v3.0.1

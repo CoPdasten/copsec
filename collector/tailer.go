@@ -297,10 +297,7 @@ func (t *Tailer) readLines(reader *bufio.Reader, file *os.File, currentOffset in
 					continue
 				}
 
-				// 1. Gelen her satırı Edge Engine'e gönder
-				edgeEngine.InspectRawLine(line, t.source)
-
-				// 2. Dispatch to stream/buffer pipeline
+				// Dispatch to stream/buffer pipeline
 				entry := LogEntry{
 					Source:    t.source,
 					Line:      line,

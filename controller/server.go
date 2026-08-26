@@ -13,11 +13,9 @@ import (
 	"time"
 
 	copsecproto "github.com/copsec/collector/proto"
-	"github.com/copsec/controller/pkg/ai_agent"
 	"github.com/copsec/controller/pkg/geoip"
 	"github.com/copsec/controller/pkg/ipinfo"
 	"github.com/copsec/controller/pkg/ml"
-	"github.com/copsec/controller/pkg/notifier"
 	"github.com/copsec/controller/pkg/sigma"
 	"github.com/copsec/controller/pkg/snort"
 	"github.com/copsec/controller/pkg/soar"
@@ -32,20 +30,20 @@ import (
 
 // NodeSession tracks live agent status and command communication channels.
 type NodeSession struct {
-	NodeID          string    `json:"node_id"`
-	APIKey          string    `json:"api_key"`
-	Hostname        string    `json:"hostname"`
-	Group           string    `json:"group"`
-	RemoteAddr      string    `json:"remote_addr"`
-	LastSeen        time.Time `json:"last_seen"`
-	CPUUsage        float64   `json:"cpu_usage"`
-	MemoryUsage     float64   `json:"memory_usage"`
-	ActiveBansCount int32     `json:"active_bans_count"`
-	UptimeSeconds   int64     `json:"uptime_seconds"`
+	NodeID          string                        `json:"node_id"`
+	APIKey          string                        `json:"api_key"`
+	Hostname        string                        `json:"hostname"`
+	Group           string                        `json:"group"`
+	RemoteAddr      string                        `json:"remote_addr"`
+	LastSeen        time.Time                     `json:"last_seen"`
+	CPUUsage        float64                       `json:"cpu_usage"`
+	MemoryUsage     float64                       `json:"memory_usage"`
+	ActiveBansCount int32                         `json:"active_bans_count"`
+	UptimeSeconds   int64                         `json:"uptime_seconds"`
 	CommandChan     chan *copsecproto.SOARCommand `json:"-"`
 }
 
-// CentralServer implements the gRPC CopsecStreamService with threat analysis, auto-auth & autonomous SOAR.
+// CentralServer implements the direct gRPC Hub-and-Spoke CopsecStreamService.
 type CentralServer struct {
 	copsecproto.UnimplementedCopsecStreamServiceServer
 
@@ -55,10 +53,6 @@ type CentralServer struct {
 	sigmaEngine  *SigmaEngine
 	ttlManager   *TTLBanManager
 	wsHub        *WSHub
-	telegramBot  *TelegramSOARBot
-	aiEngine     *AIEngine
-	aiAgent      *ai_agent.Agent
-	notifier     *notifier.Dispatcher
 	threatEngine *threat.ScoringEngine
 	nodes        map[string]*NodeSession
 	eventSubChan chan *StoredEvent
@@ -80,24 +74,14 @@ func NewCentralServer(storage *StorageEngine, analyzer *RuleEngine) *CentralServ
 	srv := &CentralServer{
 		storage:          storage,
 		analyzer:         analyzer,
-		aiEngine:         NewAIEngine(),
-		aiAgent:          ai_agent.GetDefaultAgent(),
-		notifier:         notifier.GetDefaultDispatcher(),
 		threatEngine:     threat.GetDefaultEngine(),
 		nodes:            make(map[string]*NodeSession),
 		eventSubChan:     make(chan *StoredEvent, 4096),
 		autoBanEnabled:   true,
-		autoBanThreshold: 50,
+		autoBanThreshold: 80,
 		ipHistory:        make(map[string][]int64),
 		autoBanned:       make(map[string]int64),
 	}
-
-	// Register notifier toast listener to broadcast live AI triage briefs to Web SOC
-	srv.notifier.SetToastListener(func(brief *ai_agent.AITriageBrief) {
-		if srv.wsHub != nil {
-			srv.wsHub.Broadcast("ai_triage", brief)
-		}
-	})
 
 	// EPS Calculator ticker
 	go func() {
@@ -157,13 +141,6 @@ func (s *CentralServer) SetAutoBanPolicy(enabled bool, threshold int) {
 	if threshold > 0 {
 		s.autoBanThreshold = threshold
 	}
-}
-
-// SetTelegramBot configures the telegram alert bot.
-func (s *CentralServer) SetTelegramBot(bot *TelegramSOARBot) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.telegramBot = bot
 }
 
 // GetAnalyzer returns the rule engine instance.
@@ -437,12 +414,15 @@ func (s *CentralServer) processEvent(nodeID string, event *copsecproto.LogEvent)
 		}
 	}
 
+	// Normal audit logs de-noising (non-critical audit events have mitre_id = "")
+	if event.Source == "audit" && threatScore < 70 {
+		mitreID = ""
+	}
+
 	// Global Infrastructure & Public DNS Whitelist protection
-	if isProtectedIP(event.ClientIp) {
+	if isProtectedIP(event.ClientIp) || (s.threatEngine != nil && s.threatEngine.IsWhitelisted(event.ClientIp)) {
 		threatScore = 0
-		if ruleScope != sigma.ScopeHostLocal && ruleID != "sudo_execution" {
-			mitreID = ""
-		}
+		mitreID = ""
 	} else {
 		// Ensure non-whitelisted MITRE technique matches or Sigma rules have baseline score >= 60
 		if mitreID != "" && strings.HasPrefix(strings.ToUpper(mitreID), "T") && threatScore < 60 && ruleID != "suricata_flow" && ruleID != "suricata_dns" {
@@ -511,78 +491,13 @@ func (s *CentralServer) processEvent(nodeID string, event *copsecproto.LogEvent)
 	// Check Autonomous Auto-Ban Policy & Dynamic TTL Management
 	s.checkAutonomousBanPolicy(stored)
 
-	// Trigger AI Threat Intelligence analysis for severe incidents
+	// Broadcast event directly to Web SOC via WebSocket Hub
 	s.mu.RLock()
-	ai := s.aiEngine
-	bot := s.telegramBot
 	hub := s.wsHub
 	s.mu.RUnlock()
 
-	// 1. Autonomous LLM SOC Analyst & Real-Time Multi-Channel Incident Dispatcher
-	if s.aiAgent != nil && s.aiAgent.ShouldAnalyze(stored.ThreatScore, stored.ClientIP, stored.RuleID) {
-		go func(ev *StoredEvent) {
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-
-			geo := geoip.GetDefaultEngine().Lookup(ev.ClientIP)
-			ic := &ai_agent.IncidentContext{
-				NodeID:           ev.NodeID,
-				Source:           ev.Source,
-				RawLine:          ev.RawLine,
-				ClientIP:         ev.ClientIP,
-				StatusCode:       ev.StatusCode,
-				ThreatScore:      ev.ThreatScore,
-				RuleID:           ev.RuleID,
-				MitreTechniqueID: ev.MitreTechniqueID,
-				CountryCode:      geo.CountryCode,
-				CountryName:      geo.CountryName,
-				FlagEmoji:        geo.FlagEmoji,
-				ASN:              geo.ASN,
-				MLAnomaly:        ev.MLAnomaly,
-				MLConfidencePct:  ev.MLConfidencePct,
-				SnortML:          ev.SnortML,
-				SnortConfidence:  ev.SnortConfidence,
-			}
-
-			brief, err := s.aiAgent.AnalyzeIncident(ctx, ic)
-			if err == nil && brief != nil {
-				ev.AIAnalysis = brief.RawMarkdown
-				_ = s.storage.UpdateEventAI(ev.ID, brief.RawMarkdown)
-				if s.notifier != nil {
-					s.notifier.DispatchTriageAlert(ctx, brief)
-				}
-			}
-		}(stored)
-	}
-
-	if ai != nil && (stored.ThreatScore >= 65 || strings.Contains(stored.RuleID, "anomaly") || strings.Contains(stored.RuleID, "rce") || strings.Contains(stored.RuleID, "sqli") || strings.Contains(stored.RuleID, "sigma")) {
-		go func(ev *StoredEvent) {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			intel := ai.AnalyzeIntent(ctx, ev)
-			summary := fmt.Sprintf("• Intent: %s\n• Root Cause: %s\n• Mitigation: %s", intel.AttackerIntent, intel.RootCause, intel.Mitigation)
-			if ev.AIAnalysis == "" {
-				ev.AIAnalysis = summary
-				_ = s.storage.UpdateEventAI(ev.ID, summary)
-			}
-
-			if bot != nil && (ev.ThreatScore >= 40 || ev.StatusCode >= 400) {
-				bot.ProcessEvent(ev)
-			}
-
-			// Broadcast AI updated event to Web SOC
-			if hub != nil {
-				hub.Broadcast("event", ev)
-			}
-		}(stored)
-	} else {
-		if bot != nil && (stored.ThreatScore >= 40 || stored.StatusCode >= 400) {
-			go bot.ProcessEvent(stored)
-		}
-		// Non-blocking Web SOC WebSocket broadcast
-		if hub != nil {
-			hub.Broadcast("event", stored)
-		}
+	if hub != nil {
+		hub.Broadcast("event", stored)
 	}
 
 	// Broadcast to channel subscriber non-blockingly
@@ -592,7 +507,7 @@ func (s *CentralServer) processEvent(nodeID string, event *copsecproto.LogEvent)
 	}
 }
 
-// checkAutonomousBanPolicy evaluates static critical scores (>=50) and correlation spike windows.
+// checkAutonomousBanPolicy evaluates static critical scores (>=80) and correlation spike windows.
 func (s *CentralServer) checkAutonomousBanPolicy(event *StoredEvent) {
 	// Inhibit network quarantine (Auto-Ban) for SCOPE_HOST_LOCAL rules
 	scope := sigma.DetermineRuleScope(event.RuleID, "", "", "", nil)
@@ -601,7 +516,7 @@ func (s *CentralServer) checkAutonomousBanPolicy(event *StoredEvent) {
 	}
 
 	ip := strings.TrimSpace(event.ClientIP)
-	if ip == "" || isProtectedIP(ip) {
+	if ip == "" || isProtectedIP(ip) || (s.threatEngine != nil && s.threatEngine.IsWhitelisted(ip)) {
 		return
 	}
 
@@ -642,14 +557,14 @@ func (s *CentralServer) checkAutonomousBanPolicy(event *StoredEvent) {
 		recentCount,
 	)
 
-	// Fallback check against configured threshold if user set a custom threshold
+	// Fallback check against configured threshold (strictly >= 80 with matching rule signature)
 	threshold := s.autoBanThreshold
 	if threshold <= 0 {
-		threshold = 50
+		threshold = 80
 	}
-	if !shouldTrigger && event.ThreatScore >= threshold {
+	if !shouldTrigger && event.ThreatScore >= threshold && event.RuleID != "" && event.RuleID != "suricata_flow" && event.RuleID != "suricata_dns" {
 		shouldTrigger = true
-		reason = fmt.Sprintf("Autonomous Threshold Match (Score: %d)", event.ThreatScore)
+		reason = fmt.Sprintf("Autonomous Threshold Match (Score: %d, Rule: %s)", event.ThreatScore, event.RuleID)
 		pbID = "PB-101"
 	}
 
@@ -663,7 +578,6 @@ func (s *CentralServer) checkAutonomousBanPolicy(event *StoredEvent) {
 		// Enforce via TTLBanManager if present, or direct broadcast fallback
 		s.mu.RLock()
 		ttlMgr := s.ttlManager
-		bot := s.telegramBot
 		hub := s.wsHub
 		s.mu.RUnlock()
 
@@ -699,14 +613,9 @@ func (s *CentralServer) checkAutonomousBanPolicy(event *StoredEvent) {
 		// Broadcast SOAR Playbook Run update to Web SOC
 		if hub != nil {
 			hub.Broadcast("soar_playbook_run", map[string]interface{}{
-				"run": run,
+				"run":         run,
 				"active_runs": soarEngine.GetActiveRuns(),
 			})
-		}
-
-		// Dispatch high-priority autonomous Telegram alert
-		if bot != nil {
-			go bot.SendAutoBanAlert(event, banReason, dispatched)
 		}
 	}
 }

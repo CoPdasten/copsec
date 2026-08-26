@@ -193,7 +193,7 @@ func (e *Engine) seedCuratedPlaybooks() {
 				Title:           "Lock Compromised Accounts & Enforce Key-Based Auth",
 				Description:     "Temporarily lock breached accounts (passwd -l), invalidate PAM tokens, and sync swarm-wide quarantine.",
 				Command:         "sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config && systemctl reload sshd",
-				AutomatedAction: "SWARM_SYNC",
+				AutomatedAction: "FLEET_BAN",
 				Status:          "PENDING",
 			},
 		},
@@ -249,9 +249,9 @@ func (e *Engine) seedCuratedPlaybooks() {
 		},
 	}
 
-	// 4. PB-402: Kernel Rootkit & eBPF Hook Tamper Guard
-	e.playbooks["PB-402"] = &Playbook{
-		ID:               "PB-402",
+	// 4. PB-406: Rootkit Defense & eBPF Hook Tamper Guard
+	pb406 := &Playbook{
+		ID:               "PB-406",
 		Name:             "Kernel Rootkit & eBPF Hook Tamper Guard",
 		Category:         "Host & Kernel",
 		MitreTechniques:  []string{"T1014", "T1055"},
@@ -299,6 +299,8 @@ func (e *Engine) seedCuratedPlaybooks() {
 			},
 		},
 	}
+	e.playbooks["PB-406"] = pb406
+	e.playbooks["PB-402"] = pb406
 
 	// 5. PB-501: Privilege Escalation & Sudo Anomaly Alert
 	e.playbooks["PB-501"] = &Playbook{
@@ -386,7 +388,7 @@ func (e *Engine) ShouldTriggerSOAR(
 		strings.Contains(ruleLower, "fim_healing") ||
 		strings.Contains(ruleLower, "module_taint") ||
 		mitreUpper == "T1014" || mitreUpper == "T1055" {
-		return true, "Critical Kernel / Rootkit Security Violation Intercepted", "PB-402"
+		return true, "Critical Kernel / Rootkit Security Violation Intercepted", "PB-406"
 	}
 
 	// 2. Absolute Exclusions (Host/Bogon or benign static asset requests)
@@ -457,7 +459,7 @@ func (e *Engine) ShouldTriggerSOAR(
 		} else if mitreUpper == "T1071" || mitreUpper == "T1568" {
 			return true, fmt.Sprintf("High-Threat Network C2 Flow (Score: %d, MITRE: %s)", threatScore, mitreUpper), "PB-305"
 		} else if mitreUpper == "T1014" || mitreUpper == "T1055" {
-			return true, fmt.Sprintf("High-Threat Host Integrity Breach (Score: %d, MITRE: %s)", threatScore, mitreUpper), "PB-402"
+			return true, fmt.Sprintf("High-Threat Host Integrity Breach (Score: %d, MITRE: %s)", threatScore, mitreUpper), "PB-406"
 		}
 	}
 

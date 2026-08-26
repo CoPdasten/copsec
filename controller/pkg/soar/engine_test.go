@@ -59,7 +59,7 @@ func TestAntiNoiseGatingAndHighFidelityTriggers(t *testing.T) {
 		{90, "198.51.100.45", "rce_exploit", "T1190", "POST /api/exec cmd=/bin/sh -i HTTP/1.1", 1, "PB-101"},
 		{85, "198.51.100.50", "ssh_auth_burst", "T1110", "Failed password for root from 198.51.100.50", 6, "PB-204"},
 		{95, "198.51.100.60", "c2_beacon", "T1071", "DNS query tunnel.c2.attacker.com", 1, "PB-305"},
-		{95, "127.0.0.1", "rootkit_tamper", "T1014", "eBPF ptrace injection detected on PID 1234", 1, "PB-402"},
+		{95, "127.0.0.1", "rootkit_tamper", "T1014", "eBPF ptrace injection detected on PID 1234", 1, "PB-406"},
 	}
 
 	for _, tt := range criticalEvents {

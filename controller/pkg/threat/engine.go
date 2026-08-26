@@ -121,6 +121,7 @@ func NewScoringEngine(banThreshold, tarpitThreshold int) *ScoringEngine {
 		"172.16.0.0/12",
 		"192.168.0.0/16",
 		"100.64.0.0/10",   // Tailscale / CGNAT
+		"fd7a:115c:a1e0::/48", // Tailscale IPv6 Overlay
 		"169.254.0.0/16",  // Link-local
 		"8.8.8.8/32",      // Google Primary DNS
 		"8.8.4.4/32",      // Google Secondary DNS

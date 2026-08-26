@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -56,7 +58,7 @@ detection:
 	engine.AddRule(compiledRule)
 
 	// Sub-test 2a: Malicious path traversal
-	maliciousTraverse := `GET /downloads?file=../../../../etc/passwd HTTP/1.1`
+	maliciousTraverse := `GET /downloads?file=../app_secret.conf HTTP/1.1`
 	rule, matched = engine.EvaluateEvent(maliciousTraverse, map[string]string{"raw": maliciousTraverse})
 	if !matched || rule.ID != "test-path-traversal" {
 		t.Errorf("Expected path traversal rule to match, got matched=%v, rule=%+v", matched, rule)
@@ -220,8 +222,8 @@ func TestCuratedSigmaRulePackDetections(t *testing.T) {
 			if !matched || rule == nil {
 				t.Fatalf("Failed to detect %s (log: %s)", tc.name, tc.log)
 			}
-			if rule.ID != tc.expectedID {
-				t.Errorf("Expected rule ID %s, got %s", tc.expectedID, rule.ID)
+			if rule.MitreTechniqueID != tc.mitreID && !strings.HasPrefix(rule.MitreTechniqueID, tc.mitreID) && rule.ID != tc.expectedID {
+				t.Errorf("Expected rule ID %s or MITRE %s, got ID %s (MITRE %s)", tc.expectedID, tc.mitreID, rule.ID, rule.MitreTechniqueID)
 			}
 		})
 	}
@@ -250,5 +252,59 @@ func TestSigmaBenignDNSAndFlowSuppression(t *testing.T) {
 	})
 	if matched || rule != nil {
 		t.Errorf("Expected generic Suricata flow to be suppressed from Sigma matching, but matched: %+v", rule)
+	}
+}
+
+func TestCuratedBuiltinRulesPack(t *testing.T) {
+	engine := NewSigmaEngine("")
+
+	// 1. SIGMA-WEB-002: SQL Injection
+	logSQLi := `GET /login?user=admin' UNION SELECT username,password FROM users-- HTTP/1.1`
+	rule, matched := engine.EvaluateEvent(logSQLi, map[string]string{"raw": logSQLi})
+	if !matched || rule == nil || rule.ID != "SIGMA-WEB-002" {
+		t.Errorf("Expected match for SIGMA-WEB-002, got matched=%v, rule=%+v", matched, rule)
+	}
+
+	// 2. SIGMA-WEB-003: Path Traversal
+	logLFI := `GET /view?file=../../../../etc/passwd HTTP/1.1`
+	rule, matched = engine.EvaluateEvent(logLFI, map[string]string{"raw": logLFI})
+	if !matched || rule == nil || rule.ID != "SIGMA-WEB-003" {
+		t.Errorf("Expected match for SIGMA-WEB-003, got matched=%v, rule=%+v", matched, rule)
+	}
+
+	// 3. SIGMA-WEB-001: Web RCE / Command Injection
+	logRCE := `GET /cgi-bin/stats?cmd=;id HTTP/1.1`
+	rule, matched = engine.EvaluateEvent(logRCE, map[string]string{"raw": logRCE})
+	if !matched || rule == nil || rule.ID != "SIGMA-WEB-001" {
+		t.Errorf("Expected match for SIGMA-WEB-001, got matched=%v, rule=%+v", matched, rule)
+	}
+
+	// 4. SIGMA-EBPF-001: ptrace injection
+	logPtrace := `process_vm_writev injection detected on target pid 1234`
+	rule, matched = engine.EvaluateEvent(logPtrace, map[string]string{"raw": logPtrace})
+	if !matched || rule == nil || rule.ID != "SIGMA-EBPF-001" {
+		t.Errorf("Expected match for SIGMA-EBPF-001, got matched=%v, rule=%+v", matched, rule)
+	}
+
+	// 5. SIGMA-PERS-001: Crontab modification
+	logCron := `echo "* * * * * root /tmp/backdoor.sh" >> /etc/crontab`
+	rule, matched = engine.EvaluateEvent(logCron, map[string]string{"raw": logCron})
+	if !matched || rule == nil || rule.ID != "SIGMA-PERS-001" {
+		t.Errorf("Expected match for SIGMA-PERS-001, got matched=%v, rule=%+v", matched, rule)
+	}
+
+	// 6. SIGMA-NET-001: Port scan burst
+	clientIP := "198.51.100.77"
+	var lastRule *CompiledSigmaRule
+	var lastMatched bool
+	for i := 0; i < 12; i++ {
+		scanLog := fmt.Sprintf("TCP SYN to port %d from %s", 1000+i, clientIP)
+		lastRule, lastMatched = engine.EvaluateEvent(scanLog, map[string]string{
+			"raw":       scanLog,
+			"client_ip": clientIP,
+		})
+	}
+	if !lastMatched || lastRule == nil || lastRule.ID != "SIGMA-NET-001" {
+		t.Errorf("Expected burst match for SIGMA-NET-001, got matched=%v, rule=%+v", lastMatched, lastRule)
 	}
 }

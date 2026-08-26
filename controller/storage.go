@@ -720,56 +720,6 @@ func (s *StorageEngine) GetAllSystemConfig() (map[string]string, error) {
 	return res, nil
 }
 
-// RecordHoneypotEvent saves intercepted fake SSH or Honey-URL intrusions.
-func (s *StorageEngine) RecordHoneypotEvent(ev *HoneypotEvent) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	query := `INSERT INTO honeypot_events (trap_type, client_ip, port, username, password, key_fingerprint, client_version, requested_url, user_agent, payload_summary, timestamp_ms, auto_banned)
-	          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	res, err := s.db.Exec(query, ev.TrapType, ev.ClientIP, ev.Port, ev.Username, ev.Password, ev.KeyFingerprint, ev.ClientVersion, ev.RequestedURL, ev.UserAgent, ev.PayloadSummary, ev.TimestampMs, ev.AutoBanned)
-	if err != nil {
-		return err
-	}
-	id, _ := res.LastInsertId()
-	ev.ID = id
-	return nil
-}
-
-// GetHoneypotLogs retrieves latest deception trap hits.
-func (s *StorageEngine) GetHoneypotLogs(limit int) ([]*HoneypotEvent, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	query := `SELECT id, trap_type, client_ip, port, username, password, key_fingerprint, client_version, requested_url, user_agent, payload_summary, timestamp_ms, auto_banned
-	          FROM honeypot_events ORDER BY timestamp_ms DESC LIMIT ?`
-	rows, err := s.db.Query(query, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var list []*HoneypotEvent
-	geo := geoip.GetDefaultEngine()
-	for rows.Next() {
-		ev := &HoneypotEvent{}
-		var autoBannedInt int
-		if err := rows.Scan(&ev.ID, &ev.TrapType, &ev.ClientIP, &ev.Port, &ev.Username, &ev.Password, &ev.KeyFingerprint, &ev.ClientVersion, &ev.RequestedURL, &ev.UserAgent, &ev.PayloadSummary, &ev.TimestampMs, &autoBannedInt); err == nil {
-			ev.AutoBanned = (autoBannedInt == 1)
-			if ev.ClientIP != "" && ev.ClientIP != "-" {
-				loc := geo.Lookup(ev.ClientIP)
-				ev.CountryCode = loc.CountryCode
-				ev.CountryName = loc.CountryName
-				ev.City = loc.City
-				ev.ASN = loc.ASN
-				ev.FlagEmoji = loc.FlagEmoji
-			}
-			list = append(list, ev)
-		}
-	}
-	return list, nil
-}
-
 // Close terminates database connections.
 func (s *StorageEngine) Close() error {
 	s.mu.Lock()

@@ -187,49 +187,64 @@ var (
 // GetDefaultCatalog returns the singleton catalog.
 func GetDefaultCatalog() *CuratedCatalog {
 	catalogOnce.Do(func() {
-		defaultCatalog = &CuratedCatalog{
-			rules: []RuleMetadata{
-				{
-					ID:          "sigma-linux-revshell",
-					Title:       "Linux Interactive Reverse Shell and C2 Activity",
-					Description: "Detects interactive bash, netcat, socat, python, perl, ruby, and encoded reverse shells",
-					Level:       "critical",
-					ThreatScore: 95,
-					MitreID:     "T1059.004",
-					Tags:        []string{"attack.execution", "attack.t1059.004", "attack.t1071"},
-					Scope:       ScopeHostLocal,
-				},
-				{
-					ID:          "sigma-linux-evasion",
-					Title:       "Linux Defense Evasion and Anti-Forensics Activity",
-					Description: "Detects history manipulation, log scrubbing, defense impairment, and timestamp spoofing",
-					Level:       "critical",
-					ThreatScore: 95,
-					MitreID:     "T1070",
-					Tags:        []string{"attack.defense_evasion", "attack.t1070", "attack.t1562"},
-					Scope:       ScopeHostLocal,
-				},
-				{
-					ID:          "sigma-linux-persistence",
-					Title:       "Linux Persistence and Privilege Escalation Activity",
-					Description: "Detects unauthorized sudoers modifications, cronjob injections, SUID abuse, and SSH key additions",
-					Level:       "high",
-					ThreatScore: 85,
-					MitreID:     "T1053",
-					Tags:        []string{"attack.persistence", "attack.privilege_escalation", "attack.t1053", "attack.t1548.003"},
-					Scope:       ScopeHostLocal,
-				},
-				{
-					ID:          "sigma-web-advanced",
-					Title:       "Advanced Web Exploits and Modern Injection Vectors",
-					Description: "Detects Server-Side Template Injection (SSTI), PHP Wrappers / LFI, Out-of-Band Exfiltration, and NoSQL Injection",
-					Level:       "critical",
-					ThreatScore: 95,
-					MitreID:     "T1190",
-					Tags:        []string{"attack.initial_access", "attack.t1190", "attack.persistence", "attack.t1505.003"},
-					Scope:       ScopeNetwork,
-				},
+		rules := []RuleMetadata{
+			{
+				ID:          "sigma-linux-revshell",
+				Title:       "Linux Interactive Reverse Shell and C2 Activity",
+				Description: "Detects interactive bash, netcat, socat, python, perl, ruby, and encoded reverse shells",
+				Level:       "critical",
+				ThreatScore: 95,
+				MitreID:     "T1059.004",
+				Tags:        []string{"attack.execution", "attack.t1059.004", "attack.t1071"},
+				Scope:       ScopeHostLocal,
 			},
+			{
+				ID:          "sigma-linux-evasion",
+				Title:       "Linux Defense Evasion and Anti-Forensics Activity",
+				Description: "Detects history manipulation, log scrubbing, defense impairment, and timestamp spoofing",
+				Level:       "critical",
+				ThreatScore: 95,
+				MitreID:     "T1070",
+				Tags:        []string{"attack.defense_evasion", "attack.t1070", "attack.t1562"},
+				Scope:       ScopeHostLocal,
+			},
+			{
+				ID:          "sigma-linux-persistence",
+				Title:       "Linux Persistence and Privilege Escalation Activity",
+				Description: "Detects unauthorized sudoers modifications, cronjob injections, SUID abuse, and SSH key additions",
+				Level:       "high",
+				ThreatScore: 85,
+				MitreID:     "T1053",
+				Tags:        []string{"attack.persistence", "attack.privilege_escalation", "attack.t1053", "attack.t1548.003"},
+				Scope:       ScopeHostLocal,
+			},
+			{
+				ID:          "sigma-web-advanced",
+				Title:       "Advanced Web Exploits and Modern Injection Vectors",
+				Description: "Detects Server-Side Template Injection (SSTI), PHP Wrappers / LFI, Out-of-Band Exfiltration, and NoSQL Injection",
+				Level:       "critical",
+				ThreatScore: 95,
+				MitreID:     "T1190",
+				Tags:        []string{"attack.initial_access", "attack.t1190", "attack.persistence", "attack.t1505.003"},
+				Scope:       ScopeNetwork,
+			},
+		}
+
+		for _, br := range CuratedBuiltinRules() {
+			rules = append(rules, RuleMetadata{
+				ID:          br.ID,
+				Title:       br.Title,
+				Description: br.Description,
+				Level:       strings.ToLower(br.Level),
+				ThreatScore: br.ThreatScore,
+				MitreID:     br.MitreTechniqueID,
+				Tags:        br.Tags,
+				Scope:       br.Scope,
+			})
+		}
+
+		defaultCatalog = &CuratedCatalog{
+			rules: rules,
 		}
 	})
 	return defaultCatalog

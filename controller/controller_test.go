@@ -12,6 +12,7 @@ import (
 
 	copsecproto "github.com/copsec/collector/proto"
 	"github.com/copsec/controller/pkg/sigma"
+	"github.com/copsec/controller/pkg/soar"
 	"google.golang.org/grpc/metadata"
 )
 
@@ -57,23 +58,6 @@ func TestRuleEngineAnalysis(t *testing.T) {
 	name, tactic := engine.GetTechniqueMeta("T1190")
 	if name == "" || tactic == "" {
 		t.Errorf("Expected technique meta for T1190, got: name=%s, tactic=%s", name, tactic)
-	}
-}
-
-func TestAIEngineLocalHeuristic(t *testing.T) {
-	ai := NewAIEngine()
-
-	evSQLi := &StoredEvent{
-		Source:           "nginx",
-		RawLine:          "GET /search?q=1%27%20UNION%20SELECT%20username,password%20FROM%20users-- HTTP/1.1",
-		ClientIP:         "198.51.100.99",
-		MitreTechniqueID: "T1190",
-		ThreatScore:      85,
-	}
-
-	intel := ai.AnalyzeIntent(context.Background(), evSQLi)
-	if intel.AttackerIntent == "" || intel.Mitigation == "" || intel.ConfidenceScore < 70 {
-		t.Errorf("Expected valid AI Threat Intel, got: %+v", intel)
 	}
 }
 
@@ -202,11 +186,11 @@ func TestAutonomousAutoBanPolicy(t *testing.T) {
 		t.Fatalf("Internal loopback IP 127.0.0.1 must not be banned, got %d bans", len(bans))
 	}
 
-	// 2. Test Static Threshold (ThreatScore >= 50 triggers instant ban)
+	// 2. Test Threshold (ThreatScore >= 80 triggers instant ban)
 	critEvent := &StoredEvent{
 		NodeID:           "node-vps-test",
 		ClientIP:         "198.51.100.88",
-		ThreatScore:      60,
+		ThreatScore:      85,
 		MitreTechniqueID: "T1190",
 		RuleID:           "sqli_union_injection",
 		RawLine:          "GET /search?q=1' UNION SELECT 1,2--",
@@ -216,39 +200,7 @@ func TestAutonomousAutoBanPolicy(t *testing.T) {
 
 	bans, err := store.GetActiveBans()
 	if err != nil || len(bans) != 1 || bans[0].IP != "198.51.100.88" {
-		t.Fatalf("Expected auto-ban for 198.51.100.88 (ThreatScore: 60 >= 50), got %+v", bans)
-	}
-
-	// 3. Test Correlational Spike Threshold (3x >= 35 within 60s)
-	spikeIP := "198.51.100.99"
-	spikeEvent := &StoredEvent{
-		NodeID:           "node-vps-test",
-		ClientIP:         spikeIP,
-		ThreatScore:      40,
-		MitreTechniqueID: "T1110.001",
-		RuleID:           "ssh_failed_password",
-		RawLine:          "Failed password for invalid user root",
-	}
-
-	// Event 1
-	server.checkAutonomousBanPolicy(spikeEvent)
-	bans, _ = store.GetActiveBans()
-	if len(bans) != 1 { // Still only 1 ban from previous test
-		t.Fatalf("Expected no auto-ban after 1 event, got %d bans", len(bans))
-	}
-
-	// Event 2
-	server.checkAutonomousBanPolicy(spikeEvent)
-	bans, _ = store.GetActiveBans()
-	if len(bans) != 1 {
-		t.Fatalf("Expected no auto-ban after 2 events, got %d bans", len(bans))
-	}
-
-	// Event 3 (Should trigger auto-ban)
-	server.checkAutonomousBanPolicy(spikeEvent)
-	bans, _ = store.GetActiveBans()
-	if len(bans) != 2 {
-		t.Fatalf("Expected 2 auto-bans after 3rd correlated event, got %d bans", len(bans))
+		t.Fatalf("Expected auto-ban for 198.51.100.88 (ThreatScore: 85 >= 80), got %+v", bans)
 	}
 }
 
@@ -287,44 +239,6 @@ func TestTTLBanManagerLifecycle(t *testing.T) {
 	}
 }
 
-func TestDeceptionHoneypotAndRateLimiter(t *testing.T) {
-	tmpDir := t.TempDir()
-	store, _ := NewStorageEngine(filepath.Join(tmpDir, "test.db"))
-	defer store.Close()
-
-	analyzer := NewRuleEngine("")
-	server := NewCentralServer(store, analyzer)
-	ttlMgr := NewTTLBanManager(store, server)
-	defer ttlMgr.Stop()
-
-	// 1. Honey-URL Router Test
-	router := NewHoneyDeceptionRouter(server, ttlMgr, store)
-	if !router.IsHoneyURL("/admin") || !router.IsHoneyURL("/.env") || !router.IsHoneyURL("/wp-login.php") {
-		t.Errorf("Expected standard deception URLs to be recognized")
-	}
-	if router.IsHoneyURL("/api/v1/legitimate-endpoint") {
-		t.Errorf("Expected legitimate endpoint to NOT be flagged as honey URL")
-	}
-
-	// 2. Token-Bucket Rate Limiter Test
-	rl := NewTokenBucketRateLimiter(5.0, 5.0, server, ttlMgr) // 5 tokens max
-	testIP := "203.0.113.88"
-
-	// Consume all 5 tokens
-	for i := 0; i < 5; i++ {
-		allowed, _ := rl.Allow(testIP)
-		if !allowed {
-			t.Errorf("Request %d should have been allowed within burst", i)
-		}
-	}
-
-	// 6th request must be rejected with 429
-	allowed, retryAfter := rl.Allow(testIP)
-	if allowed || retryAfter <= 0 {
-		t.Errorf("6th request should be rate limited, got allowed=%v, retryAfter=%d", allowed, retryAfter)
-	}
-}
-
 func TestSystemConfigStorage(t *testing.T) {
 	tmpDir := t.TempDir()
 	store, _ := NewStorageEngine(filepath.Join(tmpDir, "test.db"))
@@ -332,10 +246,8 @@ func TestSystemConfigStorage(t *testing.T) {
 
 	cfg := map[string]string{
 		"grpc_addr":         "127.0.0.1:9443",
-		"telegram_token":    "test_bot_token",
-		"telegram_chat":     "-100987654",
-		"honeypot_ssh_addr": ":2223",
-		"autoban_threshold": "65",
+		"ipinfo_token":      "test_tok",
+		"autoban_threshold": "80",
 		"configured":        "true",
 	}
 
@@ -348,7 +260,7 @@ func TestSystemConfigStorage(t *testing.T) {
 		t.Fatalf("GetAllSystemConfig failed: %v", err)
 	}
 
-	if loaded["grpc_addr"] != "127.0.0.1:9443" || loaded["autoban_threshold"] != "65" {
+	if loaded["grpc_addr"] != "127.0.0.1:9443" || loaded["autoban_threshold"] != "80" {
 		t.Errorf("Config mismatch: %+v", loaded)
 	}
 }
@@ -445,7 +357,7 @@ func TestSOCAlertsTriageAPI(t *testing.T) {
 	server.SetSigmaEngine(sigmaEng)
 	hub := NewWSHub()
 
-	webSoc := NewWebSOCServer("127.0.0.1:0", server, store, ttlMgr, sigmaEng, hub, nil, nil, nil)
+	webSoc := NewWebSOCServer("127.0.0.1:0", server, store, ttlMgr, sigmaEng, hub)
 
 	// Insert test incidents
 	// 1. Critical SQLi (ThreatScore 95)
@@ -561,75 +473,32 @@ func TestSOCAlertsTriageAPI(t *testing.T) {
 	}
 }
 
-func TestAIAgentAndNotifierAPIs(t *testing.T) {
-	tmpDir := t.TempDir()
-	store, err := NewStorageEngine(filepath.Join(tmpDir, "ai_test.db"))
-	if err != nil {
-		t.Fatalf("Failed to initialize storage: %v", err)
-	}
-	defer store.Close()
-
-	analyzer := NewRuleEngine("")
-	server := NewCentralServer(store, analyzer)
-	ttlMgr := NewTTLBanManager(store, server)
-	defer ttlMgr.Stop()
-	wsHub := NewWSHub()
-
-	webSoc := NewWebSOCServer(":0", server, store, ttlMgr, nil, wsHub, nil, nil, nil)
-
-	// 1. Test POST /api/ai/agent/test-dispatch
-	dispatchBody, _ := json.Marshal(map[string]interface{}{
-		"node_id":            "node-soc-prod",
-		"source":             "nginx",
-		"raw_line":           "GET /api/v1/users?id=1 UNION SELECT null,username,password FROM accounts-- HTTP/1.1",
-		"client_ip":          "198.51.100.44",
-		"threat_score":       96,
-		"rule_id":            "sigma-web-sqli",
-		"mitre_technique_id": "T1190",
-	})
-
-	dispatchReq := httptest.NewRequest("POST", "/api/ai/agent/test-dispatch", bytes.NewBuffer(dispatchBody))
-	dispatchReq.Header.Set("Content-Type", "application/json")
-	dispatchRec := httptest.NewRecorder()
-	webSoc.handleAIAgentTestDispatch(dispatchRec, dispatchReq)
-
-	if dispatchRec.Code != http.StatusOK {
-		t.Fatalf("Expected status 200 from /api/ai/agent/test-dispatch, got %d: %s", dispatchRec.Code, dispatchRec.Body.String())
+func TestSOARPlaybookEngineAndLifecycle(t *testing.T) {
+	eng := soar.GetDefaultEngine()
+	playbooks := eng.GetPlaybooks()
+	if len(playbooks) < 4 {
+		t.Fatalf("Expected at least 4 curated SOAR playbooks, got %d", len(playbooks))
 	}
 
-	var dispatchResp map[string]interface{}
-	if err := json.Unmarshal(dispatchRec.Body.Bytes(), &dispatchResp); err != nil {
-		t.Fatalf("Failed to parse dispatch response: %v", err)
+	// Verify required playbooks
+	required := []string{"PB-101", "PB-204", "PB-305", "PB-406"}
+	for _, id := range required {
+		pb := eng.GetPlaybook(id)
+		if pb == nil {
+			t.Errorf("Required playbook %s not found", id)
+		}
 	}
 
-	if dispatchResp["success"] != true {
-		t.Errorf("Expected success to be true in dispatch response")
+	// Start run
+	run := eng.StartPlaybookRun(5001, "PB-101", "198.51.100.99", "node-prod-1", 90, "T1190", "SQLi Injection")
+	if run.Status != "RUNNING" {
+		t.Errorf("Expected status RUNNING, got %s", run.Status)
 	}
 
-	// 2. Test GET /api/ai/agent/latest
-	latestReq := httptest.NewRequest("GET", "/api/ai/agent/latest?limit=10", nil)
-	latestRec := httptest.NewRecorder()
-	webSoc.handleAIAgentLatest(latestRec, latestReq)
-
-	if latestRec.Code != http.StatusOK {
-		t.Fatalf("Expected status 200 from /api/ai/agent/latest, got %d", latestRec.Code)
-	}
-
-	var briefs []map[string]interface{}
-	if err := json.Unmarshal(latestRec.Body.Bytes(), &briefs); err != nil {
-		t.Fatalf("Failed to parse latest briefs response: %v", err)
-	}
-
-	if len(briefs) == 0 {
-		t.Fatalf("Expected at least 1 AI triage brief in history, got 0")
-	}
-
-	firstBrief := briefs[0]
-	if firstBrief["client_ip"] != "198.51.100.44" {
-		t.Errorf("Expected client_ip 198.51.100.44, got %v", firstBrief["client_ip"])
-	}
-	if firstBrief["threat_score"].(float64) != 96 {
-		t.Errorf("Expected threat_score 96, got %v", firstBrief["threat_score"])
+	// Advance step
+	updated, err := eng.AdvanceStep(run.RunID, 0, "COMPLETED", "Extracted offending URI: /api/v1/users")
+	if err != nil || updated.CurrentStepIdx != 1 {
+		t.Errorf("AdvanceStep failed: %v", err)
 	}
 }
 
@@ -647,7 +516,7 @@ func TestIPInfoRESTLookupAndDrawerEnrichment(t *testing.T) {
 	defer ttlMgr.Stop()
 	wsHub := NewWSHub()
 
-	webSoc := NewWebSOCServer(":0", server, store, ttlMgr, nil, wsHub, nil, nil, nil)
+	webSoc := NewWebSOCServer(":0", server, store, ttlMgr, nil, wsHub)
 
 	// 1. Test GET /api/ipinfo/lookup with public test IP
 	req := httptest.NewRequest("GET", "/api/ipinfo/lookup?ip=198.51.100.77", nil)

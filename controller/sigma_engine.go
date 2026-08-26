@@ -403,6 +403,36 @@ func (se *SigmaEngine) EvaluateEvent(rawLine string, fields map[string]string) (
 
 	normalizedRaw := NormalizePayload(rawLine)
 
+	// 0. Curated Deterministic Sigma Rule Pack evaluation
+	clientIP := ""
+	if fields != nil {
+		if ip, ok := fields["client_ip"]; ok {
+			clientIP = ip
+		} else if ip, ok := fields["sourceip"]; ok {
+			clientIP = ip
+		}
+	}
+	var ts int64
+	if fields != nil {
+		if tsStr, ok := fields["timestamp_ms"]; ok {
+			ts, _ = strconv.ParseInt(tsStr, 10, 64)
+		}
+	}
+	if builtinRule, ok := sigma.GetBuiltinTracker().EvaluateBuiltinRules(rawLine, fields, clientIP, ts); ok {
+		return &CompiledSigmaRule{
+			ID:                 builtinRule.ID,
+			Title:              builtinRule.Title,
+			Description:        builtinRule.Description,
+			Level:              strings.ToLower(builtinRule.Level),
+			ThreatScore:        builtinRule.ThreatScore,
+			MitreTechniqueID:   builtinRule.MitreTechniqueID,
+			MitreTechniqueName: builtinRule.MitreTechniqueName,
+			MitreTactic:        builtinRule.MitreTactic,
+			Tags:               builtinRule.Tags,
+			Scope:              builtinRule.Scope,
+		}, true
+	}
+
 	for _, rule := range se.rules {
 		if se.evaluateRule(rule, fields, rawLine, normalizedRaw) {
 			return rule, true
@@ -677,7 +707,7 @@ func buildValueMatcher(val string, modifier MatchModifier) ValueMatcher {
 }
 
 func parseMitreTags(tags []string, title string) (techniqueID, techniqueName, tactic string) {
-	techniqueID = "T1190"
+	techniqueID = ""
 	techniqueName = title
 	tactic = "Initial Access"
 
@@ -694,7 +724,7 @@ func parseMitreTags(tags []string, title string) (techniqueID, techniqueName, ta
 		}
 	}
 
-	if techniqueName == title {
+	if techniqueName == title && techniqueID != "" {
 		switch techniqueID {
 		case "T1190":
 			techniqueName = "Exploit Public-Facing Application"

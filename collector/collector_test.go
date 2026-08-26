@@ -246,7 +246,7 @@ func TestGrpcClientFlushOfflineBufferLive(t *testing.T) {
 }
 
 func TestFallbackEngineAutonomousInspection(t *testing.T) {
-	fallback := NewFallbackEngine("node-vps-test", "", "")
+	fallback := NewFallbackEngine("node-vps-test")
 	fallback.SetFallbackActive(true)
 
 	if !fallback.IsActive() {
