@@ -964,7 +964,7 @@
         <div class="card-title">
           <span>Raw Telemetry Log Console</span>
           <div style="display: flex; gap: 6px;">
-            <button class="btn" style="padding: 2px 6px;" onclick="copyRawLog()">[Copy Raw]</button>
+            <button class="btn" style="padding: 2px 6px;" onclick="copyRawLog(this)">[Copy Raw]</button>
             <button class="btn" style="padding: 2px 6px;" onclick="prettifyRawLog()">[Format JSON]</button>
           </div>
         </div>
@@ -978,7 +978,7 @@
             <span>Contextual Investigation Runbook</span>
             <span id="drawerMitreTechniqueLabel" style="font-size: 10px; color: var(--purple);">[T1190]</span>
           </div>
-          <button class="btn btn-accent" style="padding: 2px 8px; font-size: 10px;" onclick="copyCompleteRunbookScript()">[Copy Complete Script]</button>
+          <button class="btn btn-accent" style="padding: 2px 8px; font-size: 10px;" onclick="copyCompleteRunbookScript(this)">[Copy Complete Script]</button>
         </div>
         <div id="drawerCommandsList" style="display: flex; flex-direction: column; gap: 8px;"></div>
       </div>
@@ -2076,18 +2076,31 @@
         row.style.background = 'rgba(255,255,255,0.02)';
         row.style.borderRadius = '4px';
         row.style.border = '1px solid var(--border)';
-        row.innerHTML = `
-          <div style="flex: 1; overflow: hidden;">
-            <div style="font-size: 10px; font-weight: 600; color: var(--text);">${item.title}:</div>
-            <div style="font-size: 10px; font-family: monospace; color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHTML(item.cmd)}</div>
-          </div>
-          <button class="btn" style="padding: 2px 6px; font-size: 10px;" onclick="copyText('${escapeHTML(item.cmd)}')">[Copy]</button>
+
+        const textDiv = document.createElement('div');
+        textDiv.style.flex = '1';
+        textDiv.style.overflow = 'hidden';
+        textDiv.innerHTML = `
+          <div style="font-size: 10px; font-weight: 600; color: var(--text);">${item.title}:</div>
+          <div style="font-size: 10px; font-family: monospace; color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHTML(item.cmd)}</div>
         `;
+
+        const btn = document.createElement('button');
+        btn.className = 'btn';
+        btn.style.padding = '2px 6px';
+        btn.style.fontSize = '10px';
+        btn.innerText = '[Copy]';
+        btn.onclick = function() {
+          window.copyToClipboard(item.cmd, this);
+        };
+
+        row.appendChild(textDiv);
+        row.appendChild(btn);
         container.appendChild(row);
       });
     }
 
-    function copyCompleteRunbookScript() {
+    function copyCompleteRunbookScript(btnElement) {
       if (!currentDrawerEvent) {
         showToast('No active incident selected', 'crit');
         return;
@@ -2095,8 +2108,7 @@
       const cmds = getCurrentRunbookCommands(currentDrawerEvent);
       if (cmds.length === 0) return;
       const scriptText = cmds.map(c => c.cmd).join(';\n');
-      copyText(scriptText);
-      showToast('[RUNBOOK] Complete triage bash script copied', 'ok');
+      window.copyToClipboard(scriptText, btnElement || document.getElementById('btnCopyAllRunbook'));
     }
 
     function exportCaseMarkdown() {
@@ -2193,9 +2205,9 @@ ${notes}
       if (drawer) drawer.classList.remove('open');
     }
 
-    function copyRawLog() {
+    function copyRawLog(btnElement) {
       const el = document.getElementById('dRaw');
-      if (el) copyText(el.textContent);
+      if (el) window.copyToClipboard(el.textContent, btnElement);
     }
 
     function prettifyRawLog() {
@@ -2210,11 +2222,50 @@ ${notes}
       }
     }
 
-    function copyText(txt) {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(txt);
+    window.copyToClipboard = function(text, btnElement) {
+      if (!text) return;
+
+      const showSuccess = () => {
+        if (btnElement) {
+          const originalText = btnElement.innerText;
+          btnElement.innerText = '[COPIED]';
+          btnElement.style.color = 'var(--green)';
+          setTimeout(() => {
+            btnElement.innerText = originalText;
+            btnElement.style.color = '';
+          }, 1500);
+        }
+        showToast('Copied to clipboard', 'ok');
+      };
+
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(showSuccess).catch(() => fallbackCopy(text, showSuccess));
+      } else {
+        fallbackCopy(text, showSuccess);
       }
-      showToast('Copied to clipboard', 'ok');
+    };
+
+    function fallbackCopy(text, callback) {
+      const textArea = document.createElement("textarea");
+      textArea.value = text;
+      textArea.style.position = "fixed";
+      textArea.style.left = "-999999px";
+      textArea.style.top = "-999999px";
+      document.body.appendChild(textArea);
+      textArea.focus();
+      textArea.select();
+      try {
+        const successful = document.execCommand('copy');
+        if (callback) callback();
+      } catch (err) {
+        console.error('Fallback copy failed:', err);
+        showToast('Copy failed', 'crit');
+      }
+      document.body.removeChild(textArea);
+    }
+
+    function copyText(txt, btnElement) {
+      window.copyToClipboard(txt, btnElement);
     }
 
     async function saveDrawerNotes() {
