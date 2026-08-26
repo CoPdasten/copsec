@@ -126,12 +126,16 @@ func (ws *WebSOCServer) Start() error {
 	mux.HandleFunc("/api/config/ipinfo", ws.handleConfigIPInfo)
 	mux.HandleFunc("/api/stats", ws.handleStats)
 	mux.HandleFunc("/api/events", ws.handleEvents)
+	mux.HandleFunc("/api/telemetry", ws.handleEvents)
 	mux.HandleFunc("/api/alerts", ws.handleAlerts)
 	mux.HandleFunc("/api/alerts/triage", ws.handleAlertsTriage)
 	mux.HandleFunc("/api/bans", ws.handleBans)
 	mux.HandleFunc("/api/quarantine", ws.handleBans)
 	mux.HandleFunc("/api/quarantine/unban", ws.handleSOARUnban)
 	mux.HandleFunc("/api/quarantine/ban", ws.handleSOARBan)
+	mux.HandleFunc("/api/mitigation/tarpit", ws.handleMitigationTarpit)
+	mux.HandleFunc("/api/mitigation/ban", ws.handleSOARBan)
+	mux.HandleFunc("/api/mitigation/unban", ws.handleSOARUnban)
 	mux.HandleFunc("/api/soar/ban", ws.handleSOARBan)
 	mux.HandleFunc("/api/soar/unban", ws.handleSOARUnban)
 	mux.HandleFunc("/api/soar/playbooks", ws.handleSOARPlaybooks)
@@ -433,8 +437,11 @@ func (ws *WebSOCServer) handleEvents(w http.ResponseWriter, r *http.Request) {
 
 	query := r.URL.Query().Get("q")
 	limitStr := r.URL.Query().Get("limit")
-	limit := 50
-	if l, err := strconv.Atoi(limitStr); err == nil && l > 0 && l <= 500 {
+	limit := 500
+	if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+		if l > 5000 {
+			l = 5000
+		}
 		limit = l
 	}
 
@@ -524,6 +531,56 @@ func (ws *WebSOCServer) handleSOARUnban(w http.ResponseWriter, r *http.Request) 
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"message": fmt.Sprintf("IP %s unbanned across all layers", req.IP),
+	})
+}
+
+func (ws *WebSOCServer) handleMitigationTarpit(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		IP              string `json:"ip"`
+		DurationSeconds int64  `json:"duration_seconds"`
+		Reason          string `json:"reason"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	cleanIP := strings.TrimSpace(req.IP)
+	if cleanIP == "" || isProtectedIP(cleanIP) {
+		http.Error(w, "Invalid or protected IP", http.StatusBadRequest)
+		return
+	}
+
+	dur := req.DurationSeconds
+	if dur <= 0 {
+		dur = 3600
+	}
+	reason := req.Reason
+	if reason == "" {
+		reason = "Analyst Instant Action: Zero-Window Tarpit Trap"
+	}
+
+	if ws.ttlManager != nil {
+		record, err := ws.ttlManager.BanIP(cleanIP, reason, dur, TierTempIsolation)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(record)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"ip":      cleanIP,
+		"action":  "TARPIT",
 	})
 }
 
@@ -874,8 +931,11 @@ func (ws *WebSOCServer) handleAlerts(w http.ResponseWriter, r *http.Request) {
 	}
 
 	limitStr := r.URL.Query().Get("limit")
-	limit := 100
-	if l, err := strconv.Atoi(limitStr); err == nil && l > 0 && l <= 500 {
+	limit := 500
+	if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+		if l > 5000 {
+			l = 5000
+		}
 		limit = l
 	}
 

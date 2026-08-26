@@ -565,7 +565,6 @@
     <button class="tab-btn active" onclick="navigateTo('dashboard')">[DASHBOARD]</button>
     <button class="tab-btn" onclick="navigateTo('telemetry')">[TELEMETRY] <span class="tab-badge" id="badgeTelemetry">0</span></button>
     <button class="tab-btn" onclick="navigateTo('alerts')">[ALERTS] <span class="tab-badge" id="badgeAlerts" style="background: var(--red); color:#fff;">0</span></button>
-    <button class="tab-btn" onclick="navigateTo('soar')">[SOAR PLAYBOOKS] <span class="tab-badge" id="badgeSOAR">0</span></button>
     <button class="tab-btn" onclick="navigateTo('rules')">[DETECTION RULES] <span class="tab-badge" id="badgeRules">0</span></button>
     <button class="tab-btn" onclick="navigateTo('settings')">[FLEET & SETTINGS]</button>
   </nav>
@@ -734,6 +733,12 @@
             <option value="MEDIUM">[MED] Medium (30+)</option>
             <option value="INFO">[INFO] Informational</option>
           </select>
+          <select id="telemetryBufferLimit" class="input-box" onchange="changeBufferLimit(this.value)" title="Configure live rolling telemetry stream buffer capacity">
+            <option value="200">Buffer: 200 Logs</option>
+            <option value="500">Buffer: 500 Logs</option>
+            <option value="1000" selected>Buffer: 1000 Logs</option>
+            <option value="0">Buffer: Live All (&infin;)</option>
+          </select>
         </div>
         <div class="toolbar-right">
           <button class="btn" id="btnAutoScroll" onclick="toggleAutoScroll()">AUTO-SCROLL: ON</button>
@@ -801,48 +806,7 @@
       </div>
     </div>
 
-    <!-- Tab 3: SOAR Playbooks & Mitigation Hub -->
-    <div id="tab-soar" class="tab-pane">
-      <!-- Manual Emergency Triggers -->
-      <div class="card">
-        <div class="card-title">
-          <span>Manual SOAR Mitigation Dispatch</span>
-          <div style="display: flex; gap: 6px;">
-            <button class="btn btn-red" style="padding: 2px 6px;" onclick="openQuarantineModal()">[QUARANTINE VAULT]</button>
-          </div>
-        </div>
-        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-          <input type="text" id="manualActionIP" class="input-box" placeholder="Target Attacker IP (e.g. 198.51.100.99)" style="width: 220px;" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
-          <button class="btn btn-red" onclick="executeSOARAction('XDP_BLACKHOLE')">[XDP_DROP] Enforce Drop</button>
-          <button class="btn btn-orange" onclick="executeSOARAction('TARPIT_TRAP')">[TARPIT] Zero-Window</button>
-          <button class="btn btn-accent" onclick="executeSOARAction('ISOLATE_HOST')">[ISOLATE] Node Service</button>
-          <button class="btn btn-green" onclick="executeSOARAction('WHITELIST_IP')">[ALLOW] Unban & Whitelist</button>
-        </div>
-      </div>
-
-      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; flex: 1;">
-        <!-- Curated Playbook Catalog -->
-        <div class="card" style="overflow-y: auto;">
-          <div class="card-title">Live SOAR Playbook Catalog</div>
-          <div id="playbookCatalogList" style="display: flex; flex-direction: column; gap: 8px;">
-            <!-- Rendered playbooks -->
-          </div>
-        </div>
-
-        <!-- Active Execution Runs -->
-        <div class="card" style="overflow-y: auto;">
-          <div class="card-title">
-            <span>Real-Time Execution Instances</span>
-            <button class="btn" style="padding: 2px 6px;" onclick="fetchSOARRuns()">REFRESH RUNS</button>
-          </div>
-          <div id="playbookRunsList" style="display: flex; flex-direction: column; gap: 10px;">
-            <div style="color: var(--text-muted); padding: 12px; text-align: center;">No active execution runs</div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Tab 4: Detection Rules (Detection-as-Code) -->
+    <!-- Tab 3: Detection Rules (Detection-as-Code) -->
     <div id="tab-rules" class="tab-pane">
       <div class="toolbar">
         <div class="toolbar-left">
@@ -1023,13 +987,14 @@
         <button class="btn btn-accent" style="align-self: flex-start;" onclick="saveDrawerNotes()">Save Notes</button>
       </div>
 
-      <!-- Quick Triage Action Footer -->
+      <!-- Direct 1-Click Incident Mitigation Actions -->
       <div class="card" style="border-color: var(--border-accent);">
-        <div class="card-title">Immediate Mitigation Actions</div>
+        <div class="card-title">Direct Incident Mitigation (1-Click Actions)</div>
         <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-          <button class="btn btn-red" onclick="quickDrawerBan()">[XDP_DROP] Enforce Ban</button>
-          <button class="btn btn-orange" onclick="quickDrawerTarpit()">[TARPIT] Zero-Window</button>
-          <button class="btn btn-green" onclick="quickDrawerWhitelist()">[ALLOW] Whitelist IP</button>
+          <button class="btn btn-red" onclick="quickDrawerBan()">[⚡ Instant XDP Drop (1h)]</button>
+          <button class="btn btn-orange" onclick="quickDrawerTarpit()">[🕳️ Send to Tarpit]</button>
+          <button class="btn btn-green" onclick="quickDrawerUnban()">[🔓 Unban IP]</button>
+          <button class="btn btn-accent" onclick="quickDrawerWhitelist()">[🛡️ Whitelist CIDR]</button>
         </div>
       </div>
     </div>
@@ -1066,25 +1031,6 @@
     </div>
   </div>
 
-  <!-- Launch Playbook Modal -->
-  <div id="playbookModal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 2000; align-items: center; justify-content: center;">
-    <div class="card" style="width: 440px;">
-      <div class="card-title">
-        <span id="pbModalTitle">Launch SOAR Playbook</span>
-        <button class="btn" onclick="closePlaybookModal()">[X]</button>
-      </div>
-      <div style="color: var(--text-muted); font-size: 11px;" id="pbModalDesc">Specify target node or attacker IP to contain:</div>
-      <div>
-        <label style="color: var(--text-muted); font-size: 10px; display: block; margin-bottom: 2px;">TARGET IP / HOSTNAME</label>
-        <input type="text" id="pbModalTargetIP" class="input-box" style="width: 100%;" placeholder="e.g. 198.51.100.99 or 127.0.0.1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
-      </div>
-      <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px;">
-        <button class="btn" onclick="closePlaybookModal()">Cancel</button>
-        <button class="btn btn-red" onclick="confirmLaunchPlaybook()">Launch Run</button>
-      </div>
-    </div>
-  </div>
-
   <!-- Submit Sigma Rule Modal -->
   <div id="ruleModal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 2000; align-items: center; justify-content: center;">
     <div class="card" style="width: 600px; max-height: 80vh;">
@@ -1108,14 +1054,13 @@
     // State
     let ws = null;
     let autoScroll = true;
-    let maxTelemetryRows = 200;
+    let maxTelemetryRows = 1000;
     let currentDrawerEvent = null;
     let currentEventIP = "";
     let lastToasts = new Map();
     let telemetryEvents = [];
     let activeAlertsList = [];
     let allRulesList = [];
-    let pendingLaunchPB = null;
 
     // LRU IPInfo Cache
     const ipinfoCache = new Map();
@@ -1124,6 +1069,24 @@
     let layerCounts = { WAF: 0, EDR: 0, AUTH: 0, NET: 0 };
     let severityCounts = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, INFO: 0 };
     let actorMap = new Map();
+
+    function changeBufferLimit(val) {
+      maxTelemetryRows = parseInt(val) || 0;
+      if (maxTelemetryRows > 0) {
+        if (telemetryEvents.length > maxTelemetryRows) {
+          telemetryEvents = telemetryEvents.slice(0, maxTelemetryRows);
+        }
+        const tbody = document.getElementById('telemetryTableBody');
+        if (tbody) {
+          while (tbody.children.length > maxTelemetryRows) {
+            tbody.removeChild(tbody.lastChild);
+          }
+        }
+        const badge = document.getElementById('badgeTelemetry');
+        if (badge) badge.textContent = telemetryEvents.length;
+      }
+      showToast(`Buffer capacity: ${maxTelemetryRows === 0 ? 'Live All (Unlimited)' : maxTelemetryRows + ' logs'}`, 'ok');
+    }
 
     // Standardized Badge Helpers (No Emojis)
     function getISOBadge(code) {
@@ -1259,7 +1222,6 @@
       if (pane) pane.classList.add('active');
 
       if (tabId === 'alerts') fetchAlerts();
-      if (tabId === 'soar') { fetchSOARPlaybooks(); fetchSOARRuns(); }
       if (tabId === 'rules') fetchRules();
       if (tabId === 'settings') fetchSettings();
     }
@@ -1311,10 +1273,6 @@
           showToast(`[ALERT] ${ev.rule_id} from ${ev.source_ip}`, 'crit');
           fetchAlerts();
         }
-      } else if (type === 'PLAYBOOK_RUN_UPDATE' || type === 'soar_playbook_run') {
-        if (payload.runs) renderPlaybookRuns(payload.runs);
-        else if (payload.active_runs) renderPlaybookRuns(payload.active_runs);
-        else if (payload.run) fetchSOARRuns();
       } else if (type === 'ban_change') {
         const ip = payload.ban?.ip || 'IP';
         showToast(`[XDP_DROP] Quarantine ${String(payload.action).toUpperCase()}: ${ip}`, 'ok');
@@ -1415,14 +1373,20 @@
       }
     }
 
-    // Telemetry Feed Rendering
+    // Telemetry Feed Rendering with Configurable Rolling Window Buffer
     function appendTelemetryRow(ev) {
       telemetryEvents.unshift(ev);
-      if (telemetryEvents.length > maxTelemetryRows) telemetryEvents.pop();
+      const cap = maxTelemetryRows > 0 ? maxTelemetryRows : 10000;
+      if (telemetryEvents.length > cap) {
+        telemetryEvents.pop();
+      }
 
-      document.getElementById('badgeTelemetry').textContent = telemetryEvents.length;
+      const badge = document.getElementById('badgeTelemetry');
+      if (badge) badge.textContent = telemetryEvents.length;
 
       const tbody = document.getElementById('telemetryTableBody');
+      if (!tbody) return;
+
       const tr = document.createElement('tr');
       tr.onclick = () => openDrawer(ev);
 
@@ -1443,11 +1407,11 @@
 
       tbody.insertBefore(tr, tbody.firstChild);
 
-      while (tbody.children.length > maxTelemetryRows) {
+      while (tbody.children.length > cap) {
         tbody.removeChild(tbody.lastChild);
       }
 
-      if (autoScroll) {
+      if (autoScroll && tbody.parentElement) {
         tbody.parentElement.scrollTop = 0;
       }
     }
@@ -1555,183 +1519,6 @@
         showToast(`[ACTION] ${action.toUpperCase()} enforced on ${ip}`, 'ok');
         fetchAlerts();
       } catch (e) {}
-    }
-
-    // SOAR Playbooks Engine & Execution Instances
-    async function fetchSOARPlaybooks() {
-      try {
-        const res = await fetch('/api/playbooks');
-        const data = await res.json();
-        const list = Array.isArray(data.playbooks) ? data.playbooks : (Array.isArray(data) ? data : []);
-        document.getElementById('badgeSOAR').textContent = list.length;
-        const catalogContainer = document.getElementById('playbookCatalogList');
-        catalogContainer.innerHTML = '';
-
-        list.forEach(pb => {
-          const div = document.createElement('div');
-          div.className = 'pb-step-card';
-          div.innerHTML = `
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-              <span style="font-weight: 700; color: var(--accent);">${pb.id}: ${escapeHTML(pb.name)}</span>
-              <span class="badge badge-mitre">[${pb.mitre_techniques?.join(', ') || ''}]</span>
-            </div>
-            <div style="color: var(--text-muted); font-size: 11px;">${escapeHTML(pb.description)}</div>
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px;">
-              <span style="font-size: 10px; color: var(--text-dim);">SLA: ${pb.sla_target_seconds}s &bull; ${pb.steps?.length || 4} Steps</span>
-              <button class="btn btn-red" onclick="promptLaunchPlaybook('${pb.id}', '${escapeHTML(pb.name)}')">Execute</button>
-            </div>
-          `;
-          catalogContainer.appendChild(div);
-        });
-      } catch (e) {}
-    }
-
-    async function fetchSOARRuns() {
-      try {
-        const res = await fetch('/api/playbooks/runs');
-        const data = await res.json();
-        const runs = Array.isArray(data.runs) ? data.runs : (Array.isArray(data) ? data : []);
-        renderPlaybookRuns(runs);
-      } catch (e) {}
-    }
-
-    function renderPlaybookRuns(runs) {
-      const runsContainer = document.getElementById('playbookRunsList');
-      if (!runs || runs.length === 0) {
-        runsContainer.innerHTML = `<div style="color: var(--text-muted); padding: 14px; text-align: center;">No active execution instances</div>`;
-        return;
-      }
-      runsContainer.innerHTML = '';
-
-      runs.forEach(run => {
-        const isDone = run.status === 'COMPLETED';
-        const isRunning = run.status === 'RUNNING' || run.status === 'IN_PROGRESS';
-        const isFailed = run.status === 'FAILED';
-        const cardClass = isDone ? 'pb-step-card completed-run' : (isFailed ? 'pb-step-card' : 'pb-step-card active-run');
-
-        const elapsedSec = run.start_time_ms ? Math.floor((Date.now() - run.start_time_ms) / 1000) : 0;
-        const slaSeconds = run.sla_target_seconds || 60;
-        const remainingSLA = Math.max(0, slaSeconds - elapsedSec);
-
-        const statusBadge = isDone ? `<span class="badge badge-low">[COMPLETED]</span>` :
-                            (isFailed ? `<span class="badge badge-crit">[FAILED]</span>` :
-                            (isRunning ? `<span class="badge badge-high">[RUNNING]</span>` : `<span class="badge badge-iso">[PENDING]</span>`));
-
-        const div = document.createElement('div');
-        div.className = cardClass;
-
-        let stepsHTML = '';
-        (run.steps || []).forEach((s, idx) => {
-          const stepDone = s.status === 'COMPLETED';
-          const stepCurrent = idx === run.current_step_idx && isRunning;
-          const sBadge = stepDone ? `<span class="badge badge-low">[DONE]</span>` :
-                         (stepCurrent ? `<span class="badge badge-high">[ACTIVE]</span>` : `<span class="badge badge-iso">[PENDING]</span>`);
-
-          stepsHTML += `
-            <div class="step-item ${stepDone ? 'step-done' : (stepCurrent ? 'step-current' : '')}">
-              <div style="display: flex; justify-content: space-between; align-items: center;">
-                <span style="font-weight: 600; font-size: 11px;">${s.badge || 'STEP ' + (idx+1)}: ${escapeHTML(s.title)}</span>
-                ${sBadge}
-              </div>
-              <div style="font-size: 10px; color: var(--text-muted);">${escapeHTML(s.description)}</div>
-              ${s.output ? `<div style="font-size: 10px; color: var(--accent);">Output: ${escapeHTML(s.output)}</div>` : ''}
-              ${stepCurrent ? `
-                <div style="display: flex; gap: 6px; margin-top: 4px;">
-                  <button class="btn btn-green" style="padding: 2px 6px;" onclick="advancePlaybookStep('${run.run_id}', ${idx}, 'COMPLETED')">Complete Step</button>
-                  <button class="btn btn-orange" style="padding: 2px 6px;" onclick="copyText('${escapeHTML(s.command)}')">Copy Cmd</button>
-                </div>
-              ` : ''}
-            </div>
-          `;
-        });
-
-        div.innerHTML = `
-          <div style="display: flex; justify-content: space-between; align-items: center;">
-            <span style="font-weight: 700; color: ${isRunning ? 'var(--orange)' : (isDone ? 'var(--green)' : 'var(--text)')};">${run.run_id} (${run.playbook_id})</span>
-            ${statusBadge}
-          </div>
-          <div style="font-size: 11px;">Target: <strong>${run.target_ip}</strong> &bull; Node: ${run.node_id} &bull; SLA Countdown: <strong>${remainingSLA}s</strong> remaining</div>
-          <div style="color: var(--text-muted); font-size: 10px;">Trigger Reason: ${escapeHTML(run.trigger_reason)}</div>
-          <div style="display: flex; flex-direction: column; gap: 4px; margin-top: 4px;">
-            ${stepsHTML}
-          </div>
-        `;
-        runsContainer.appendChild(div);
-      });
-    }
-
-    function promptLaunchPlaybook(pbID, pbName) {
-      pendingLaunchPB = pbID;
-      const topIP = document.getElementById('manualActionIP').value.trim();
-      document.getElementById('pbModalTitle').textContent = `Launch Playbook: ${pbID}`;
-      document.getElementById('pbModalDesc').textContent = `Execute ${pbName} containment workflow:`;
-      document.getElementById('pbModalTargetIP').value = topIP || currentEventIP || '';
-      document.getElementById('playbookModal').style.display = 'flex';
-      document.getElementById('pbModalTargetIP').focus();
-    }
-
-    function closePlaybookModal() {
-      document.getElementById('playbookModal').style.display = 'none';
-      pendingLaunchPB = null;
-    }
-
-    async function confirmLaunchPlaybook() {
-      const targetIP = document.getElementById('pbModalTargetIP').value.trim() || '127.0.0.1';
-      const pbID = pendingLaunchPB || 'PB-101';
-      closePlaybookModal();
-
-      try {
-        await fetch('/api/playbooks/execute', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action_type: 'START_PLAYBOOK',
-            playbook_id: pbID,
-            target_ip: targetIP,
-            reason: `Manual Operator Launch [${pbID}] on ${targetIP}`
-          })
-        });
-        showToast(`[SOAR] Playbook ${pbID} launched on ${targetIP}`, 'ok');
-        fetchSOARRuns();
-      } catch (e) {
-        showToast('Launch failed: ' + e.message, 'crit');
-      }
-    }
-
-    async function advancePlaybookStep(runID, stepIdx, status) {
-      try {
-        await fetch('/api/playbooks/execute', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            run_id: runID,
-            step_index: stepIdx,
-            status: status,
-            output: `Step ${stepIdx + 1} verified by operator`
-          })
-        });
-        showToast(`[SOAR] Step ${stepIdx + 1} completed`, 'ok');
-        fetchSOARRuns();
-      } catch (e) {}
-    }
-
-    async function executeSOARAction(actionType) {
-      const ip = document.getElementById('manualActionIP').value.trim();
-      if (!ip) {
-        showToast('Please enter target IP', 'crit');
-        return;
-      }
-      try {
-        const res = await fetch('/api/soar/execute', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action_type: actionType, actor_ip: ip })
-        });
-        const data = await res.json();
-        showToast(data.message || `Action ${actionType} executed`, 'ok');
-      } catch (e) {
-        showToast('Execution failed: ' + e.message, 'crit');
-      }
     }
 
     // Active Quarantine Vault (Kernel XDP Banned IPs)
@@ -2273,14 +2060,84 @@
       } catch (e) {}
     }
 
-    function quickDrawerBan() {
-      if (currentEventIP) executeSOARAction('XDP_BLACKHOLE');
+    // 1-Click Mitigation Actions
+    async function quickDrawerBan() {
+      if (!currentEventIP || currentEventIP === '127.0.0.1' || currentEventIP === '-' || currentEventIP === 'N/A') return;
+      try {
+        const res = await fetch('/api/quarantine/ban', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ip: currentEventIP,
+            duration_seconds: 3600,
+            reason: `Analyst 1-Click: Instant XDP Drop (1h) on ${currentEventIP}`
+          })
+        });
+        if (res.ok) {
+          showToast(`[⚡ XDP_DROP] Enforced 1h blackhole on ${currentEventIP}`, 'ok');
+          fetchQuarantineBans();
+          fetchAlerts();
+        }
+      } catch (e) {
+        showToast('Ban failed: ' + e.message, 'crit');
+      }
     }
-    function quickDrawerTarpit() {
-      if (currentEventIP) executeSOARAction('TARPIT_TRAP');
+
+    async function quickDrawerTarpit() {
+      if (!currentEventIP || currentEventIP === '127.0.0.1' || currentEventIP === '-' || currentEventIP === 'N/A') return;
+      try {
+        const res = await fetch('/api/mitigation/tarpit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ip: currentEventIP,
+            duration_seconds: 3600,
+            reason: `Analyst 1-Click: Zero-Window Tarpit Trap on ${currentEventIP}`
+          })
+        });
+        if (res.ok) {
+          showToast(`[🕳️ TARPIT] Trapped ${currentEventIP} in zero-window buffer`, 'ok');
+          fetchQuarantineBans();
+          fetchAlerts();
+        }
+      } catch (e) {
+        showToast('Tarpit failed: ' + e.message, 'crit');
+      }
     }
-    function quickDrawerWhitelist() {
-      if (currentEventIP) executeSOARAction('WHITELIST_IP');
+
+    async function quickDrawerUnban() {
+      if (!currentEventIP || currentEventIP === '127.0.0.1' || currentEventIP === '-' || currentEventIP === 'N/A') return;
+      try {
+        const res = await fetch('/api/quarantine/unban', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ip: currentEventIP })
+        });
+        if (res.ok) {
+          showToast(`[🔓 UNBAN] Removed ${currentEventIP} from quarantine`, 'ok');
+          fetchQuarantineBans();
+          fetchAlerts();
+        }
+      } catch (e) {
+        showToast('Unban failed: ' + e.message, 'crit');
+      }
+    }
+
+    async function quickDrawerWhitelist() {
+      if (!currentEventIP || currentEventIP === '127.0.0.1' || currentEventIP === '-' || currentEventIP === 'N/A') return;
+      try {
+        const res = await fetch('/api/whitelist', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ cidr: currentEventIP })
+        });
+        if (res.ok) {
+          showToast(`[🛡️ WHITELIST] Added ${currentEventIP} to protected CIDRs`, 'ok');
+          quickDrawerUnban();
+        }
+      } catch (e) {
+        showToast('Whitelist failed: ' + e.message, 'crit');
+      }
     }
 
     // Toast Notification Hygiene (Max 3, deduplicate within 3s)
@@ -2319,11 +2176,8 @@
       checkIPInfoStatus();
       fetchAlerts();
       fetchRules();
-      fetchSOARPlaybooks();
-      fetchSOARRuns();
       fetchQuarantineBans();
       setInterval(fetchAlerts, 8000);
-      setInterval(fetchSOARRuns, 5000);
       setInterval(fetchQuarantineBans, 10000);
     });
   </script>
