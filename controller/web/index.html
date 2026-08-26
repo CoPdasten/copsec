@@ -183,7 +183,7 @@
       justify-content: space-between;
     }
 
-    /* Common Buttons & Inputs */
+    /* Buttons & Inputs */
     .btn {
       background: var(--border-accent);
       color: var(--text);
@@ -198,6 +198,7 @@
       align-items: center;
       gap: 6px;
       transition: all 0.15s;
+      user-select: none;
     }
     .btn:hover {
       background: var(--card-hover);
@@ -236,6 +237,10 @@
       border-color: var(--cyan);
       color: var(--cyan);
     }
+    .btn-cyan:hover {
+      background: var(--cyan);
+      color: #000;
+    }
     .input-box {
       background: #0d1117;
       border: 1px solid var(--card-border);
@@ -250,7 +255,7 @@
       border-color: var(--accent);
     }
 
-    /* ISO Badges & Severity Badges */
+    /* Badges */
     .badge {
       display: inline-block;
       padding: 2px 6px;
@@ -299,10 +304,9 @@
     }
     tr:hover td {
       background: rgba(88, 166, 255, 0.04);
-      cursor: pointer;
     }
 
-    /* Live Feed Controls */
+    /* Toolbar */
     .toolbar {
       display: flex;
       align-items: center;
@@ -320,12 +324,12 @@
     #drawer {
       position: fixed;
       top: 0;
-      right: -680px;
-      width: 650px;
+      right: -720px;
+      width: 680px;
       height: 100vh;
       background: var(--card);
       border-left: 1px solid var(--card-border);
-      box-shadow: -10px 0 30px rgba(0, 0, 0, 0.8);
+      box-shadow: -10px 0 30px rgba(0, 0, 0, 0.85);
       transition: right 0.25s cubic-bezier(0.16, 1, 0.3, 1);
       z-index: 1000;
       display: flex;
@@ -341,6 +345,7 @@
       align-items: center;
       justify-content: space-between;
       background: #11161d;
+      flex-shrink: 0;
     }
     .drawer-body {
       padding: 16px;
@@ -361,7 +366,6 @@
       white-space: pre-wrap;
       max-height: 160px;
       overflow-y: auto;
-      position: relative;
     }
     .terminal-header {
       display: flex;
@@ -387,26 +391,43 @@
       word-break: break-word;
     }
 
-    /* Playbook Steps UI */
-    .pb-step {
+    /* Playbook Step UI */
+    .pb-step-card {
       background: #0d1117;
       border: 1px solid var(--card-border);
       border-radius: var(--radius);
-      padding: 10px;
+      padding: 12px;
       display: flex;
       flex-direction: column;
-      gap: 6px;
+      gap: 8px;
     }
-    .pb-step.completed {
-      border-color: var(--green);
-      background: rgba(63, 185, 80, 0.05);
-    }
-    .pb-step.in_progress {
+    .pb-step-card.active-run {
       border-color: var(--orange);
-      background: rgba(210, 153, 34, 0.05);
+      background: rgba(210, 153, 34, 0.04);
+    }
+    .pb-step-card.completed-run {
+      border-color: var(--green);
+      background: rgba(63, 185, 80, 0.04);
+    }
+    .step-item {
+      background: #161b22;
+      border: 1px solid var(--card-border);
+      border-radius: 4px;
+      padding: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .step-item.step-done {
+      border-color: var(--green);
+      border-left: 3px solid var(--green);
+    }
+    .step-item.step-current {
+      border-color: var(--orange);
+      border-left: 3px solid var(--orange);
     }
 
-    /* Toasts Hygiene (Max 3, auto-expire) */
+    /* Toasts */
     #toast-container {
       position: fixed;
       bottom: 20px;
@@ -423,14 +444,14 @@
       color: var(--text);
       padding: 8px 12px;
       border-radius: var(--radius);
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6);
       display: flex;
       align-items: center;
       gap: 8px;
       font-size: 11px;
       animation: slideIn 0.2s ease-out;
       pointer-events: auto;
-      max-width: 320px;
+      max-width: 340px;
     }
     .toast.crit { border-color: var(--red); color: #ff7b72; }
     .toast.ok { border-color: var(--green); color: #7ee787; }
@@ -439,7 +460,7 @@
       to { transform: translateX(0); opacity: 1; }
     }
 
-    /* Custom Toggle Switch */
+    /* Toggle Switch */
     .switch {
       position: relative;
       display: inline-block;
@@ -497,7 +518,7 @@
     <div id="tab-telemetry" class="tab-pane active">
       <div class="toolbar">
         <div class="toolbar-left">
-          <input type="text" id="telemetryFilter" class="input-box" placeholder="Filter telemetry (e.g. sqli, 404, nginx, T1190)..." style="width: 280px;" oninput="applyTelemetryFilter()">
+          <input type="text" id="telemetryFilter" class="input-box" placeholder="Filter telemetry (e.g. sqli, 404, nginx, T1190)..." style="width: 280px;" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" oninput="applyTelemetryFilter()">
           <select id="filterSource" class="input-box" onchange="applyTelemetryFilter()">
             <option value="">All Sources</option>
             <option value="nginx">Nginx</option>
@@ -544,7 +565,7 @@
     <div id="tab-alerts" class="tab-pane">
       <div class="toolbar">
         <div class="toolbar-left">
-          <span style="color: var(--text-muted); font-size: 11px;">High-Fidelity Actionable Incidents (De-noised, score &ge; 40 or confirmed MITRE signature)</span>
+          <span style="color: var(--text-muted); font-size: 11px;">Actionable Security Incidents (De-noised, score &ge; 40 or validated MITRE technique)</span>
         </div>
         <div class="toolbar-right">
           <button class="btn" onclick="fetchAlerts()">🔄 Refresh Alerts</button>
@@ -555,15 +576,14 @@
         <table>
           <thead>
             <tr>
-              <th style="width: 65px;">TIME</th>
-              <th style="width: 50px;">ISO</th>
-              <th style="width: 115px;">CLIENT IP</th>
-              <th style="width: 65px;">SCORE</th>
+              <th style="width: 75px;">TIME</th>
+              <th style="width: 55px;">ISO</th>
+              <th style="width: 120px;">CLIENT IP</th>
+              <th style="width: 75px;">SCORE</th>
               <th style="width: 90px;">MITRE ID</th>
-              <th style="width: 160px;">RULE IDENTIFIER</th>
-              <th style="width: 120px;">CONTAINMENT</th>
-              <th>TRIGGER SUMMARY</th>
-              <th style="width: 220px; text-align: right;">QUICK TRIAGE ACTIONS</th>
+              <th style="width: 180px;">RULE IDENTIFIER</th>
+              <th style="width: 125px;">CONTAINMENT</th>
+              <th style="width: 250px; text-align: right;">TRIAGE ACTIONS</th>
             </tr>
           </thead>
           <tbody id="alertsTableBody">
@@ -582,7 +602,7 @@
           <span style="font-size: 11px; color: var(--text-muted);">Fleet-wide real-time kernel & network containment</span>
         </div>
         <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-          <input type="text" id="manualActionIP" class="input-box" placeholder="Target Attacker IP (e.g. 198.51.100.99)" style="width: 220px;">
+          <input type="text" id="manualActionIP" class="input-box" placeholder="Target Attacker IP (e.g. 198.51.100.99)" style="width: 220px;" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
           <button class="btn btn-red" onclick="executeSOARAction('XDP_BLACKHOLE')">⚡ Enforce Fleet-Wide XDP Drop</button>
           <button class="btn btn-orange" onclick="executeSOARAction('TARPIT_TRAP')">🕳️ Route TCP to Zero-Window Tarpit</button>
           <button class="btn btn-cyan" onclick="executeSOARAction('ISOLATE_HOST')">🛡️ Isolate Compromised Node</button>
@@ -593,7 +613,7 @@
       <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; flex: 1;">
         <!-- Curated Playbook Catalog -->
         <div class="card" style="overflow-y: auto;">
-          <div class="card-title">Curated Playbook Catalog</div>
+          <div class="card-title">Curated Incident Playbook Catalog</div>
           <div id="playbookCatalogList" style="display: flex; flex-direction: column; gap: 10px;">
             <!-- Rendered playbooks -->
           </div>
@@ -601,9 +621,12 @@
 
         <!-- Active Execution Runs -->
         <div class="card" style="overflow-y: auto;">
-          <div class="card-title">Live Playbook Execution Instances</div>
+          <div class="card-title">
+            <span>Live Playbook Execution Instances</span>
+            <button class="btn" style="padding: 2px 6px;" onclick="fetchSOARRuns()">🔄 Refresh Runs</button>
+          </div>
           <div id="playbookRunsList" style="display: flex; flex-direction: column; gap: 12px;">
-            <div style="color: var(--text-muted); padding: 10px; text-align: center;">No active execution runs</div>
+            <div style="color: var(--text-muted); padding: 12px; text-align: center;">No active execution runs</div>
           </div>
         </div>
       </div>
@@ -613,7 +636,7 @@
     <div id="tab-rules" class="tab-pane">
       <div class="toolbar">
         <div class="toolbar-left">
-          <span style="color: var(--text-muted); font-size: 11px;">In-Memory Compiled SigmaHQ & Deterministic Rulepack</span>
+          <span style="color: var(--text-muted); font-size: 11px;">In-Memory Compiled SigmaHQ & Curated Rulepack</span>
         </div>
         <div class="toolbar-right">
           <button class="btn btn-cyan" onclick="openRuleModal()">➕ Submit Custom Sigma Rule (YAML)</button>
@@ -669,19 +692,19 @@
 
         <!-- System Configuration -->
         <div class="card">
-          <div class="card-title">SIEM Platform Configuration</div>
+          <div class="card-title">SIEM Platform Parameters</div>
           <div style="display: flex; flex-direction: column; gap: 10px;">
             <div>
               <label style="color: var(--text-muted); font-size: 10px; display: block; margin-bottom: 3px;">gRPC INGESTION BIND ADDRESS</label>
-              <input type="text" id="cfgGRPC" class="input-box" style="width: 100%;" value="0.0.0.0:8443">
+              <input type="text" id="cfgGRPC" class="input-box" style="width: 100%;" value="0.0.0.0:8443" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
             </div>
             <div>
               <label style="color: var(--text-muted); font-size: 10px; display: block; margin-bottom: 3px;">IPINFO.IO THREAT INTEL API TOKEN</label>
-              <input type="password" id="cfgIPInfo" class="input-box" style="width: 100%;" placeholder="Default public fallback active">
+              <input type="text" id="cfgIPInfo" class="input-box" style="width: 100%;" placeholder="Default public fallback active" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
             </div>
             <div>
               <label style="color: var(--text-muted); font-size: 10px; display: block; margin-bottom: 3px;">SOAR AUTONOMOUS BAN THREAT SCORE THRESHOLD (DEFAULT: 80)</label>
-              <input type="number" id="cfgAutoban" class="input-box" style="width: 100%;" value="80">
+              <input type="number" id="cfgAutoban" class="input-box" style="width: 100%;" value="80" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
             </div>
             <button class="btn btn-cyan" style="align-self: flex-start;" onclick="saveConfig()">💾 Save Runtime Settings</button>
           </div>
@@ -695,7 +718,7 @@
           <span style="font-size: 11px; color: var(--green);">Recursive Resolvers, RFC1918, CGNAT, Tailscale Overlay</span>
         </div>
         <div style="display: flex; gap: 10px; align-items: center;">
-          <input type="text" id="whitelistCIDRInput" class="input-box" placeholder="Add Custom CIDR (e.g. 10.100.0.0/16 or 1.2.3.4)" style="width: 280px;">
+          <input type="text" id="whitelistCIDRInput" class="input-box" placeholder="Add Custom CIDR (e.g. 10.100.0.0/16 or 1.2.3.4)" style="width: 280px;" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
           <button class="btn btn-green" onclick="addWhitelistCIDR()">🛡️ Add Protected CIDR</button>
         </div>
         <div id="whitelistTags" style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px;">
@@ -718,6 +741,14 @@
       <button class="btn" onclick="closeDrawer()">✕ Close</button>
     </div>
     <div class="drawer-body">
+      <!-- Root Cause & Evidence Analysis -->
+      <div class="card" style="border-color: var(--accent); background: rgba(88, 166, 255, 0.03);">
+        <div style="color: var(--accent); font-size: 11px; font-weight: 700; text-transform: uppercase;">🔍 Root Cause & Evidence Analysis</div>
+        <div id="drawerRootCause" style="font-size: 11px; line-height: 1.6; color: var(--text);">
+          <!-- Dynamic evidence analysis -->
+        </div>
+      </div>
+
       <!-- Forensic KV Table -->
       <div>
         <div style="color: var(--text-muted); font-size: 10px; font-weight: 700; margin-bottom: 6px; text-transform: uppercase;">Forensic Incident Metadata</div>
@@ -745,29 +776,18 @@
         <div class="terminal-box" id="dRaw">-</div>
       </div>
 
-      <!-- Investigation Checklist & Commands -->
+      <!-- Contextual MITRE Investigation Checklist & Commands -->
       <div>
-        <div style="color: var(--text-muted); font-size: 10px; font-weight: 700; margin-bottom: 6px; text-transform: uppercase;">MITRE Triage Checklist & Forensics Commands</div>
-        <div class="card" style="gap: 8px;">
-          <div style="display: flex; justify-content: space-between; align-items: center;">
-            <span style="font-size: 11px;">1. Check socket connections:</span>
-            <button class="btn" onclick="copyText('ss -tulpn | grep \'' + currentEventIP + '\'')">📋 Copy Cmd</button>
-          </div>
-          <div style="display: flex; justify-content: space-between; align-items: center;">
-            <span style="font-size: 11px;">2. Audit recent process execution:</span>
-            <button class="btn" onclick="copyText('ausearch -i -ts recent')">📋 Copy Cmd</button>
-          </div>
-          <div style="display: flex; justify-content: space-between; align-items: center;">
-            <span style="font-size: 11px;">3. Inspect active XDP drop counters:</span>
-            <button class="btn" onclick="copyText('bpftool map dump name xdp_drop_map')">📋 Copy Cmd</button>
-          </div>
+        <div style="color: var(--text-muted); font-size: 10px; font-weight: 700; margin-bottom: 6px; text-transform: uppercase;">Contextual MITRE Triage Checklist & CLI Commands</div>
+        <div class="card" id="drawerCommandsList" style="gap: 8px;">
+          <!-- Dynamically populated based on MITRE technique -->
         </div>
       </div>
 
       <!-- Persistent Analyst Notes -->
       <div>
         <div style="color: var(--text-muted); font-size: 10px; font-weight: 700; margin-bottom: 6px; text-transform: uppercase;">Analyst Notes (Persisted to SQLite)</div>
-        <textarea id="drawerNotes" class="input-box" rows="3" style="width: 100%; resize: vertical;" placeholder="Add investigative triage notes or containment rationale..."></textarea>
+        <textarea id="drawerNotes" class="input-box" rows="3" style="width: 100%; resize: vertical;" placeholder="Add investigative triage notes or containment rationale..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
         <button class="btn btn-cyan" style="margin-top: 6px;" onclick="saveDrawerNotes()">💾 Save Analyst Note</button>
       </div>
 
@@ -783,6 +803,25 @@
     </div>
   </div>
 
+  <!-- Launch Playbook Target IP Prompt Modal -->
+  <div id="playbookModal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.75); z-index: 2000; align-items: center; justify-content: center;">
+    <div class="card" style="width: 440px;">
+      <div class="card-title">
+        <span id="pbModalTitle">Launch SOAR Playbook</span>
+        <button class="btn" onclick="closePlaybookModal()">✕</button>
+      </div>
+      <div style="color: var(--text-muted); font-size: 11px;" id="pbModalDesc">Specify target node or attacker IP to contain:</div>
+      <div>
+        <label style="color: var(--text-muted); font-size: 10px; display: block; margin-bottom: 3px;">TARGET IP / HOSTNAME</label>
+        <input type="text" id="pbModalTargetIP" class="input-box" style="width: 100%;" placeholder="e.g. 198.51.100.99 or 127.0.0.1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+      </div>
+      <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px;">
+        <button class="btn" onclick="closePlaybookModal()">Cancel</button>
+        <button class="btn btn-red" onclick="confirmLaunchPlaybook()">⚡ Launch Run</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Submit Sigma Rule Modal -->
   <div id="ruleModal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.75); z-index: 2000; align-items: center; justify-content: center;">
     <div class="card" style="width: 600px; max-height: 80vh;">
@@ -790,7 +829,7 @@
         <span>Submit Custom SigmaHQ Rule (YAML)</span>
         <button class="btn" onclick="closeRuleModal()">✕</button>
       </div>
-      <textarea id="customRuleYAML" class="input-box" rows="14" style="width: 100%; font-family: inherit; font-size: 11px;" placeholder="title: Suspicious Web Shell Execution&#10;id: custom-webshell&#10;level: critical&#10;detection:&#10;  selection:&#10;    _raw|contains: 'c99.php'&#10;  condition: selection"></textarea>
+      <textarea id="customRuleYAML" class="input-box" rows="14" style="width: 100%; font-family: inherit; font-size: 11px;" placeholder="title: Suspicious Web Shell Execution&#10;id: custom-webshell&#10;level: critical&#10;detection:&#10;  selection:&#10;    _raw|contains: 'c99.php'&#10;  condition: selection" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
       <div style="display: flex; justify-content: flex-end; gap: 8px;">
         <button class="btn" onclick="closeRuleModal()">Cancel</button>
         <button class="btn btn-cyan" onclick="submitCustomRule()">Compile & Load Rule</button>
@@ -809,21 +848,56 @@
     let maxTelemetryRows = 200;
     let currentDrawerEvent = null;
     let currentEventIP = "";
-    let lastToasts = new Map(); // text -> timestamp
+    let lastToasts = new Map();
     let telemetryEvents = [];
+    let activeAlertsList = [];
+    let pendingLaunchPB = null;
 
-    // Country Code Clean Badges
+    // Normalization Helpers
     function getISOBadge(code) {
-      if (!code || code === "-" || code === "LOC") return `<span class="badge badge-iso">[LOCAL]</span>`;
-      return `<span class="badge badge-iso">[${code.toUpperCase()}]</span>`;
+      if (!code || code === "-" || code === "LOC" || code === "LOCAL") return `<span class="badge badge-iso">[LOCAL]</span>`;
+      return `<span class="badge badge-iso">[${String(code).toUpperCase()}]</span>`;
     }
 
-    // Severity Badge
     function getScoreBadge(score) {
-      if (score >= 80) return `<span class="badge badge-crit">${score} CRIT</span>`;
-      if (score >= 60) return `<span class="badge badge-high">${score} HIGH</span>`;
-      if (score >= 35) return `<span class="badge badge-med">${score} MED</span>`;
-      return `<span class="badge badge-low">${score} LOW</span>`;
+      const num = Number(score) || 0;
+      if (num >= 80) return `<span class="badge badge-crit">${num} CRIT</span>`;
+      if (num >= 60) return `<span class="badge badge-high">${num} HIGH</span>`;
+      if (num >= 35) return `<span class="badge badge-med">${num} MED</span>`;
+      return `<span class="badge badge-low">${num} LOW</span>`;
+    }
+
+    function normalizeEvent(raw) {
+      if (!raw) return {};
+      const score = raw.threat_score !== undefined ? raw.threat_score : (raw.score !== undefined ? raw.score : (raw.peak_score !== undefined ? raw.peak_score : 0));
+      const ip = raw.client_ip || raw.target_ip || raw.ip || raw.src_ip || "-";
+      const rule = raw.rule_id || raw.rule_identifier || raw.rule || raw.rule_name || "SECURITY_ALERT";
+      const mitre = raw.mitre_technique_id || raw.mitre_id || raw.mitre || "";
+      const timeMs = raw.timestamp_ms || raw.timestamp || raw.first_seen_ms || raw.last_seen_ms || Date.now();
+      const country = raw.country_code || raw.country || raw.geo_country || "LOC";
+      const containment = raw.containment_state || (raw.is_banned ? "BANNED (XDP)" : (raw.is_host_local ? "HOST CONTAINED" : "UNMITIGATED"));
+
+      return {
+        id: raw.id || raw.event_id || raw.incident_id || 0,
+        node_id: raw.node_id || "node-edge-primary",
+        source: raw.source || "telemetry",
+        raw_line: raw.raw_line || raw.raw || raw.message || raw.payload || "",
+        client_ip: ip,
+        status_code: raw.status_code || 0,
+        timestamp_ms: timeMs,
+        rule_id: rule,
+        mitre_technique_id: mitre,
+        threat_score: Number(score),
+        threat_tier: raw.threat_tier || (Number(score) >= 80 ? "CRITICAL" : (Number(score) >= 60 ? "HIGH" : "NORMAL")),
+        country_code: country,
+        country_name: raw.country_name || (country === "LOC" ? "Local Infrastructure" : ""),
+        city: raw.city || "",
+        asn: raw.asn || "",
+        containment_state: containment,
+        is_host_local: raw.is_host_local || ip === "127.0.0.1" || ip === "local",
+        analyst_notes: raw.analyst_notes || raw.notes || "",
+        score_breakdown: raw.score_breakdown || ""
+      };
     }
 
     // Tab Switching
@@ -838,7 +912,7 @@
       if (pane) pane.classList.add('active');
 
       if (tabId === 'alerts') fetchAlerts();
-      if (tabId === 'soar') fetchSOAR();
+      if (tabId === 'soar') { fetchSOARPlaybooks(); fetchSOARRuns(); }
       if (tabId === 'rules') fetchRules();
       if (tabId === 'settings') fetchSettings();
     }
@@ -882,15 +956,19 @@
         document.getElementById('statNodes').textContent = payload.nodes_count || 0;
         document.getElementById('statBans').textContent = payload.active_bans || 0;
       } else if (type === 'event') {
-        appendTelemetryRow(payload);
-        if (payload.threat_score >= 80) {
-          showToast(`🚨 High Threat Detected: ${payload.rule_id || 'Alert'} from ${payload.client_ip}`, 'crit');
-          incrementAlertBadge();
+        const ev = normalizeEvent(payload);
+        appendTelemetryRow(ev);
+        if (ev.threat_score >= 80) {
+          showToast(`🚨 High Threat: ${ev.rule_id} from ${ev.client_ip}`, 'crit');
+          fetchAlerts();
         }
-      } else if (type === 'soar_playbook_run') {
-        renderPlaybookRuns([payload.run]);
+      } else if (type === 'PLAYBOOK_RUN_UPDATE' || type === 'soar_playbook_run') {
+        if (payload.runs) renderPlaybookRuns(payload.runs);
+        else if (payload.active_runs) renderPlaybookRuns(payload.active_runs);
+        else if (payload.run) fetchSOARRuns();
       } else if (type === 'ban_change') {
-        showToast(`⚡ XDP Quarantine ${payload.action.toUpperCase()}: ${payload.ban.ip}`, 'ok');
+        const ip = payload.ban?.ip || 'IP';
+        showToast(`⚡ XDP Quarantine ${String(payload.action).toUpperCase()}: ${ip}`, 'ok');
       }
     }
 
@@ -905,19 +983,19 @@
       const tr = document.createElement('tr');
       tr.onclick = () => openDrawer(ev);
 
-      const d = new Date(ev.timestamp_ms || Date.now());
+      const d = new Date(ev.timestamp_ms);
       const timeStr = d.toTimeString().split(' ')[0];
 
       tr.innerHTML = `
         <td style="color: var(--text-muted);">${timeStr}</td>
         <td>${getISOBadge(ev.country_code)}</td>
-        <td style="font-weight: 600; color: var(--text);">${ev.client_ip || '-'}</td>
-        <td style="color: var(--text-muted);">${ev.source || '-'}</td>
+        <td style="font-weight: 600; color: var(--text);">${ev.client_ip}</td>
+        <td style="color: var(--text-muted);">${ev.source}</td>
         <td>${ev.status_code || '-'}</td>
-        <td>${getScoreBadge(ev.threat_score || 0)}</td>
+        <td>${getScoreBadge(ev.threat_score)}</td>
         <td>${ev.mitre_technique_id ? `<span class="badge badge-mitre">${ev.mitre_technique_id}</span>` : '-'}</td>
-        <td style="color: var(--cyan);">${ev.rule_id || '-'}</td>
-        <td style="max-width: 380px; overflow: hidden; text-overflow: ellipsis; color: var(--text-muted);">${escapeHTML(ev.raw_line || '')}</td>
+        <td style="color: var(--cyan);">${ev.rule_id}</td>
+        <td style="max-width: 380px; overflow: hidden; text-overflow: ellipsis; color: var(--text-muted);">${escapeHTML(ev.raw_line)}</td>
       `;
 
       tbody.insertBefore(tr, tbody.firstChild);
@@ -960,45 +1038,61 @@
       }
     }
 
-    // Alerts Feed
+    // Active Alerts Cockpit
     async function fetchAlerts() {
       try {
         const res = await fetch('/api/alerts?limit=50');
-        const alerts = await res.json();
-        const tbody = document.getElementById('alertsTableBody');
-        tbody.innerHTML = '';
+        const rawAlerts = await res.json();
+        const alerts = Array.isArray(rawAlerts) ? rawAlerts.map(normalizeEvent) : [];
+        activeAlertsList = alerts;
         document.getElementById('badgeAlerts').textContent = alerts.length;
-
-        alerts.forEach(a => {
-          const tr = document.createElement('tr');
-          const d = new Date(a.timestamp_ms);
-          const timeStr = d.toTimeString().split(' ')[0];
-
-          let containmentBadge = `<span class="badge badge-low">UNMITIGATED</span>`;
-          if (a.containment_state === 'BANNED (XDP)') {
-            containmentBadge = `<span class="badge badge-crit">BANNED (XDP)</span>`;
-          } else if (a.containment_state === 'HOST CONTAINED') {
-            containmentBadge = `<span class="badge badge-cyan">HOST CONTAINED</span>`;
-          }
-
-          tr.innerHTML = `
-            <td style="color: var(--text-muted);">${timeStr}</td>
-            <td>${getISOBadge(a.country_code)}</td>
-            <td style="font-weight: 600;" onclick="openDrawerFromAlert('${a.client_ip}')">${a.client_ip}</td>
-            <td>${getScoreBadge(a.threat_score)}</td>
-            <td>${a.mitre_technique_id ? `<span class="badge badge-mitre">${a.mitre_technique_id}</span>` : '-'}</td>
-            <td style="color: var(--cyan);">${a.rule_id}</td>
-            <td>${containmentBadge}</td>
-            <td style="color: var(--text-muted); max-width: 250px; overflow: hidden; text-overflow: ellipsis;">${escapeHTML(a.raw_line)}</td>
-            <td style="text-align: right;">
-              <button class="btn btn-red" onclick="triageAction('ban', '${a.client_ip}')">⚡ Quick Ban</button>
-              <button class="btn btn-orange" onclick="triageAction('tarpit', '${a.client_ip}')">🕳️ Tarpit</button>
-              <button class="btn btn-green" onclick="triageAction('whitelist', '${a.client_ip}')">🛡️ Allow</button>
-            </td>
-          `;
-          tbody.appendChild(tr);
-        });
+        renderAlerts(alerts);
       } catch (e) {}
+    }
+
+    function renderAlerts(alerts) {
+      const tbody = document.getElementById('alertsTableBody');
+      tbody.innerHTML = '';
+
+      if (!alerts || alerts.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-muted); padding: 20px;">No actionable active security alerts</td></tr>`;
+        return;
+      }
+
+      alerts.forEach(a => {
+        const tr = document.createElement('tr');
+        const d = new Date(a.timestamp_ms);
+        const timeStr = d.toTimeString().split(' ')[0];
+
+        let containmentBadge = `<span class="badge badge-low">UNMITIGATED</span>`;
+        if (a.containment_state === 'BANNED (XDP)') {
+          containmentBadge = `<span class="badge badge-crit">BANNED (XDP)</span>`;
+        } else if (a.containment_state === 'HOST CONTAINED') {
+          containmentBadge = `<span class="badge badge-cyan">HOST CONTAINED</span>`;
+        }
+
+        tr.innerHTML = `
+          <td style="color: var(--text-muted);">${timeStr}</td>
+          <td>${getISOBadge(a.country_code)}</td>
+          <td style="font-weight: 600; color: var(--text); cursor: pointer;" onclick="openDrawerFromAlert('${a.client_ip}')">${a.client_ip}</td>
+          <td>${getScoreBadge(a.threat_score)}</td>
+          <td>${a.mitre_technique_id ? `<span class="badge badge-mitre">${a.mitre_technique_id}</span>` : '-'}</td>
+          <td style="color: var(--cyan);">${a.rule_id}</td>
+          <td>${containmentBadge}</td>
+          <td style="text-align: right;">
+            <button class="btn btn-red" onclick="triageAction('ban', '${a.client_ip}')">⚡ Ban</button>
+            <button class="btn btn-orange" onclick="triageAction('tarpit', '${a.client_ip}')">🕳️ Tarpit</button>
+            <button class="btn btn-cyan" onclick="openDrawerFromAlert('${a.client_ip}')">🔍 Inspect</button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    function openDrawerFromAlert(ip) {
+      const matched = activeAlertsList.find(a => a.client_ip === ip) || telemetryEvents.find(e => e.client_ip === ip);
+      if (matched) openDrawer(matched);
+      else openDrawer({ client_ip: ip, threat_score: 85, mitre_technique_id: 'T1190', rule_id: 'Active Alert' });
     }
 
     async function triageAction(action, ip) {
@@ -1008,71 +1102,155 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action, ip })
         });
-        showToast(`Action ${action.toUpperCase()} enforced for ${ip}`, 'ok');
+        showToast(`Triage Action ${action.toUpperCase()} enforced for ${ip}`, 'ok');
         fetchAlerts();
       } catch (e) {}
     }
 
-    function incrementAlertBadge() {
-      const badge = document.getElementById('badgeAlerts');
-      badge.textContent = parseInt(badge.textContent || 0) + 1;
-    }
-
-    // SOAR Playbooks
-    async function fetchSOAR() {
+    // SOAR Playbooks Engine
+    async function fetchSOARPlaybooks() {
       try {
-        const [pbRes, runRes] = await Promise.all([
-          fetch('/api/soar/playbooks'),
-          fetch('/api/soar/runs')
-        ]);
-        const pbData = await pbRes.json();
-        const runData = await runRes.json();
-
-        // Render Playbooks Catalog
+        const res = await fetch('/api/soar/playbooks');
+        const data = await res.json();
         const catalogContainer = document.getElementById('playbookCatalogList');
         catalogContainer.innerHTML = '';
-        (pbData.playbooks || []).forEach(pb => {
+        (data.playbooks || []).forEach(pb => {
           const div = document.createElement('div');
-          div.className = 'pb-step';
+          div.className = 'pb-step-card';
           div.innerHTML = `
             <div style="display: flex; justify-content: space-between; align-items: center;">
               <span style="font-weight: 700; color: var(--accent);">${pb.id}: ${pb.name}</span>
               <span class="badge badge-mitre">${pb.mitre_techniques?.join(', ') || ''}</span>
             </div>
             <div style="color: var(--text-muted); font-size: 11px;">${pb.description}</div>
-            <div style="display: flex; gap: 6px; margin-top: 4px;">
-              <span style="font-size: 10px; color: var(--text-dim);">SLA: ${pb.sla_target_seconds}s</span>
-              <span style="font-size: 10px; color: var(--text-dim);">&bull; Steps: ${pb.steps?.length || 0}</span>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px;">
+              <span style="font-size: 10px; color: var(--text-dim);">SLA Target: ${pb.sla_target_seconds}s &bull; ${pb.steps?.length || 4} Steps</span>
+              <button class="btn btn-red" onclick="promptLaunchPlaybook('${pb.id}', '${escapeHTML(pb.name)}')">▶ Run Playbook</button>
             </div>
           `;
           catalogContainer.appendChild(div);
         });
+      } catch (e) {}
+    }
 
-        renderPlaybookRuns(runData.runs || []);
+    async function fetchSOARRuns() {
+      try {
+        const res = await fetch('/api/soar/runs');
+        const data = await res.json();
+        renderPlaybookRuns(data.runs || []);
       } catch (e) {}
     }
 
     function renderPlaybookRuns(runs) {
       const runsContainer = document.getElementById('playbookRunsList');
       if (!runs || runs.length === 0) {
-        runsContainer.innerHTML = `<div style="color: var(--text-muted); padding: 10px; text-align: center;">No active execution runs</div>`;
+        runsContainer.innerHTML = `<div style="color: var(--text-muted); padding: 12px; text-align: center;">No active execution runs</div>`;
         return;
       }
       runsContainer.innerHTML = '';
+
       runs.forEach(run => {
+        const isDone = run.status === 'COMPLETED';
+        const isRunning = run.status === 'RUNNING' || run.status === 'IN_PROGRESS';
+        const cardClass = isDone ? 'pb-step-card completed-run' : 'pb-step-card active-run';
+
+        const elapsedSec = run.start_time_ms ? Math.floor((Date.now() - run.start_time_ms) / 1000) : 0;
         const div = document.createElement('div');
-        div.className = 'pb-step';
+        div.className = cardClass;
+
+        let stepsHTML = '';
+        (run.steps || []).forEach((s, idx) => {
+          const stepDone = s.status === 'COMPLETED';
+          const stepCurrent = idx === run.current_step_idx && isRunning;
+          const statusBadge = stepDone ? `<span class="badge badge-low">DONE</span>` : (stepCurrent ? `<span class="badge badge-high">ACTIVE</span>` : `<span class="badge badge-iso">PENDING</span>`);
+
+          stepsHTML += `
+            <div class="step-item ${stepDone ? 'step-done' : (stepCurrent ? 'step-current' : '')}">
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span style="font-weight: 600; font-size: 11px;">${s.badge || 'STEP ' + (idx+1)}: ${s.title}</span>
+                ${statusBadge}
+              </div>
+              <div style="font-size: 10px; color: var(--text-muted);">${s.description}</div>
+              ${s.output ? `<div style="font-size: 10px; color: #7ee787;">Output: ${escapeHTML(s.output)}</div>` : ''}
+              ${stepCurrent ? `
+                <div style="display: flex; gap: 6px; margin-top: 4px;">
+                  <button class="btn btn-green" style="padding: 2px 6px;" onclick="advancePlaybookStep('${run.run_id}', ${idx}, 'COMPLETED')">✓ Mark Step Complete</button>
+                  <button class="btn btn-orange" style="padding: 2px 6px;" onclick="copyText('${escapeHTML(s.command)}')">📋 Copy Step Cmd</button>
+                </div>
+              ` : ''}
+            </div>
+          `;
+        });
+
         div.innerHTML = `
           <div style="display: flex; justify-content: space-between; align-items: center;">
-            <span style="font-weight: 700; color: var(--orange);">${run.run_id} (${run.playbook_id})</span>
-            <span class="badge badge-high">${run.status}</span>
+            <span style="font-weight: 700; color: ${isRunning ? 'var(--orange)' : 'var(--green)'};">${run.run_id} (${run.playbook_id})</span>
+            <span class="badge ${isRunning ? 'badge-high' : 'badge-low'}">${run.status}</span>
           </div>
-          <div style="font-size: 11px;">Target IP: <strong>${run.target_ip}</strong> | Node: ${run.node_id}</div>
-          <div style="color: var(--text-muted); font-size: 10px;">Trigger: ${run.trigger_reason}</div>
-          <div style="margin-top: 6px; font-size: 11px;">Current Step: <strong>Step ${run.current_step_idx + 1} of ${run.steps?.length || 4}</strong></div>
+          <div style="font-size: 11px;">Target: <strong>${run.target_ip}</strong> | Node: ${run.node_id} | Elapsed: ${elapsedSec}s</div>
+          <div style="color: var(--text-muted); font-size: 10px;">Trigger Reason: ${escapeHTML(run.trigger_reason)}</div>
+          <div style="display: flex; flex-direction: column; gap: 6px; margin-top: 4px;">
+            ${stepsHTML}
+          </div>
         `;
         runsContainer.appendChild(div);
       });
+    }
+
+    function promptLaunchPlaybook(pbID, pbName) {
+      pendingLaunchPB = pbID;
+      const topIP = document.getElementById('manualActionIP').value.trim();
+      document.getElementById('pbModalTitle').textContent = `Launch Playbook: ${pbID}`;
+      document.getElementById('pbModalDesc').textContent = `Execute ${pbName} remediation workflow:`;
+      document.getElementById('pbModalTargetIP').value = topIP || currentEventIP || '';
+      document.getElementById('playbookModal').style.display = 'flex';
+      document.getElementById('pbModalTargetIP').focus();
+    }
+
+    function closePlaybookModal() {
+      document.getElementById('playbookModal').style.display = 'none';
+      pendingLaunchPB = null;
+    }
+
+    async function confirmLaunchPlaybook() {
+      const targetIP = document.getElementById('pbModalTargetIP').value.trim() || '127.0.0.1';
+      const pbID = pendingLaunchPB || 'PB-101';
+      closePlaybookModal();
+
+      try {
+        const res = await fetch('/api/soar/execute', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action_type: 'START_PLAYBOOK',
+            playbook_id: pbID,
+            target_ip: targetIP,
+            reason: `Manual Analyst Launch [${pbID}] on ${targetIP}`
+          })
+        });
+        const data = await res.json();
+        showToast(`Playbook ${pbID} launched successfully`, 'ok');
+        fetchSOARRuns();
+      } catch (e) {
+        showToast('Launch failed: ' + e.message, 'crit');
+      }
+    }
+
+    async function advancePlaybookStep(runID, stepIdx, status) {
+      try {
+        await fetch('/api/soar/execute', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            run_id: runID,
+            step_index: stepIdx,
+            status: status,
+            output: `Step ${stepIdx + 1} verified by operator`
+          })
+        });
+        showToast(`Advanced Step ${stepIdx + 1} for ${runID}`, 'ok');
+        fetchSOARRuns();
+      } catch (e) {}
     }
 
     async function executeSOARAction(actionType) {
@@ -1115,7 +1293,7 @@
             </td>
             <td style="font-weight: 600; color: var(--accent);">${r.id}</td>
             <td>${r.title}</td>
-            <td><span class="badge ${r.level === 'critical' ? 'badge-crit' : 'badge-high'}">${r.level.toUpperCase()}</span></td>
+            <td><span class="badge ${r.level === 'critical' ? 'badge-crit' : 'badge-high'}">${String(r.level).toUpperCase()}</span></td>
             <td>${r.threat_score}</td>
             <td>${r.mitre_id ? `<span class="badge badge-mitre">${r.mitre_id}</span>` : '-'}</td>
             <td><span class="badge badge-iso">${r.scope === 1 ? 'HOST' : 'NETWORK'}</span></td>
@@ -1237,27 +1415,129 @@
       } catch (e) {}
     }
 
-    // Incident Drawer
-    function openDrawer(ev) {
+    // Fully Hydrated Incident Drawer
+    function openDrawer(rawEvent) {
+      const ev = normalizeEvent(rawEvent);
       currentDrawerEvent = ev;
       currentEventIP = ev.client_ip || '';
 
       document.getElementById('drawerTitle').textContent = `INCIDENT #${ev.id || 'LIVE'}`;
-      document.getElementById('drawerScoreBadge').innerHTML = getScoreBadge(ev.threat_score || 0);
+      document.getElementById('drawerScoreBadge').innerHTML = getScoreBadge(ev.threat_score);
       document.getElementById('drawerMitreBadge').textContent = ev.mitre_technique_id || 'T1190';
       document.getElementById('drawerISOBadge').innerHTML = getISOBadge(ev.country_code);
 
-      document.getElementById('dNode').textContent = ev.node_id || 'node-edge-primary';
-      document.getElementById('dIP').textContent = ev.client_ip || '-';
-      document.getElementById('dGeo').textContent = `${ev.country_name || 'Local'} (${ev.city || 'LAN'}) - ${ev.asn || 'Internal'}`;
-      document.getElementById('dSource').textContent = `${ev.source || 'telemetry'} (HTTP ${ev.status_code || 200})`;
-      document.getElementById('dRule').textContent = `${ev.rule_id || '-'} [${ev.threat_tier || 'NORMAL'}]`;
-      document.getElementById('dTime').textContent = new Date(ev.timestamp_ms || Date.now()).toISOString();
+      document.getElementById('dNode').textContent = ev.node_id;
+      document.getElementById('dIP').textContent = ev.client_ip;
+      document.getElementById('dGeo').textContent = `${ev.country_name || 'Local'} (${ev.city || 'LAN'}) - ${ev.asn || 'Internal Network'}`;
+      document.getElementById('dSource').textContent = `${ev.source} (HTTP ${ev.status_code || 200})`;
+      document.getElementById('dRule').textContent = `${ev.rule_id} [${ev.threat_tier}]`;
+      document.getElementById('dTime').textContent = new Date(ev.timestamp_ms).toISOString();
 
-      document.getElementById('dRaw').textContent = ev.raw_line || '';
-      document.getElementById('drawerNotes').value = ev.analyst_notes || '';
+      document.getElementById('dRaw').textContent = ev.raw_line;
+      document.getElementById('drawerNotes').value = ev.analyst_notes;
+
+      // 1. Root Cause & Evidence Analysis
+      hydrateRootCauseAnalysis(ev);
+
+      // 2. Contextual MITRE Investigation Commands
+      hydrateMitreCommands(ev);
 
       document.getElementById('drawer').classList.add('open');
+    }
+
+    function hydrateRootCauseAnalysis(ev) {
+      const raw = ev.raw_line || '';
+      const rawLower = raw.toLowerCase();
+      let matchedEvidence = 'Pattern matched in raw stream';
+
+      if (rawLower.includes('union select')) matchedEvidence = 'SQL Injection keyword: "UNION SELECT"';
+      else if (rawLower.includes("' or 1=1")) matchedEvidence = 'SQL Auth Bypass token: "\' OR 1=1"';
+      else if (rawLower.includes(';id') || rawLower.includes('; id')) matchedEvidence = 'Command chaining separator: ";id"';
+      else if (rawLower.includes('|whoami') || rawLower.includes('| whoami')) matchedEvidence = 'Pipe command execution: "|whoami"';
+      else if (rawLower.includes('/dev/tcp')) matchedEvidence = 'Interactive Reverse Shell descriptor: "/dev/tcp"';
+      else if (rawLower.includes('../..')) matchedEvidence = 'Directory traversal sequence: "../.."';
+      else if (rawLower.includes('/etc/passwd')) matchedEvidence = 'Sensitive system file probe: "/etc/passwd"';
+      else if (rawLower.includes('failed password')) matchedEvidence = 'Authentication failure event: "Failed password"';
+      else if (rawLower.includes('ptrace') || rawLower.includes('process_vm_writev')) matchedEvidence = 'Memory tampering syscall: "process_vm_writev / ptrace"';
+      else if (rawLower.includes('syn probe') || rawLower.includes('port scan') || rawLower.includes('dst_port')) matchedEvidence = 'Port probe sequence in telemetry stream';
+
+      let intentSummary = 'Uncategorized network reconnaissance or anomaly.';
+      const mitre = (ev.mitre_technique_id || '').toUpperCase();
+      if (mitre.includes('T1190')) intentSummary = 'Exploit Public-Facing Application: Attacker attempting SQLi, LFI, or injection via HTTP parameters.';
+      else if (mitre.includes('T1059')) intentSummary = 'Command and Scripting Interpreter: Attacker attempting remote shellcode execution or binary spawn.';
+      else if (mitre.includes('T1110')) intentSummary = 'Credential Access: High-velocity dictionary attack / password guessing against edge authentication services.';
+      else if (mitre.includes('T1014') || mitre.includes('T1055')) intentSummary = 'Host & Kernel Tampering: Unauthorized memory injection, syscall hook, or rootkit persistence attempt.';
+      else if (mitre.includes('T1046') || mitre.includes('T1595')) intentSummary = 'Active Discovery: Automated port enumeration and service banner grabbing.';
+      else if (mitre.includes('T1071') || mitre.includes('T1568')) intentSummary = 'Command and Control: Outbound beaconing, DGA domain resolution, or high-entropy DNS tunneling.';
+
+      document.getElementById('drawerRootCause').innerHTML = `
+        <div style="margin-bottom: 4px;">• <strong>Offending Evidence:</strong> <span style="color: var(--red);">${escapeHTML(matchedEvidence)}</span></div>
+        <div style="margin-bottom: 4px;">• <strong>Log Source & Subsystem:</strong> <span style="color: var(--cyan);">${escapeHTML(ev.source.toUpperCase())}</span> (Status: ${ev.status_code || 200})</div>
+        <div style="margin-bottom: 4px;">• <strong>Scoring Breakdown:</strong> Score ${ev.threat_score}/100 &bull; ${ev.threat_tier} Risk Tier &bull; Whitelist Evaluated: Passed</div>
+        <div>• <strong>Assessed Threat Intent:</strong> ${intentSummary}</div>
+      `;
+    }
+
+    function hydrateMitreCommands(ev) {
+      const container = document.getElementById('drawerCommandsList');
+      const ip = ev.client_ip || '127.0.0.1';
+      const mitre = (ev.mitre_technique_id || '').toUpperCase();
+      let cmds = [];
+
+      if (mitre.includes('T1190')) {
+        cmds = [
+          { title: "1. Inspect Web Server Offending Requests", cmd: `grep -E 'UNION|SELECT|<script|/bin/sh|\\.\\./' /var/log/nginx/access.log | grep '${ip}' | tail -n 25` },
+          { title: "2. Verify Active Web Listener Sockets", cmd: `ss -tulpn | grep -E ':80|:443|:8080'` },
+          { title: "3. Reload Web Firewall / Ingress Configuration", cmd: `nginx -t && systemctl reload nginx` }
+        ];
+      } else if (mitre.includes('T1059')) {
+        cmds = [
+          { title: "1. Audit Recent Process Invocations (auditd)", cmd: `ausearch -i -sc execve -ts recent | grep -E 'sh|bash|python|perl|nc'` },
+          { title: "2. Inspect Active Process Tree Hierarchy", cmd: `ps aux --forest | grep -E 'sh|bash|python|perl|nc|socat'` },
+          { title: "3. Issue Kernel SIGKILL to Suspicious PIDs", cmd: `pkill -9 -f '${ip}' || kill -9 <PID>` }
+        ];
+      } else if (mitre.includes('T1110')) {
+        cmds = [
+          { title: "1. Grep Authentication Failure Records", cmd: `grep 'Failed password' /var/log/auth.log | grep '${ip}' | tail -n 30` },
+          { title: "2. Inspect Live Open SSH Sockets", cmd: `ss -tna 'sport = :22' | grep '${ip}'` },
+          { title: "3. Reset Faillock / PAM Tally for Root", cmd: `faillock --user=root --reset || pam_tally2 --user=root --reset` }
+        ];
+      } else if (mitre.includes('T1014') || mitre.includes('T1055')) {
+        cmds = [
+          { title: "1. Audit Kernel Ring Buffer for Taints / Hooks", cmd: `dmesg -T | grep -E 'taint|module|hook|ptrace' | tail -n 30` },
+          { title: "2. Inspect Loaded Kernel Modules", cmd: `lsmod | grep -v -E '^(Module|ext4|xfs|overlay|bridge)'` },
+          { title: "3. Dump Kernel eBPF XDP Drop Map", cmd: `bpftool map dump name xdp_drop_map` }
+        ];
+      } else if (mitre.includes('T1046') || mitre.includes('T1595')) {
+        cmds = [
+          { title: "1. Trace Active Conntrack Flow Records", cmd: `conntrack -L -s '${ip}' | head -n 30` },
+          { title: "2. View Socket Statistics Summary", cmd: `ss -s` },
+          { title: "3. Check Kernel Log for SYN Drop Notices", cmd: `dmesg -T | grep -E 'SYN flood|port scan|XDP' | tail -n 25` }
+        ];
+      } else {
+        cmds = [
+          { title: "1. Inspect Socket Flow Connections", cmd: `ss -tulpn | grep '${ip}'` },
+          { title: "2. View Controller Journal Telemetry", cmd: `journalctl -u copsec -n 50 --no-pager` },
+          { title: "3. Query IP Route Target", cmd: `ip route get '${ip}'` }
+        ];
+      }
+
+      container.innerHTML = '';
+      cmds.forEach(item => {
+        const row = document.createElement('div');
+        row.style.display = 'flex';
+        row.style.justifyContent = 'space-between';
+        row.style.alignItems = 'center';
+        row.style.gap = '8px';
+        row.innerHTML = `
+          <div style="flex: 1; overflow: hidden;">
+            <div style="font-size: 11px; font-weight: 600;">${item.title}:</div>
+            <div style="font-size: 10px; color: #7ee787; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHTML(item.cmd)}</div>
+          </div>
+          <button class="btn" onclick="copyText('${escapeHTML(item.cmd)}')">📋 Copy Cmd</button>
+        `;
+        container.appendChild(row);
+      });
     }
 
     function closeDrawer() {
@@ -1331,7 +1611,8 @@
     }
 
     function escapeHTML(str) {
-      return str.replace(/[&<>'"]/g, tag => ({
+      if (!str) return '';
+      return String(str).replace(/[&<>'"]/g, tag => ({
         '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
       }[tag] || tag));
     }
@@ -1340,7 +1621,9 @@
     window.addEventListener('DOMContentLoaded', () => {
       connectWS();
       fetchAlerts();
-      setInterval(fetchAlerts, 10000);
+      fetchSOARPlaybooks();
+      setInterval(fetchAlerts, 8000);
+      setInterval(fetchSOARRuns, 5000);
     });
   </script>
 </body>

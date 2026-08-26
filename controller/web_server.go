@@ -129,8 +129,11 @@ func (ws *WebSOCServer) Start() error {
 	mux.HandleFunc("/api/soar/ban", ws.handleSOARBan)
 	mux.HandleFunc("/api/soar/unban", ws.handleSOARUnban)
 	mux.HandleFunc("/api/soar/playbooks", ws.handleSOARPlaybooks)
+	mux.HandleFunc("/api/playbooks", ws.handleSOARPlaybooks)
 	mux.HandleFunc("/api/soar/runs", ws.handleSOARRuns)
+	mux.HandleFunc("/api/playbooks/runs", ws.handleSOARRuns)
 	mux.HandleFunc("/api/soar/execute", ws.handleSOARExecute)
+	mux.HandleFunc("/api/playbooks/execute", ws.handleSOARExecute)
 	mux.HandleFunc("/api/sigma/rules", ws.handleSigmaRules)
 	mux.HandleFunc("/api/sigma/rule", ws.handleSigmaRuleSubmit)
 	mux.HandleFunc("/api/sigma/toggle", ws.handleSigmaRuleToggle)
@@ -1017,6 +1020,8 @@ func (ws *WebSOCServer) handleSOARExecute(w http.ResponseWriter, r *http.Request
 	}
 	var req struct {
 		ActionType string `json:"action_type"`
+		PlaybookID string `json:"playbook_id"`
+		TargetIP   string `json:"target_ip"`
 		ActorIP    string `json:"actor_ip"`
 		NodeID     string `json:"node_id"`
 		RunID      string `json:"run_id"`
@@ -1024,6 +1029,7 @@ func (ws *WebSOCServer) handleSOARExecute(w http.ResponseWriter, r *http.Request
 		Status     string `json:"status"`
 		Output     string `json:"output"`
 		Param      string `json:"param"`
+		Reason     string `json:"reason"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid JSON: "+err.Error(), http.StatusBadRequest)
@@ -1033,14 +1039,37 @@ func (ws *WebSOCServer) handleSOARExecute(w http.ResponseWriter, r *http.Request
 	w.Header().Set("Content-Type", "application/json")
 	soarEngine := soar.GetDefaultEngine()
 
-	// If advancing a playbook step
-	if req.RunID != "" && req.Status != "" {
-		run, err := soarEngine.AdvanceStep(req.RunID, req.StepIndex, req.Status, req.Output)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
+	// 1. If starting a new playbook execution run
+	if req.PlaybookID != "" || req.ActionType == "START_PLAYBOOK" {
+		pbID := req.PlaybookID
+		if pbID == "" {
+			pbID = req.Param
 		}
+		if pbID == "" {
+			pbID = "PB-101"
+		}
+		targetIP := strings.TrimSpace(req.TargetIP)
+		if targetIP == "" {
+			targetIP = strings.TrimSpace(req.ActorIP)
+		}
+		if targetIP == "" {
+			targetIP = "127.0.0.1"
+		}
+		nodeID := strings.TrimSpace(req.NodeID)
+		if nodeID == "" {
+			nodeID = "node-edge-primary"
+		}
+		reason := strings.TrimSpace(req.Reason)
+		if reason == "" {
+			reason = fmt.Sprintf("Manual Operator Playbook Trigger [%s]", pbID)
+		}
+
+		run := soarEngine.StartPlaybookRun(time.Now().UnixMilli(), pbID, targetIP, nodeID, 90, "T1190", reason)
 		if ws.wsHub != nil {
+			ws.wsHub.Broadcast("PLAYBOOK_RUN_UPDATE", map[string]interface{}{
+				"run":         run,
+				"active_runs": soarEngine.GetActiveRuns(),
+			})
 			ws.wsHub.Broadcast("soar_playbook_run", map[string]interface{}{
 				"run":         run,
 				"active_runs": soarEngine.GetActiveRuns(),
@@ -1053,8 +1082,36 @@ func (ws *WebSOCServer) handleSOARExecute(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Direct Remediation Action Execution
-	res, err := soarEngine.ExecuteRemediationAction(req.ActionType, req.ActorIP, req.NodeID, req.Param)
+	// 2. If advancing a playbook step
+	if req.RunID != "" && req.Status != "" {
+		run, err := soarEngine.AdvanceStep(req.RunID, req.StepIndex, req.Status, req.Output)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if ws.wsHub != nil {
+			ws.wsHub.Broadcast("PLAYBOOK_RUN_UPDATE", map[string]interface{}{
+				"run":         run,
+				"active_runs": soarEngine.GetActiveRuns(),
+			})
+			ws.wsHub.Broadcast("soar_playbook_run", map[string]interface{}{
+				"run":         run,
+				"active_runs": soarEngine.GetActiveRuns(),
+			})
+		}
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"run":     run,
+		})
+		return
+	}
+
+	// 3. Direct Remediation Action Execution
+	targetIP := req.ActorIP
+	if targetIP == "" {
+		targetIP = req.TargetIP
+	}
+	res, err := soarEngine.ExecuteRemediationAction(req.ActionType, targetIP, req.NodeID, req.Param)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
