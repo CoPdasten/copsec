@@ -1524,6 +1524,38 @@
         const badge = document.getElementById('badgeAlerts');
         if (badge) badge.textContent = alerts.length;
         renderAlerts(alerts);
+
+        // Populate dashboard recent high-fidelity feed if empty
+        const dashRecent = document.getElementById('dashRecentFeedBody');
+        if (dashRecent && (dashRecent.children.length === 0 || dashRecent.children[0].textContent.includes('Awaiting'))) {
+          const highFidelity = alerts.filter(a => {
+            const isLocal = !a.source_ip || a.source_ip === '-' || a.source_ip === '127.0.0.1' || a.source_ip === '::1' || a.source_ip === 'localhost' || a.source_ip.startsWith('127.');
+            const dnsResolvers = ['8.8.8.8','8.8.4.4','1.1.1.1','1.0.0.1','1.1.1.2','1.0.0.2','9.9.9.9','149.112.112.112','208.67.222.222','208.67.220.220','213.186.33.99','213.186.33.100','37.59.108.186'];
+            const isDNS = dnsResolvers.includes(a.source_ip);
+            return a.threat_score >= 40 && !isLocal && !isDNS;
+          }).slice(0, 8);
+          if (highFidelity.length > 0) {
+            dashRecent.innerHTML = '';
+            highFidelity.forEach(ev => {
+              const tr = document.createElement('tr');
+              tr.style.cursor = 'pointer';
+              tr.onclick = () => openDrawer(ev);
+              const d = new Date(ev.timestamp_ms);
+              const timeStr = d.toTimeString().split(' ')[0];
+              const isInfo = ev.threat_score === 0 || ev.severity === 'INFO' || ev.threat_score < 30;
+              const ruleStyle = isInfo ? 'color: var(--text-muted); font-size: 11px;' : 'color: var(--cyan); font-weight: 500;';
+              tr.innerHTML = `
+                <td style="color: var(--text-muted);">${timeStr}</td>
+                <td>${getISOBadge(ev.country_code)}</td>
+                <td style="font-weight: 600; color: var(--text);">${ev.source_ip}</td>
+                <td>${getSeverityBadge(ev.severity, ev.threat_score)}</td>
+                <td>${ev.mitre_id ? `<span class="badge badge-mitre">[${ev.mitre_id}]</span>` : '-'}</td>
+                <td style="${ruleStyle}">${escapeHTML(ev.rule_matched)}</td>
+              `;
+              dashRecent.appendChild(tr);
+            });
+          }
+        }
       } catch (e) {
         console.error('Failed to fetch alerts:', e);
       }
