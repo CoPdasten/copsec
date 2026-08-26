@@ -939,7 +939,7 @@ func (ws *WebSOCServer) handleAlerts(w http.ResponseWriter, r *http.Request) {
 		limit = l
 	}
 
-	events, err := ws.storage.GetRecentEvents(limit)
+	events, err := ws.storage.GetRecentAlerts(limit)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

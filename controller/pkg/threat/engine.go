@@ -283,6 +283,9 @@ func (se *ScoringEngine) Evaluate(
 	ipStr = strings.TrimSpace(ipStr)
 	now := time.Now().UnixMilli()
 
+	rLower := strings.ToLower(ruleID)
+	mUpper := strings.ToUpper(mitreID)
+
 	// 1. Strict Whitelist Gating: Instant Zero-Score Bypass & Blocklist Invalidation
 	if ipStr == "" || se.IsWhitelisted(ipStr) {
 		return ThreatAssessment{
@@ -301,9 +304,6 @@ func (se *ScoringEngine) Evaluate(
 			TimestampMs:         now,
 		}
 	}
-
-	rLower := strings.ToLower(ruleID)
-	mUpper := strings.ToUpper(mitreID)
 
 	// 2. De-noising: Standard Port 53 DNS Traffic & Generic System Audit Events
 	// Standard DNS traffic and generic audit events must NOT be assigned T1190 or arbitrary exploit tags.

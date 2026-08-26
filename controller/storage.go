@@ -186,6 +186,26 @@ func (s *StorageEngine) initSchema() error {
 	CREATE INDEX IF NOT EXISTS idx_events_threat_score ON events(threat_score DESC);
 	CREATE INDEX IF NOT EXISTS idx_events_node_id ON events(node_id);
 
+	CREATE TABLE IF NOT EXISTS alerts (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		node_id TEXT NOT NULL,
+		source TEXT NOT NULL,
+		raw_line TEXT NOT NULL,
+		client_ip TEXT NOT NULL,
+		status_code INTEGER DEFAULT 0,
+		timestamp_ms INTEGER NOT NULL,
+		rule_id TEXT DEFAULT '',
+		mitre_technique_id TEXT DEFAULT '',
+		threat_score INTEGER DEFAULT 0,
+		ai_analysis TEXT DEFAULT '',
+		analyst_notes TEXT DEFAULT '',
+		playbook_progress TEXT DEFAULT ''
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_alerts_timestamp ON alerts(timestamp_ms DESC);
+	CREATE INDEX IF NOT EXISTS idx_alerts_client_ip ON alerts(client_ip);
+	CREATE INDEX IF NOT EXISTS idx_alerts_threat_score ON alerts(threat_score DESC);
+
 	CREATE TABLE IF NOT EXISTS active_bans (
 		ip TEXT PRIMARY KEY,
 		reason TEXT DEFAULT '',
@@ -334,6 +354,54 @@ func (s *StorageEngine) InsertEvent(ev *StoredEvent) error {
 	id, _ := res.LastInsertId()
 	ev.ID = id
 	return nil
+}
+
+// InsertAlert persists an active security alert into the dedicated SQLite alerts table.
+func (s *StorageEngine) InsertAlert(ev *StoredEvent) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	query := `INSERT INTO alerts (node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis, analyst_notes, playbook_progress)
+	          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	res, err := s.db.Exec(query, ev.NodeID, ev.Source, ev.RawLine, ev.ClientIP, ev.StatusCode, ev.TimestampMs, ev.RuleID, ev.MitreTechniqueID, ev.ThreatScore, ev.AIAnalysis, ev.AnalystNotes, ev.PlaybookProgress)
+	if err != nil {
+		return err
+	}
+	id, _ := res.LastInsertId()
+	ev.ID = id
+	return nil
+}
+
+// GetRecentAlerts retrieves the latest security alerts from SQLite.
+func (s *StorageEngine) GetRecentAlerts(limit int) ([]*StoredEvent, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	query := `SELECT id, node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis, analyst_notes, playbook_progress
+	          FROM alerts ORDER BY timestamp_ms DESC LIMIT ?`
+	rows, err := s.db.Query(query, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	alerts, err := scanEvents(rows)
+	if err != nil {
+		return nil, err
+	}
+
+	// Fallback to events table with threat_score >= 40 if alerts table is empty
+	if len(alerts) == 0 {
+		fallbackQuery := `SELECT id, node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis, analyst_notes, playbook_progress
+		                  FROM events WHERE threat_score >= 40 OR (mitre_technique_id != '' AND mitre_technique_id NOT LIKE 'T1071%') ORDER BY timestamp_ms DESC LIMIT ?`
+		fbRows, fbErr := s.db.Query(fallbackQuery, limit)
+		if fbErr == nil {
+			defer fbRows.Close()
+			return scanEvents(fbRows)
+		}
+	}
+
+	return alerts, nil
 }
 
 // UpdateEventAI updates the AI analysis field for a stored incident.

@@ -17,6 +17,7 @@ import (
 	"github.com/copsec/controller/pkg/ipinfo"
 	"github.com/copsec/controller/pkg/ml"
 	"github.com/copsec/controller/pkg/models"
+	"github.com/copsec/controller/pkg/rules"
 	"github.com/copsec/controller/pkg/sigma"
 	"github.com/copsec/controller/pkg/snort"
 	"github.com/copsec/controller/pkg/soar"
@@ -287,18 +288,38 @@ func (s *CentralServer) processEvent(nodeID string, event *copsecproto.LogEvent)
 	mitreID := event.MitreTechniqueId
 	threatScore := int(event.ThreatScore)
 
-	// 1. In-Memory Sigma Detection Engine (Detection-as-Code) Evaluation
+	fields := map[string]string{
+		"source":      event.Source,
+		"client_ip":   event.ClientIp,
+		"source_ip":   event.ClientIp,
+		"src_ip":      event.ClientIp,
+		"ip":          event.ClientIp,
+		"status":      fmt.Sprintf("%d", event.StatusCode),
+		"status_code": fmt.Sprintf("%d", event.StatusCode),
+		"raw":         event.RawLine,
+		"raw_line":    event.RawLine,
+		"message":     event.RawLine,
+	}
+
+	// 1. In-Memory SigmaHQ Detection Engine (pkg/rules/matcher.go)
+	if matchedSigmaRule, matched := rules.GetDefaultMatcher().Evaluate(event.RawLine, fields); matched {
+		if ruleID == "" {
+			ruleID = matchedSigmaRule.ID
+		}
+		if mitreID == "" {
+			mitreID = matchedSigmaRule.MitreTechniqueID
+		}
+		if threatScore < matchedSigmaRule.ThreatScore {
+			threatScore = matchedSigmaRule.ThreatScore
+		}
+	}
+
+	// 1b. SigmaEngine (controller/sigma_engine.go) fallback
 	s.mu.RLock()
 	sigmaEng := s.sigmaEngine
 	s.mu.RUnlock()
 
 	if sigmaEng != nil {
-		fields := map[string]string{
-			"source":    event.Source,
-			"client_ip": event.ClientIp,
-			"status":    fmt.Sprintf("%d", event.StatusCode),
-			"raw":       event.RawLine,
-		}
 		if matchedSigmaRule, matched := sigmaEng.EvaluateEvent(event.RawLine, fields); matched {
 			if ruleID == "" {
 				ruleID = matchedSigmaRule.ID
@@ -420,8 +441,9 @@ func (s *CentralServer) processEvent(nodeID string, event *copsecproto.LogEvent)
 		mitreID = ""
 	}
 
-	// Global Infrastructure & Public DNS Whitelist protection
-	if isProtectedIP(event.ClientIp) || (s.threatEngine != nil && s.threatEngine.IsWhitelisted(event.ClientIp)) {
+	// Global Infrastructure & Public DNS Whitelist protection (applies to normal non-exploit traffic)
+	isMaliciousPayload := threatScore >= 40 || strings.HasPrefix(strings.ToLower(ruleID), "sigma") || (mitreID != "" && strings.HasPrefix(strings.ToUpper(mitreID), "T") && ruleID != "suricata_flow" && ruleID != "suricata_dns")
+	if (isProtectedIP(event.ClientIp) || (s.threatEngine != nil && s.threatEngine.IsWhitelisted(event.ClientIp))) && !isMaliciousPayload {
 		threatScore = 0
 		mitreID = ""
 	} else {
@@ -447,6 +469,9 @@ func (s *CentralServer) processEvent(nodeID string, event *copsecproto.LogEvent)
 			loc.ASN,
 		)
 		threatScore = assessment.FinalScore
+		if assessment.MitreID != "" {
+			mitreID = assessment.MitreID
+		}
 	}
 
 	stored := &StoredEvent{
@@ -482,8 +507,15 @@ func (s *CentralServer) processEvent(nodeID string, event *copsecproto.LogEvent)
 		stored.TimestampMs = time.Now().UnixMilli()
 	}
 
-	// Persist to embedded SQLite
-	_ = s.storage.InsertEvent(stored)
+	// Persist to embedded SQLite (Telemetry table)
+	if s.storage != nil {
+		_ = s.storage.InsertEvent(stored)
+
+		// Persist to dedicated Alerts table when threat_score >= 40 (or severity != INFO)
+		if stored.ThreatScore >= 40 || (stored.MitreTechniqueID != "" && stored.MitreTechniqueID != "T1071") || strings.HasPrefix(strings.ToLower(stored.RuleID), "sigma") {
+			_ = s.storage.InsertAlert(stored)
+		}
+	}
 
 	// Asynchronously enrich IP with IPinfo threat intelligence
 	if stored.ClientIP != "" {
@@ -500,6 +532,9 @@ func (s *CentralServer) processEvent(nodeID string, event *copsecproto.LogEvent)
 
 	if hub != nil {
 		hub.Broadcast("event", stored)
+		if stored.ThreatScore >= 40 || (stored.MitreTechniqueID != "" && stored.MitreTechniqueID != "T1071") || strings.HasPrefix(strings.ToLower(stored.RuleID), "sigma") {
+			hub.Broadcast("ALERT_NEW", stored)
+		}
 	}
 
 	// Broadcast to channel subscriber non-blockingly

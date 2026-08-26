@@ -1264,14 +1264,35 @@
         document.getElementById('statTotal').textContent = payload.total_events || 0;
         document.getElementById('statNodes').textContent = payload.nodes_count || 0;
         document.getElementById('statBans').textContent = payload.active_bans || 0;
+      } else if (type === 'ALERT_NEW' || type === 'alert') {
+        const ev = normalizeEvent(payload);
+        const existingIdx = activeAlertsList.findIndex(a => a.id && ev.id && a.id === ev.id);
+        if (existingIdx >= 0) {
+          activeAlertsList[existingIdx] = ev;
+        } else {
+          activeAlertsList.unshift(ev);
+        }
+        const badge = document.getElementById('badgeAlerts');
+        if (badge) badge.textContent = activeAlertsList.length;
+        renderAlerts(activeAlertsList);
+        updateDashboardAggregates(ev);
+        showToast(`[ALERT] ${ev.rule_id || 'Threat Incident'} from ${ev.source_ip}`, 'crit');
       } else if (type === 'event') {
         const ev = normalizeEvent(payload);
         appendTelemetryRow(ev);
         updateDashboardAggregates(ev);
 
-        if (ev.threat_score >= 80) {
-          showToast(`[ALERT] ${ev.rule_id} from ${ev.source_ip}`, 'crit');
-          fetchAlerts();
+        if (ev.threat_score >= 40) {
+          const existingIdx = activeAlertsList.findIndex(a => a.id && ev.id && a.id === ev.id);
+          if (existingIdx < 0) {
+            activeAlertsList.unshift(ev);
+            const badge = document.getElementById('badgeAlerts');
+            if (badge) badge.textContent = activeAlertsList.length;
+            renderAlerts(activeAlertsList);
+          }
+          if (ev.threat_score >= 80) {
+            showToast(`[ALERT] ${ev.rule_id || 'Critical Threat'} from ${ev.source_ip}`, 'crit');
+          }
         }
       } else if (type === 'ban_change') {
         const ip = payload.ban?.ip || 'IP';
@@ -1447,17 +1468,27 @@
     // Active Alerts Cockpit
     async function fetchAlerts() {
       try {
-        const res = await fetch('/api/alerts?limit=50');
+        const res = await fetch('/api/alerts?limit=500');
         const rawAlerts = await res.json();
-        const alerts = Array.isArray(rawAlerts) ? rawAlerts.map(normalizeEvent) : [];
+        let list = [];
+        if (Array.isArray(rawAlerts)) {
+          list = rawAlerts;
+        } else if (rawAlerts && Array.isArray(rawAlerts.alerts)) {
+          list = rawAlerts.alerts;
+        }
+        const alerts = list.map(normalizeEvent);
         activeAlertsList = alerts;
-        document.getElementById('badgeAlerts').textContent = alerts.length;
+        const badge = document.getElementById('badgeAlerts');
+        if (badge) badge.textContent = alerts.length;
         renderAlerts(alerts);
-      } catch (e) {}
+      } catch (e) {
+        console.error('Failed to fetch alerts:', e);
+      }
     }
 
     function renderAlerts(alerts) {
       const tbody = document.getElementById('alertsTableBody');
+      if (!tbody) return;
       tbody.innerHTML = '';
 
       if (!alerts || alerts.length === 0) {
@@ -1467,21 +1498,23 @@
 
       alerts.forEach(a => {
         const tr = document.createElement('tr');
-        const d = new Date(a.timestamp_ms);
+        const d = new Date(a.timestamp_ms || Date.now());
         const timeStr = d.toTimeString().split(' ')[0];
+        const srcIP = a.source_ip || a.client_ip || '-';
+        const ruleName = a.rule_matched || a.rule_id || 'Security Alert';
 
         tr.innerHTML = `
           <td style="color: var(--text-muted);">${timeStr}</td>
           <td>${getISOBadge(a.country_code)}</td>
-          <td style="font-weight: 600; color: var(--text); cursor: pointer;" onclick="openDrawerFromAlert('${a.source_ip}')">${a.source_ip}</td>
+          <td style="font-weight: 600; color: var(--text); cursor: pointer;" onclick="openDrawerFromAlert('${srcIP}')">${srcIP}</td>
           <td>${getSeverityBadge(a.severity, a.threat_score)}</td>
           <td>${a.mitre_id ? `<span class="badge badge-mitre">[${a.mitre_id}]</span>` : '-'}</td>
-          <td style="color: var(--cyan);">${escapeHTML(a.rule_matched)}</td>
+          <td style="color: var(--cyan);">${escapeHTML(ruleName)}</td>
           <td>${getContainmentBadge(a.containment_state)}</td>
           <td style="text-align: right;">
-            <button class="btn btn-red" onclick="triageAction('ban', '${a.source_ip}')">[BAN]</button>
-            <button class="btn btn-orange" onclick="triageAction('tarpit', '${a.source_ip}')">[TARPIT]</button>
-            <button class="btn btn-accent" onclick="openDrawerFromAlert('${a.source_ip}')">[INSPECT]</button>
+            <button class="btn btn-red" onclick="triageAction('ban', '${srcIP}')">[BAN]</button>
+            <button class="btn btn-orange" onclick="triageAction('tarpit', '${srcIP}')">[TARPIT]</button>
+            <button class="btn btn-accent" onclick="openDrawerFromAlert('${srcIP}')">[INSPECT]</button>
           </td>
         `;
         tbody.appendChild(tr);
