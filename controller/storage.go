@@ -379,7 +379,9 @@ func (s *StorageEngine) GetRecentAlerts(limit int) ([]*StoredEvent, error) {
 
 	query := `SELECT id, node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis, analyst_notes, playbook_progress
 	          FROM alerts
-	          WHERE threat_score >= 40 AND rule_id != 'sudo_execution'
+	          WHERE threat_score >= 40 
+	            AND rule_id != 'sudo_execution'
+	            AND NOT (client_ip IN ('127.0.0.1', '::1', 'localhost', 'local', '-') AND threat_score < 70 AND rule_id NOT LIKE 'sigma%')
 	          ORDER BY timestamp_ms DESC LIMIT ?`
 	rows, err := s.db.Query(query, limit)
 	if err != nil {
@@ -396,7 +398,9 @@ func (s *StorageEngine) GetRecentAlerts(limit int) ([]*StoredEvent, error) {
 	if len(alerts) == 0 {
 		fallbackQuery := `SELECT id, node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis, analyst_notes, playbook_progress
 		                  FROM events
-		                  WHERE threat_score >= 40 AND rule_id != 'sudo_execution'
+		                  WHERE threat_score >= 40 
+		                    AND rule_id != 'sudo_execution'
+		                    AND NOT (client_ip IN ('127.0.0.1', '::1', 'localhost', 'local', '-') AND threat_score < 70 AND rule_id NOT LIKE 'sigma%')
 		                  ORDER BY timestamp_ms DESC LIMIT ?`
 		fbRows, fbErr := s.db.Query(fallbackQuery, limit)
 		if fbErr == nil {

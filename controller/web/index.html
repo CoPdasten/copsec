@@ -6,30 +6,16 @@
   <title>CoPSeC // SOC Cockpit & SOAR Engine</title>
   <style>
     :root {
-      --bg: #090d16;
-      --surface: #111726;
-      --surface-hover: #161f33;
-      --border: #1e293b;
-      --border-accent: #334155;
-      --text: #f1f5f9;
-      --text-muted: #94a3b8;
-      --text-dim: #64748b;
-      --accent: #38bdf8;
-      --accent-dim: rgba(56, 189, 248, 0.12);
-      --red: #ef4444;
-      --red-dim: rgba(239, 68, 68, 0.14);
-      --orange: #f97316;
-      --orange-dim: rgba(249, 115, 22, 0.14);
-      --yellow: #eab308;
-      --yellow-dim: rgba(234, 179, 8, 0.14);
-      --green: #10b981;
-      --green-dim: rgba(16, 185, 129, 0.14);
-      --purple: #a855f7;
-      --purple-dim: rgba(168, 85, 247, 0.14);
-      --cyan: #06b6d4;
-      --cyan-dim: rgba(6, 182, 212, 0.14);
+      --bg: #050505;
+      --surface: #0f0f11;
+      --surface-hover: #18181b;
+      --border: #27272a;
+      --border-accent: #3f3f46;
+      --text: #f4f4f5;
+      --text-muted: #a1a1aa;
+      --text-dim: #52525b;
       --font-mono: "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-      --radius: 4px;
+      --radius: 0px;
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -66,10 +52,9 @@
     }
     .brand .logo-badge {
       background: #000;
-      border: 1px solid var(--border);
+      border: 1px solid var(--border-accent);
       padding: 2px 6px;
-      border-radius: var(--radius);
-      color: var(--accent);
+      color: #fff;
       font-size: 11px;
     }
     .top-stats {
@@ -82,10 +67,9 @@
       display: flex;
       align-items: center;
       gap: 6px;
-      background: #060911;
+      background: #000000;
       border: 1px solid var(--border);
       padding: 3px 8px;
-      border-radius: var(--radius);
       font-size: 11px;
       cursor: default;
     }
@@ -94,31 +78,30 @@
       transition: all 0.15s;
     }
     .stat-pill.clickable:hover {
-      border-color: var(--accent);
+      border-color: var(--border-accent);
       background: var(--surface-hover);
+      color: #fff;
     }
     .stat-pill .val {
       color: var(--text);
-      font-weight: 600;
+      font-weight: 700;
     }
     .live-dot {
       width: 6px;
       height: 6px;
-      border-radius: 50%;
-      background: var(--green);
-      box-shadow: 0 0 6px var(--green);
+      border-radius: 0;
+      background: #f4f4f5;
       display: inline-block;
     }
     .live-dot.offline {
-      background: var(--red);
-      box-shadow: 0 0 6px var(--red);
+      background: var(--text-dim);
     }
 
     /* Nav Tabs */
     nav {
       display: flex;
       gap: 2px;
-      background: #060911;
+      background: #000000;
       border-bottom: 1px solid var(--border);
       padding: 0 16px;
       flex-shrink: 0;
@@ -145,13 +128,13 @@
       background: var(--surface-hover);
     }
     .tab-btn.active {
-      color: var(--accent);
-      border-bottom-color: var(--accent);
+      color: #ffffff;
+      border-bottom-color: #ffffff;
       background: var(--surface);
     }
     .tab-badge {
-      background: var(--border-accent);
-      border-radius: 3px;
+      background: var(--border);
+      border: 1px solid var(--border-accent);
       padding: 1px 5px;
       font-size: 10px;
       color: var(--text);
@@ -179,7 +162,6 @@
     .card {
       background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: var(--radius);
       padding: 14px;
       display: flex;
       flex-direction: column;
@@ -205,7 +187,6 @@
     .metric-card {
       background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: var(--radius);
       padding: 14px;
       display: flex;
       flex-direction: column;
@@ -216,7 +197,6 @@
     .metric-card:hover {
       background: var(--surface-hover);
       border-color: var(--border-accent);
-      transform: translateY(-1px);
     }
     .metric-header {
       display: flex;
@@ -237,13 +217,13 @@
       color: var(--text-dim);
     }
 
-    /* Standardized Text & Bracket Badges */
+    /* High-Contrast Pure Monochrome Text Badges (No Neon Colors) */
     .badge {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      padding: 1px 5px;
-      border-radius: 3px;
+      padding: 1.5px 6px;
+      border-radius: 0;
       font-size: 10px;
       font-weight: 700;
       letter-spacing: 0.3px;
@@ -252,26 +232,56 @@
     }
     .badge-iso {
       background: #000;
-      border: 1px solid var(--border);
-      color: var(--accent);
+      border: 1px solid var(--border-accent);
+      color: var(--text-muted);
     }
-    .badge-crit { background: var(--red-dim); border: 1px solid var(--red); color: var(--red); }
-    .badge-high { background: var(--orange-dim); border: 1px solid var(--orange); color: var(--orange); }
-    .badge-med { background: var(--yellow-dim); border: 1px solid var(--yellow); color: var(--yellow); }
-    .badge-low, .badge-info { background: var(--green-dim); border: 1px solid var(--green); color: var(--green); }
-    .badge-layer { background: rgba(56, 189, 248, 0.1); border: 1px solid var(--accent); color: var(--accent); }
-    .badge-mitre { background: rgba(168, 85, 247, 0.12); border: 1px solid var(--purple); color: var(--purple); }
-    .badge-xdp { background: var(--red-dim); border: 1px solid var(--red); color: var(--red); }
-    .badge-tarpit { background: var(--orange-dim); border: 1px solid var(--orange); color: var(--orange); }
-    .badge-active { background: var(--green-dim); border: 1px solid var(--green); color: var(--green); }
+    .badge-crit {
+      background: #f4f4f5;
+      border: 1px solid #ffffff;
+      color: #000000;
+      font-weight: 800;
+    }
+    .badge-high {
+      background: transparent;
+      border: 1px solid #d4d4d8;
+      color: #e4e4e7;
+      font-weight: 600;
+    }
+    .badge-med {
+      background: transparent;
+      border: 1px solid #52525b;
+      color: #a1a1aa;
+      font-weight: 600;
+    }
+    .badge-low, .badge-info, .badge-muted {
+      background: transparent;
+      border: 1px solid #27272a;
+      color: #71717a;
+      font-weight: 500;
+    }
+    .badge-layer {
+      background: transparent;
+      border: 1px solid var(--border-accent);
+      color: var(--text);
+    }
+    .badge-mitre {
+      background: transparent;
+      border: 1px solid var(--border-accent);
+      color: #d4d4d8;
+    }
+    .badge-containment, .badge-xdp, .badge-tarpit, .badge-active {
+      background: transparent;
+      border: 1px solid var(--border-accent);
+      color: #d4d4d8;
+    }
 
     /* Buttons & Inputs */
     .btn {
-      background: var(--surface);
+      background: #000000;
       color: var(--text);
       border: 1px solid var(--border);
       padding: 4px 8px;
-      border-radius: var(--radius);
+      border-radius: 0;
       font-family: inherit;
       font-size: 11px;
       font-weight: 600;
@@ -284,57 +294,43 @@
     }
     .btn:hover {
       background: var(--surface-hover);
+      border-color: #f4f4f5;
+      color: #ffffff;
+    }
+    .btn-action {
+      background: #000000;
+      color: var(--text);
+      border: 1px solid var(--border);
+      padding: 2px 6px;
+      font-size: 10px;
+    }
+    .btn-action:hover {
+      background: #ffffff;
+      color: #000000;
+      border-color: #ffffff;
+    }
+    .btn-red, .btn-orange, .btn-green, .btn-accent {
+      background: #000000;
       border-color: var(--border-accent);
-      color: #fff;
+      color: var(--text);
     }
-    .btn-red {
-      background: var(--red-dim);
-      border-color: var(--red);
-      color: var(--red);
-    }
-    .btn-red:hover {
-      background: var(--red);
-      color: #000;
-    }
-    .btn-orange {
-      background: var(--orange-dim);
-      border-color: var(--orange);
-      color: var(--orange);
-    }
-    .btn-orange:hover {
-      background: var(--orange);
-      color: #000;
-    }
-    .btn-green {
-      background: var(--green-dim);
-      border-color: var(--green);
-      color: var(--green);
-    }
-    .btn-green:hover {
-      background: var(--green);
-      color: #000;
-    }
-    .btn-accent {
-      background: var(--accent-dim);
-      border-color: var(--accent);
-      color: var(--accent);
-    }
-    .btn-accent:hover {
-      background: var(--accent);
-      color: #000;
+    .btn-red:hover, .btn-orange:hover, .btn-green:hover, .btn-accent:hover {
+      background: #ffffff;
+      border-color: #ffffff;
+      color: #000000;
     }
     .input-box {
-      background: #060911;
+      background: #000000;
       border: 1px solid var(--border);
       color: var(--text);
       padding: 4px 8px;
-      border-radius: var(--radius);
+      border-radius: 0;
       font-family: inherit;
       font-size: 11px;
       outline: none;
     }
     .input-box:focus {
-      border-color: var(--accent);
+      border-color: #f4f4f5;
     }
 
     /* Tables */
@@ -349,7 +345,7 @@
       font-size: 11px;
     }
     th {
-      background: #060911;
+      background: #000000;
       color: var(--text-muted);
       font-weight: 600;
       text-transform: uppercase;
@@ -361,11 +357,15 @@
     }
     td {
       padding: 6px 10px;
-      border-bottom: 1px solid #141b29;
+      border-bottom: 1px solid #18181b;
       white-space: nowrap;
     }
     tr:hover td {
-      background: rgba(56, 189, 248, 0.03);
+      background: #18181b;
+    }
+    tr.selected-alert-row td {
+      background: #27272a !important;
+      color: #ffffff !important;
     }
 
     /* Toolbar */
@@ -390,7 +390,7 @@
       width: 720px;
       height: 100vh;
       background: var(--surface);
-      border-left: 1px solid var(--border);
+      border-left: 1px solid var(--border-accent);
       box-shadow: -10px 0 30px rgba(0, 0, 0, 0.95);
       transition: right 0.22s cubic-bezier(0.16, 1, 0.3, 1);
       z-index: 1000;
@@ -406,7 +406,7 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      background: #0a0f1c;
+      background: #000000;
       flex-shrink: 0;
     }
     .drawer-body {
@@ -418,12 +418,12 @@
       gap: 14px;
     }
     .terminal-box {
-      background: #060911;
+      background: #000000;
       border: 1px solid var(--border);
-      border-radius: var(--radius);
+      border-radius: 0;
       padding: 10px;
       font-size: 11px;
-      color: #38bdf8;
+      color: #f4f4f5;
       word-break: break-all;
       white-space: pre-wrap;
       max-height: 160px;
@@ -438,49 +438,47 @@
       color: var(--text-muted);
       font-weight: 600;
       padding: 4px 6px;
-      border-bottom: 1px solid #141b29;
+      border-bottom: 1px solid #18181b;
     }
     .kv-table td:last-child {
       color: var(--text);
       padding: 4px 6px;
       word-break: break-word;
-      border-bottom: 1px solid #141b29;
+      border-bottom: 1px solid #18181b;
     }
 
     /* Playbook Step UI */
     .pb-step-card {
-      background: #090d16;
+      background: #000000;
       border: 1px solid var(--border);
-      border-radius: var(--radius);
       padding: 10px;
       display: flex;
       flex-direction: column;
       gap: 6px;
     }
     .pb-step-card.active-run {
-      border-color: var(--orange);
-      background: rgba(249, 115, 22, 0.03);
+      border-color: #d4d4d8;
+      background: #18181b;
     }
     .pb-step-card.completed-run {
-      border-color: var(--green);
-      background: rgba(16, 185, 129, 0.03);
+      border-color: var(--border-accent);
+      background: #09090b;
     }
     .step-item {
       background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: 3px;
       padding: 6px 8px;
       display: flex;
       flex-direction: column;
       gap: 3px;
     }
     .step-item.step-done {
-      border-color: var(--green);
-      border-left: 3px solid var(--green);
+      border-color: #71717a;
+      border-left: 3px solid #f4f4f5;
     }
     .step-item.step-current {
-      border-color: var(--orange);
-      border-left: 3px solid var(--orange);
+      border-color: #d4d4d8;
+      border-left: 3px solid #ffffff;
     }
 
     /* Toast Container */
@@ -495,12 +493,11 @@
       pointer-events: none;
     }
     .toast {
-      background: var(--surface);
-      border: 1px solid var(--border);
+      background: #000000;
+      border: 1px solid var(--border-accent);
       color: var(--text);
       padding: 6px 10px;
-      border-radius: var(--radius);
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.8);
       display: flex;
       align-items: center;
       gap: 6px;
@@ -509,8 +506,8 @@
       pointer-events: auto;
       max-width: 340px;
     }
-    .toast.crit { border-color: var(--red); color: #fca5a5; }
-    .toast.ok { border-color: var(--green); color: #86efac; }
+    .toast.crit { border-color: #ffffff; color: #ffffff; }
+    .toast.ok { border-color: var(--border-accent); color: #e4e4e7; }
     @keyframes slideIn {
       from { transform: translateX(100%); opacity: 0; }
       to { transform: translateX(0); opacity: 1; }
@@ -526,19 +523,17 @@
     .switch input { opacity: 0; width: 0; height: 0; }
     .slider {
       position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
-      background-color: #1e293b;
+      background-color: #18181b;
       transition: .2s;
-      border-radius: 16px;
       border: 1px solid var(--border);
     }
     .slider:before {
       position: absolute; content: ""; height: 10px; width: 10px; left: 2px; bottom: 2px;
       background-color: var(--text-muted);
       transition: .2s;
-      border-radius: 50%;
     }
-    input:checked + .slider { background-color: var(--green); border-color: var(--green); }
-    input:checked + .slider:before { transform: translateX(14px); background-color: #000; }
+    input:checked + .slider { background-color: #f4f4f5; border-color: #ffffff; }
+    input:checked + .slider:before { transform: translateX(14px); background-color: #000000; }
   </style>
 </head>
 <body>
@@ -555,7 +550,7 @@
       <div class="stat-pill">TOTAL EVENTS: <span class="val" id="statTotal">0</span></div>
       <div class="stat-pill">FLEET NODES: <span class="val" id="statNodes">0</span></div>
       <div class="stat-pill clickable" onclick="openQuarantineModal()" title="View and manage kernel XDP quarantine list">
-        ACTIVE BANS (XDP): <span class="val" id="statBans" style="color: var(--red);">0</span>
+        ACTIVE BANS (XDP): <span class="val" id="statBans">0</span>
       </div>
     </div>
   </header>
@@ -564,7 +559,7 @@
   <nav>
     <button class="tab-btn active" onclick="navigateTo('dashboard')">[DASHBOARD]</button>
     <button class="tab-btn" onclick="navigateTo('telemetry')">[TELEMETRY] <span class="tab-badge" id="badgeTelemetry">0</span></button>
-    <button class="tab-btn" onclick="navigateTo('alerts')">[ALERTS] <span class="tab-badge" id="badgeAlerts" style="background: var(--red); color:#fff;">0</span></button>
+    <button class="tab-btn" onclick="navigateTo('alerts')">[ALERTS] <span class="tab-badge" id="badgeAlerts">0</span></button>
     <button class="tab-btn" onclick="navigateTo('rules')">[DETECTION RULES] <span class="tab-badge" id="badgeRules">0</span></button>
     <button class="tab-btn" onclick="navigateTo('settings')">[FLEET & SETTINGS]</button>
   </nav>
@@ -581,7 +576,7 @@
             <span>CRITICAL SEVERITY</span>
             <span class="badge badge-crit">[CRIT]</span>
           </div>
-          <div class="metric-val" id="dashCritCount" style="color: var(--red);">0</div>
+          <div class="metric-val" id="dashCritCount">0</div>
           <div class="metric-desc">Immediate threat incidents (Score &ge; 85)</div>
         </div>
         <div class="metric-card" onclick="navigateTo('alerts', { severity: 'HIGH' })">
@@ -589,7 +584,7 @@
             <span>HIGH SEVERITY</span>
             <span class="badge badge-high">[HIGH]</span>
           </div>
-          <div class="metric-val" id="dashHighCount" style="color: var(--orange);">0</div>
+          <div class="metric-val" id="dashHighCount">0</div>
           <div class="metric-desc">High-fidelity detections (Score 60-84)</div>
         </div>
         <div class="metric-card" onclick="navigateTo('alerts', { severity: 'MEDIUM' })">
@@ -597,7 +592,7 @@
             <span>MEDIUM SEVERITY</span>
             <span class="badge badge-med">[MED]</span>
           </div>
-          <div class="metric-val" id="dashMedCount" style="color: var(--yellow);">0</div>
+          <div class="metric-val" id="dashMedCount">0</div>
           <div class="metric-desc">Suspicious probes & triage (Score 30-59)</div>
         </div>
         <div class="metric-card" onclick="navigateTo('telemetry', { severity: 'INFO' })">
@@ -605,7 +600,7 @@
             <span>INFORMATIONAL / BENIGN</span>
             <span class="badge badge-info">[INFO]</span>
           </div>
-          <div class="metric-val" id="dashInfoCount" style="color: var(--green);">0</div>
+          <div class="metric-val" id="dashInfoCount">0</div>
           <div class="metric-desc">Normalized telemetry baseline events</div>
         </div>
       </div>
@@ -618,7 +613,7 @@
           <div class="card">
             <div class="card-title">
               <span>Defense Layers & Status (24H Inspection)</span>
-              <span style="font-size: 10px; color: var(--text-muted);">Click layer to inspect telemetry</span>
+              <span style="font-size: 10px; color: var(--text-dim);">Click layer to inspect telemetry</span>
             </div>
             <div class="table-container">
               <table>
@@ -665,7 +660,7 @@
             <div class="card-title">
               <span>Top Offending Threat Actors</span>
               <div style="display: flex; gap: 6px;">
-                <button class="btn btn-red" style="padding: 2px 6px;" onclick="openQuarantineModal()">[QUARANTINE VAULT]</button>
+                <button class="btn" style="padding: 2px 6px;" onclick="openQuarantineModal()">[QUARANTINE VAULT]</button>
               </div>
             </div>
             <div class="table-container">
@@ -691,7 +686,7 @@
         <div class="card" style="flex: 1; display: flex; flex-direction: column;">
           <div class="card-title">
             <span>Recent High-Fidelity Incidents</span>
-            <button class="btn btn-accent" style="padding: 2px 6px;" onclick="navigateTo('alerts')">View All Alerts &rarr;</button>
+            <button class="btn" style="padding: 2px 6px;" onclick="navigateTo('alerts')">View All Alerts &rarr;</button>
           </div>
           <div class="table-container" style="flex: 1;">
             <table>
@@ -781,7 +776,7 @@
           </select>
         </div>
         <div class="toolbar-right">
-          <button class="btn btn-red" onclick="clearAllActiveAlerts()">[CLEAR ALL ALERTS]</button>
+          <button class="btn" onclick="clearAllActiveAlerts()">[CLEAR ALL ALERTS]</button>
           <button class="btn" onclick="fetchAlerts()">REFRESH ALERTS</button>
         </div>
       </div>
@@ -815,8 +810,8 @@
           <span style="color: var(--text-muted); font-size: 11px;">In-Memory Compiled SigmaHQ & Curated Rulepack</span>
         </div>
         <div class="toolbar-right">
-          <button class="btn btn-green" onclick="triggerRulesSync()">[SYNC] Pull Latest SigmaHQ</button>
-          <button class="btn btn-accent" onclick="openRuleModal()">[ADD] Custom YAML Rule</button>
+          <button class="btn" onclick="triggerRulesSync()">[SYNC] Pull Latest SigmaHQ</button>
+          <button class="btn" onclick="openRuleModal()">[ADD] Custom YAML Rule</button>
         </div>
       </div>
 
@@ -882,18 +877,18 @@
             <div>
               <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
                 <label style="color: var(--text-muted); font-size: 10px;">IPINFO.IO THREAT INTEL API TOKEN</label>
-                <span id="ipinfoTokenState" style="font-size: 10px; color: var(--accent);"></span>
+                <span id="ipinfoTokenState" style="font-size: 10px; color: var(--text-muted);"></span>
               </div>
               <div style="display: flex; gap: 6px;">
                 <input type="password" id="cfgIPInfo" class="input-box" style="flex: 1;" placeholder="Default public fallback active" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
-                <button id="btnSaveIPInfo" class="btn btn-accent" onclick="saveIPInfoToken()">[Save Token]</button>
+                <button id="btnSaveIPInfo" class="btn" onclick="saveIPInfoToken()">[Save Token]</button>
               </div>
             </div>
             <div>
               <label style="color: var(--text-muted); font-size: 10px; display: block; margin-bottom: 2px;">SOAR AUTONOMOUS BAN THREAT SCORE THRESHOLD</label>
               <input type="number" id="cfgAutoban" class="input-box" style="width: 100%;" value="80" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
             </div>
-            <button class="btn btn-accent" style="align-self: flex-start;" onclick="saveConfig()">Save Runtime Settings</button>
+            <button class="btn" style="align-self: flex-start;" onclick="saveConfig()">Save Runtime Settings</button>
           </div>
         </div>
       </div>
@@ -902,11 +897,11 @@
       <div class="card">
         <div class="card-title">
           <span>Global Protected Infrastructure Whitelist (Never Scored / Banned)</span>
-          <span style="font-size: 10px; color: var(--green);">Recursive Resolvers, RFC1918, CGNAT, Tailscale Overlay</span>
+          <span style="font-size: 10px; color: var(--text-dim);">Recursive Resolvers, RFC1918, CGNAT, Tailscale Overlay</span>
         </div>
         <div style="display: flex; gap: 8px; align-items: center;">
           <input type="text" id="whitelistCIDRInput" class="input-box" placeholder="Add Custom CIDR (e.g. 10.100.0.0/16 or 1.2.3.4)" style="width: 280px;" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
-          <button class="btn btn-green" onclick="addWhitelistCIDR()">Add Protected CIDR</button>
+          <button class="btn" onclick="addWhitelistCIDR()">Add Protected CIDR</button>
         </div>
         <div id="whitelistTags" style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px;">
           <!-- Whitelist badges -->
@@ -920,26 +915,26 @@
   <div id="drawer">
     <div class="drawer-header">
       <div style="display: flex; align-items: center; gap: 8px;">
-        <span style="font-weight: 700; color: var(--accent);" id="drawerTitle">FORENSIC INSPECTOR</span>
+        <span style="font-weight: 700; color: var(--text);" id="drawerTitle">FORENSIC INSPECTOR</span>
         <span id="drawerScoreBadge" class="badge badge-crit">[CRIT] 95</span>
         <span id="drawerMitreBadge" class="badge badge-mitre">[T1190]</span>
         <span id="drawerISOBadge" class="badge badge-iso">[LOCAL]</span>
       </div>
       <div style="display: flex; gap: 6px; align-items: center;">
-        <button class="btn btn-red" style="padding: 3px 8px; font-size: 11px;" onclick="dismissCurrentDrawerAlert()">[DISMISS ALERT]</button>
+        <button class="btn" style="padding: 3px 8px; font-size: 11px;" onclick="dismissCurrentDrawerAlert()">[DISMISS ALERT]</button>
         <button class="btn" onclick="closeDrawer()">[CLOSE]</button>
       </div>
     </div>
     <div class="drawer-body">
       <!-- 1. IPinfo Metadata Box (LRU Cached Live Lookup) -->
-      <div class="card" style="border-color: var(--accent); background: rgba(56, 189, 248, 0.03);">
+      <div class="card">
         <div class="card-title">
           <span>Threat Intelligence & IPinfo Metadata</span>
           <span id="drawerIPInfoStatus" style="font-size: 10px; color: var(--text-dim);">SYNCED</span>
         </div>
         <table class="kv-table">
           <tbody>
-            <tr><td>SOURCE IP / HOST</td><td id="dIP" style="font-weight: 700; color: var(--accent);">127.0.0.1</td></tr>
+            <tr><td>SOURCE IP / HOST</td><td id="dIP" style="font-weight: 700; color: var(--text);">127.0.0.1</td></tr>
             <tr><td>ORGANIZATION / ISP</td><td id="dOrg">Loading IP intelligence...</td></tr>
             <tr><td>ASN ROUTING</td><td id="dASN">-</td></tr>
             <tr><td>GEOGRAPHY / CITY</td><td id="dGeo">-</td></tr>
@@ -953,11 +948,11 @@
         <div class="card-title">Evidence & Offending Payload Analysis</div>
         <table class="kv-table">
           <tbody>
-            <tr><td>OFFENDING SUBSTRING</td><td id="dEvidencePayload" style="color: var(--red); font-weight: 600;">-</td></tr>
-            <tr><td>TARGET URI / URL</td><td id="dEvidenceURI" style="color: var(--cyan);">-</td></tr>
-            <tr><td>PROCESS COMMAND LINE</td><td id="dEvidenceCmd" style="color: #7ee787;">-</td></tr>
+            <tr><td>OFFENDING SUBSTRING</td><td id="dEvidencePayload" style="color: var(--text); font-weight: 600;">-</td></tr>
+            <tr><td>TARGET URI / URL</td><td id="dEvidenceURI" style="color: var(--text);">-</td></tr>
+            <tr><td>PROCESS COMMAND LINE</td><td id="dEvidenceCmd" style="color: var(--text-muted);">-</td></tr>
             <tr><td>PID / SUBSYSTEM</td><td id="dEvidenceProc">-</td></tr>
-            <tr><td>RULE MATCHED</td><td id="dRule" style="color: var(--accent);">-</td></tr>
+            <tr><td>RULE MATCHED</td><td id="dRule" style="color: var(--text);">-</td></tr>
             <tr><td>EVENT TIMESTAMP</td><td id="dTime" style="color: var(--text-muted);">-</td></tr>
           </tbody>
         </table>
@@ -980,9 +975,9 @@
         <div class="card-title">
           <div style="display: flex; align-items: center; gap: 8px;">
             <span>Contextual Investigation Runbook</span>
-            <span id="drawerMitreTechniqueLabel" style="font-size: 10px; color: var(--purple);">[T1190]</span>
+            <span id="drawerMitreTechniqueLabel" style="font-size: 10px; color: var(--text-muted);">[T1190]</span>
           </div>
-          <button class="btn btn-accent" style="padding: 2px 8px; font-size: 10px;" onclick="copyCompleteRunbookScript(this)">[Copy Complete Script]</button>
+          <button class="btn" style="padding: 2px 8px; font-size: 10px;" onclick="copyCompleteRunbookScript(this)">[Copy Complete Script]</button>
         </div>
         <div id="drawerCommandsList" style="display: flex; flex-direction: column; gap: 8px;"></div>
       </div>
@@ -992,19 +987,19 @@
         <div class="card-title">Analyst Incident Notes (SQLite Persisted)</div>
         <textarea id="drawerNotes" class="input-box" rows="3" style="width: 100%; font-family: inherit; font-size: 11px;" placeholder="Add forensic observation notes..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"></textarea>
         <div style="display: flex; gap: 8px; margin-top: 6px;">
-          <button class="btn btn-accent" onclick="saveDrawerNotes()">Save Notes</button>
-          <button class="btn btn-green" onclick="exportCaseMarkdown()">[Export Case .MD]</button>
+          <button class="btn" onclick="saveDrawerNotes()">Save Notes</button>
+          <button class="btn" onclick="exportCaseMarkdown()">[Export Case .MD]</button>
         </div>
       </div>
 
       <!-- Direct 1-Click Incident Mitigation Actions -->
-      <div class="card" style="border-color: var(--border-accent);">
+      <div class="card">
         <div class="card-title">Direct Incident Mitigation (1-Click Actions)</div>
         <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-          <button class="btn btn-red" onclick="quickDrawerBan()">[⚡ Instant XDP Drop (1h)]</button>
-          <button class="btn btn-orange" onclick="quickDrawerTarpit()">[🕳️ Send to Tarpit]</button>
-          <button class="btn btn-green" onclick="quickDrawerUnban()">[🔓 Unban IP]</button>
-          <button class="btn btn-accent" onclick="quickDrawerWhitelist()">[🛡️ Whitelist CIDR]</button>
+          <button class="btn" onclick="quickDrawerBan()">[Instant XDP Drop (1h)]</button>
+          <button class="btn" onclick="quickDrawerTarpit()">[Send to Tarpit]</button>
+          <button class="btn" onclick="quickDrawerUnban()">[Unban IP]</button>
+          <button class="btn" onclick="quickDrawerWhitelist()">[Whitelist CIDR]</button>
         </div>
       </div>
     </div>
@@ -1113,12 +1108,12 @@
       const num = Number(score) || 0;
       const s = String(sev || '').toUpperCase();
       if (num === 0 || s === 'INFO' || (num < 30 && s !== 'CRITICAL' && s !== 'HIGH' && s !== 'MEDIUM')) {
-        return `<span class="badge badge-info">[INFO] ${num}</span>`;
+        return `<span class="badge badge-muted">[INFO] ${num}</span>`;
       }
       if (s === 'CRITICAL' || num >= 85) return `<span class="badge badge-crit">[CRIT] ${num}</span>`;
       if (s === 'HIGH' || num >= 60) return `<span class="badge badge-high">[HIGH] ${num}</span>`;
       if (s === 'MEDIUM' || num >= 30) return `<span class="badge badge-med">[MED] ${num}</span>`;
-      return `<span class="badge badge-info">[INFO] ${num}</span>`;
+      return `<span class="badge badge-muted">[INFO] ${num}</span>`;
     }
 
     function getContainmentBadge(state) {
@@ -1561,18 +1556,31 @@
       }
     }
 
+    let selectedAlertIndex = -1;
+
     function renderAlerts(alerts) {
       const tbody = document.getElementById('alertsTableBody');
       if (!tbody) return;
       tbody.innerHTML = '';
 
       if (!alerts || alerts.length === 0) {
+        selectedAlertIndex = -1;
         tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-muted); padding: 20px;">No actionable active security alerts</td></tr>`;
         return;
       }
 
-      alerts.forEach(a => {
+      if (selectedAlertIndex >= alerts.length) {
+        selectedAlertIndex = alerts.length - 1;
+      }
+
+      alerts.forEach((a, idx) => {
         const tr = document.createElement('tr');
+        if (idx === selectedAlertIndex) {
+          tr.classList.add('selected-alert-row');
+        }
+        tr.id = `alert-row-${idx}`;
+        tr.onclick = () => selectAlertRow(idx);
+
         const d = new Date(a.timestamp_ms || Date.now());
         const timeStr = d.toTimeString().split(' ')[0];
         const srcIP = a.source_ip || a.client_ip || '-';
@@ -1584,17 +1592,34 @@
           <td style="font-weight: 600; color: var(--text); cursor: pointer;" onclick="openDrawerFromAlert('${srcIP}')">${srcIP}</td>
           <td>${getSeverityBadge(a.severity, a.threat_score)}</td>
           <td>${a.mitre_id ? `<span class="badge badge-mitre">[${a.mitre_id}]</span>` : '-'}</td>
-          <td style="color: var(--cyan);">${escapeHTML(ruleName)}</td>
+          <td style="color: var(--text);">${escapeHTML(ruleName)}</td>
           <td>${getContainmentBadge(a.containment_state)}</td>
           <td style="text-align: right; white-space: nowrap;">
-            <button class="btn btn-red" style="padding: 2px 6px; font-size: 10px;" onclick="triageAction('ban', '${srcIP}', ${a.id || 0})">[BAN]</button>
-            <button class="btn btn-orange" style="padding: 2px 6px; font-size: 10px;" onclick="triageAction('tarpit', '${srcIP}', ${a.id || 0})">[TARPIT]</button>
-            <button class="btn btn-accent" style="padding: 2px 6px; font-size: 10px;" onclick="openDrawerFromAlert('${srcIP}')">[INSPECT]</button>
-            <button class="btn" style="padding: 2px 6px; font-size: 10px; color: var(--text-muted);" onclick="dismissAlert(event, '${a.id || srcIP}')">[DISMISS]</button>
+            <button class="btn btn-action" onclick="event.stopPropagation(); triageAction('ban', '${srcIP}', ${a.id || 0})">[XDP DROP]</button>
+            <button class="btn btn-action" onclick="event.stopPropagation(); triageAction('tarpit', '${srcIP}', ${a.id || 0})">[TARPIT]</button>
+            <button class="btn btn-action" onclick="event.stopPropagation(); openDrawerFromAlert('${srcIP}')">[INSPECT]</button>
+            <button class="btn btn-action" style="color: var(--text-muted);" onclick="dismissAlert(event, '${a.id || srcIP}')">[DISMISS]</button>
           </td>
         `;
         tbody.appendChild(tr);
       });
+    }
+
+    function selectAlertRow(idx) {
+      const rows = document.getElementById('alertsTableBody')?.getElementsByTagName('tr');
+      if (!rows || rows.length === 0) return;
+      if (idx < 0) idx = 0;
+      if (idx >= activeAlertsList.length) idx = activeAlertsList.length - 1;
+
+      selectedAlertIndex = idx;
+      for (let i = 0; i < rows.length; i++) {
+        if (i === idx) {
+          rows[i].classList.add('selected-alert-row');
+          rows[i].scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        } else {
+          rows[i].classList.remove('selected-alert-row');
+        }
+      }
     }
 
     function applyAlertsFilter() {
@@ -1773,7 +1798,7 @@
             </label>
           </td>
           <td>${originTag}</td>
-          <td style="font-weight: 600; color: var(--accent);">${r.id}</td>
+          <td style="font-weight: 600; color: var(--text);">${r.id}</td>
           <td style="color: var(--text);">${escapeHTML(r.title)}</td>
           <td>${getSeverityBadge(r.severity || r.level, r.threat_score)}</td>
           <td style="font-weight: 600;">${r.threat_score}</td>
@@ -1858,7 +1883,7 @@
             localStorage.setItem('copsec_ipinfo_configured', 'true');
             if (input) input.placeholder = '●●●●●●●● (Active & Persisted in SQLite)';
             if (badge) {
-              badge.className = 'badge badge-green';
+              badge.className = 'badge badge-iso';
               badge.textContent = '[CONFIGURED]';
             }
             if (stateLabel) stateLabel.textContent = `Active (${data.token_masked || '●●●●'})`;
@@ -2488,12 +2513,43 @@ ${notes}
       }
 
       if (!isInput) {
-        if ((e.key === 'x' || e.key === 'X' || e.key === 'd' || e.key === 'D' || e.key === 'Delete') && currentDrawerEvent) {
-          const drawer = document.getElementById('drawer');
-          if (drawer && drawer.classList.contains('open')) {
+        const activePane = document.querySelector('.tab-pane.active');
+        const isAlertsTab = activePane && activePane.id === 'tab-alerts';
+        const drawer = document.getElementById('drawer');
+        const isDrawerOpen = drawer && drawer.classList.contains('open');
+
+        // Hotkeys when drawer is open
+        if ((e.key === 'x' || e.key === 'X' || e.key === 'd' || e.key === 'D' || e.key === 'Delete') && currentDrawerEvent && isDrawerOpen) {
+          e.preventDefault();
+          dismissCurrentDrawerAlert();
+          return;
+        }
+
+        // Hotkeys when on Alerts tab (and drawer not open)
+        if (isAlertsTab && !isDrawerOpen && activeAlertsList.length > 0) {
+          if (e.key === 'j' || e.key === 'J' || e.key === 'ArrowDown') {
             e.preventDefault();
-            dismissCurrentDrawerAlert();
+            const nextIdx = selectedAlertIndex + 1 < activeAlertsList.length ? selectedAlertIndex + 1 : 0;
+            selectAlertRow(nextIdx);
             return;
+          } else if (e.key === 'k' || e.key === 'K' || e.key === 'ArrowUp') {
+            e.preventDefault();
+            const prevIdx = selectedAlertIndex - 1 >= 0 ? selectedAlertIndex - 1 : activeAlertsList.length - 1;
+            selectAlertRow(prevIdx);
+            return;
+          } else if (e.key === 'x' || e.key === 'X' || e.key === 'Delete') {
+            if (selectedAlertIndex >= 0 && selectedAlertIndex < activeAlertsList.length) {
+              e.preventDefault();
+              const sel = activeAlertsList[selectedAlertIndex];
+              dismissAlert(null, sel.id || sel.source_ip);
+              return;
+            }
+          } else if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+            if (selectedAlertIndex >= 0 && selectedAlertIndex < activeAlertsList.length) {
+              e.preventDefault();
+              openDrawer(activeAlertsList[selectedAlertIndex]);
+              return;
+            }
           }
         }
 
@@ -2511,7 +2567,6 @@ ${notes}
           navigateTo('rules');
         } else if (e.key === '/') {
           e.preventDefault();
-          const activePane = document.querySelector('.tab-pane.active');
           if (activePane && activePane.id === 'tab-telemetry') {
             document.getElementById('telemetryFilter')?.focus();
           } else if (activePane && activePane.id === 'tab-alerts') {
