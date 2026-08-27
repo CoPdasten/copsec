@@ -471,6 +471,38 @@ func TestSOCAlertsTriageAPI(t *testing.T) {
 	if len(bans) != 1 || bans[0].IP != "198.51.100.44" {
 		t.Fatalf("Expected 198.51.100.44 to be active in TTL manager, got %+v", bans)
 	}
+
+	// Test Dismiss (Resolve) on remaining alert
+	dismissBody, _ := json.Marshal(map[string]interface{}{
+		"id":     "198.51.100.88",
+		"status": "RESOLVED",
+	})
+	dismissReq := httptest.NewRequest("POST", "/api/alerts/dismiss", bytes.NewBuffer(dismissBody))
+	dismissReq.Header.Set("Content-Type", "application/json")
+	dismissRec := httptest.NewRecorder()
+	webSoc.handleAlertsDismiss(dismissRec, dismissReq)
+	if dismissRec.Code != http.StatusOK {
+		t.Fatalf("Expected status 200 from /api/alerts/dismiss, got %d", dismissRec.Code)
+	}
+
+	// Verify active alerts count decreased
+	reqActive := httptest.NewRequest("GET", "/api/alerts?status=ACTIVE&limit=50", nil)
+	recActive := httptest.NewRecorder()
+	webSoc.handleAlerts(recActive, reqActive)
+	var activeAlerts []*SOCAlertDTO
+	_ = json.Unmarshal(recActive.Body.Bytes(), &activeAlerts)
+
+	// Verify resolved archive contains the dismissed/mitigated alerts
+	reqArchive := httptest.NewRequest("GET", "/api/alerts?status=RESOLVED&limit=50", nil)
+	recArchive := httptest.NewRecorder()
+	webSoc.handleAlerts(recArchive, reqArchive)
+	var resolvedAlerts []*SOCAlertDTO
+	if err := json.Unmarshal(recArchive.Body.Bytes(), &resolvedAlerts); err != nil {
+		t.Fatalf("Failed to parse archive response: %v", err)
+	}
+	if len(resolvedAlerts) == 0 {
+		t.Fatalf("Expected at least 1 resolved alert in archive, got 0")
+	}
 }
 
 func TestSOARPlaybookEngineAndLifecycle(t *testing.T) {

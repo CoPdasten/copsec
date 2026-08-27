@@ -786,11 +786,15 @@
       </div>
     </div>
 
-    <!-- Tab 2: Active Alerts Cockpit -->
+    <!-- Tab 2: Active Alerts & Case Archive Cockpit -->
     <div id="tab-alerts" class="tab-pane">
       <div class="toolbar">
         <div class="toolbar-left">
-          <input type="text" id="alertsFilter" class="input-box" placeholder="Filter alerts by IP, rule, or technique..." style="width: 260px;" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" oninput="applyAlertsFilter()">
+          <div style="display: flex; gap: 4px; margin-right: 8px;">
+            <button id="btnAlertsActiveTab" class="btn btn-accent" style="font-weight: 700;" onclick="switchAlertsView('ACTIVE')">[ ⦿ ACTIVE ALERTS (<span id="alertsActiveCount">0</span>) ]</button>
+            <button id="btnAlertsArchiveTab" class="btn" style="color: var(--text-muted);" onclick="switchAlertsView('RESOLVED')">[ ◷ RESOLVED ARCHIVE ]</button>
+          </div>
+          <input type="text" id="alertsFilter" class="input-box" placeholder="Filter alerts by IP, rule, or technique..." style="width: 240px;" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" oninput="applyAlertsFilter()">
           <select id="alertsSeverityFilter" class="input-box" onchange="applyAlertsFilter()">
             <option value="">ALL SEVERITIES</option>
             <option value="CRITICAL">[CRIT] Critical</option>
@@ -799,8 +803,8 @@
           </select>
         </div>
         <div class="toolbar-right">
-          <button class="btn" onclick="clearAllActiveAlerts()">[CLEAR ALL ALERTS]</button>
-          <button class="btn" onclick="fetchAlerts()">REFRESH ALERTS</button>
+          <button id="btnClearAlertsBtn" class="btn" onclick="clearAllActiveAlerts()">[CLEAR ALL ALERTS]</button>
+          <button class="btn" onclick="fetchAlerts()">REFRESH</button>
         </div>
       </div>
 
@@ -1089,6 +1093,7 @@
     let telemetryEvents = [];
     let activeAlertsList = [];
     let allRulesList = [];
+    let currentAlertsView = 'ACTIVE'; // 'ACTIVE' or 'RESOLVED'
 
     // High-Frequency Zero-Lag Telemetry Batch Queue
     window.streamBufferQueue = [];
@@ -1570,10 +1575,45 @@
       }
     }
 
-    // Active Alerts Cockpit
+    // Active Alerts Cockpit & Case History Archive
+    function switchAlertsView(view) {
+      currentAlertsView = view === 'RESOLVED' ? 'RESOLVED' : 'ACTIVE';
+      const btnActive = document.getElementById('btnAlertsActiveTab');
+      const btnArchive = document.getElementById('btnAlertsArchiveTab');
+      const btnClear = document.getElementById('btnClearAlertsBtn');
+
+      if (currentAlertsView === 'RESOLVED') {
+        if (btnActive) {
+          btnActive.className = 'btn';
+          btnActive.style.fontWeight = '500';
+          btnActive.style.color = 'var(--text-muted)';
+        }
+        if (btnArchive) {
+          btnArchive.className = 'btn btn-accent';
+          btnArchive.style.fontWeight = '700';
+          btnArchive.style.color = '';
+        }
+        if (btnClear) btnClear.style.display = 'none';
+      } else {
+        if (btnActive) {
+          btnActive.className = 'btn btn-accent';
+          btnActive.style.fontWeight = '700';
+          btnActive.style.color = '';
+        }
+        if (btnArchive) {
+          btnArchive.className = 'btn';
+          btnArchive.style.fontWeight = '500';
+          btnArchive.style.color = 'var(--text-muted)';
+        }
+        if (btnClear) btnClear.style.display = '';
+      }
+      fetchAlerts();
+    }
+
     async function fetchAlerts() {
       try {
-        const res = await fetch('/api/alerts?limit=500');
+        const url = currentAlertsView === 'RESOLVED' ? '/api/alerts?status=RESOLVED&limit=500' : '/api/alerts?status=ACTIVE&limit=500';
+        const res = await fetch(url);
         const rawAlerts = await res.json();
         let list = [];
         if (Array.isArray(rawAlerts)) {
@@ -1583,39 +1623,46 @@
         }
         const alerts = list.map(normalizeEvent);
         activeAlertsList = alerts;
-        const badge = document.getElementById('badgeAlerts');
-        if (badge) badge.textContent = alerts.length;
+
+        if (currentAlertsView === 'ACTIVE') {
+          const badge = document.getElementById('badgeAlerts');
+          if (badge) badge.textContent = alerts.length;
+          const activeCount = document.getElementById('alertsActiveCount');
+          if (activeCount) activeCount.textContent = alerts.length;
+        }
         renderAlerts(alerts);
 
         // Populate dashboard recent high-fidelity feed if empty
-        const dashRecent = document.getElementById('dashRecentFeedBody');
-        if (dashRecent && (dashRecent.children.length === 0 || dashRecent.children[0].textContent.includes('Awaiting'))) {
-          const highFidelity = alerts.filter(a => {
-            const isLocal = !a.source_ip || a.source_ip === '-' || a.source_ip === '127.0.0.1' || a.source_ip === '::1' || a.source_ip === 'localhost' || a.source_ip.startsWith('127.');
-            const dnsResolvers = ['8.8.8.8','8.8.4.4','1.1.1.1','1.0.0.1','1.1.1.2','1.0.0.2','9.9.9.9','149.112.112.112','208.67.222.222','208.67.220.220','213.186.33.99','213.186.33.100','37.59.108.186'];
-            const isDNS = dnsResolvers.includes(a.source_ip);
-            return a.threat_score >= 40 && !isLocal && !isDNS;
-          }).slice(0, 8);
-          if (highFidelity.length > 0) {
-            dashRecent.innerHTML = '';
-            highFidelity.forEach(ev => {
-              const tr = document.createElement('tr');
-              tr.style.cursor = 'pointer';
-              tr.onclick = () => openDrawer(ev);
-              const d = new Date(ev.timestamp_ms);
-              const timeStr = d.toTimeString().split(' ')[0];
-              const isInfo = ev.threat_score === 0 || ev.severity === 'INFO' || ev.threat_score < 30;
-              const ruleStyle = isInfo ? 'color: var(--text-muted); font-size: 11px;' : 'color: var(--cyan); font-weight: 500;';
-              tr.innerHTML = `
-                <td style="color: var(--text-muted);">${timeStr}</td>
-                <td>${getISOBadge(ev.country_code)}</td>
-                <td style="font-weight: 600; color: var(--text);">${ev.source_ip}</td>
-                <td>${getSeverityBadge(ev.severity, ev.threat_score)}</td>
-                <td>${ev.mitre_id ? `<span class="badge badge-mitre">[${ev.mitre_id}]</span>` : '-'}</td>
-                <td style="${ruleStyle}">${escapeHTML(ev.rule_matched)}</td>
-              `;
-              dashRecent.appendChild(tr);
-            });
+        if (currentAlertsView === 'ACTIVE') {
+          const dashRecent = document.getElementById('dashRecentFeedBody');
+          if (dashRecent && (dashRecent.children.length === 0 || dashRecent.children[0].textContent.includes('Awaiting'))) {
+            const highFidelity = alerts.filter(a => {
+              const isLocal = !a.source_ip || a.source_ip === '-' || a.source_ip === '127.0.0.1' || a.source_ip === '::1' || a.source_ip === 'localhost' || a.source_ip.startsWith('127.');
+              const dnsResolvers = ['8.8.8.8','8.8.4.4','1.1.1.1','1.0.0.1','1.1.1.2','1.0.0.2','9.9.9.9','149.112.112.112','208.67.222.222','208.67.220.220','213.186.33.99','213.186.33.100','37.59.108.186'];
+              const isDNS = dnsResolvers.includes(a.source_ip);
+              return a.threat_score >= 40 && !isLocal && !isDNS;
+            }).slice(0, 8);
+            if (highFidelity.length > 0) {
+              dashRecent.innerHTML = '';
+              highFidelity.forEach(ev => {
+                const tr = document.createElement('tr');
+                tr.style.cursor = 'pointer';
+                tr.onclick = () => openDrawer(ev);
+                const d = new Date(ev.timestamp_ms);
+                const timeStr = d.toTimeString().split(' ')[0];
+                const isInfo = ev.threat_score === 0 || ev.severity === 'INFO' || ev.threat_score < 30;
+                const ruleStyle = isInfo ? 'color: var(--text-muted); font-size: 11px;' : 'color: var(--cyan); font-weight: 500;';
+                tr.innerHTML = `
+                  <td style="color: var(--text-muted);">${timeStr}</td>
+                  <td>${getISOBadge(ev.country_code)}</td>
+                  <td style="font-weight: 600; color: var(--text);">${ev.source_ip}</td>
+                  <td>${getSeverityBadge(ev.severity, ev.threat_score)}</td>
+                  <td>${ev.mitre_id ? `<span class="badge badge-mitre">[${ev.mitre_id}]</span>` : '-'}</td>
+                  <td style="${ruleStyle}">${escapeHTML(ev.rule_matched)}</td>
+                `;
+                dashRecent.appendChild(tr);
+              });
+            }
           }
         }
       } catch (e) {
@@ -1632,7 +1679,8 @@
 
       if (!alerts || alerts.length === 0) {
         selectedAlertIndex = -1;
-        tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-muted); padding: 20px;">No actionable active security alerts</td></tr>`;
+        const msg = currentAlertsView === 'RESOLVED' ? 'No resolved/archived incident cases found' : 'No actionable active security alerts';
+        tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-muted); padding: 20px;">${msg}</td></tr>`;
         return;
       }
 
@@ -1657,6 +1705,30 @@
         const srcIP = a.source_ip || a.client_ip || '-';
         const ruleName = a.rule_matched || a.rule_id || 'Security Alert';
 
+        let containmentTag = getContainmentBadge(a.containment_state);
+        if (a.triage_status === 'MITIGATED') {
+          containmentTag = `<span class="badge" style="border: 1px solid var(--border-accent); color: #d4d4d8;">[MITIGATED]</span>`;
+        } else if (a.triage_status === 'RESOLVED') {
+          containmentTag = `<span class="badge" style="border: 1px solid var(--border); color: #71717a;">[RESOLVED]</span>`;
+        } else if (a.triage_status === 'FALSE_POSITIVE') {
+          containmentTag = `<span class="badge" style="border: 1px solid var(--border); color: #71717a;">[FALSE_POSITIVE]</span>`;
+        }
+
+        let actionButtons = '';
+        if (currentAlertsView === 'RESOLVED') {
+          actionButtons = `
+            <button class="btn btn-action" onclick="event.stopPropagation(); openDrawerFromAlert('${srcIP}')">[INSPECT CASE]</button>
+            <button class="btn btn-action" style="color: var(--text-muted);" onclick="event.stopPropagation(); restoreAlert('${a.id || srcIP}')">[REOPEN]</button>
+          `;
+        } else {
+          actionButtons = `
+            <button class="btn btn-action" onclick="event.stopPropagation(); triageAction('ban', '${srcIP}', ${a.id || 0})">[XDP DROP]</button>
+            <button class="btn btn-action" onclick="event.stopPropagation(); triageAction('tarpit', '${srcIP}', ${a.id || 0})">[TARPIT]</button>
+            <button class="btn btn-action" onclick="event.stopPropagation(); openDrawerFromAlert('${srcIP}')">[INSPECT]</button>
+            <button class="btn btn-action" style="color: var(--text-muted);" onclick="dismissAlert(event, '${a.id || srcIP}')">[DISMISS]</button>
+          `;
+        }
+
         tr.innerHTML = `
           <td style="color: var(--text-muted);">${timeStr}</td>
           <td>${getISOBadge(a.country_code)}</td>
@@ -1664,12 +1736,9 @@
           <td>${getSeverityBadge(a.severity, a.threat_score)}</td>
           <td>${a.mitre_id ? `<span class="badge badge-mitre">[${a.mitre_id}]</span>` : '-'}</td>
           <td style="color: var(--text);">${escapeHTML(ruleName)}</td>
-          <td>${getContainmentBadge(a.containment_state)}</td>
+          <td>${containmentTag}</td>
           <td style="text-align: right; white-space: nowrap;">
-            <button class="btn btn-action" onclick="event.stopPropagation(); triageAction('ban', '${srcIP}', ${a.id || 0})">[XDP DROP]</button>
-            <button class="btn btn-action" onclick="event.stopPropagation(); triageAction('tarpit', '${srcIP}', ${a.id || 0})">[TARPIT]</button>
-            <button class="btn btn-action" onclick="event.stopPropagation(); openDrawerFromAlert('${srcIP}')">[INSPECT]</button>
-            <button class="btn btn-action" style="color: var(--text-muted);" onclick="dismissAlert(event, '${a.id || srcIP}')">[DISMISS]</button>
+            ${actionButtons}
           </td>
         `;
         tbody.appendChild(tr);
@@ -1726,6 +1795,20 @@
       } catch (e) {}
     }
 
+    async function restoreAlert(idOrIP) {
+      const target = String(idOrIP || '').trim();
+      if (!target) return;
+      try {
+        await fetch('/api/alerts/triage', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'resolve', status: 'ACTIVE', id: target, ip: target })
+        });
+        showToast(`[REOPEN] Case restored to Active Alerts`, 'ok');
+        fetchAlerts();
+      } catch (e) {}
+    }
+
     async function dismissAlert(e, idOrIP) {
       if (e && e.stopPropagation) e.stopPropagation();
       const target = String(idOrIP || '').trim();
@@ -1757,6 +1840,8 @@
       activeAlertsList = activeAlertsList.filter(a => String(a.id) !== target && a.source_ip !== target);
       const badge = document.getElementById('badgeAlerts');
       if (badge) badge.textContent = activeAlertsList.length;
+      const activeCount = document.getElementById('alertsActiveCount');
+      if (activeCount) activeCount.textContent = activeAlertsList.length;
       renderAlerts(activeAlertsList);
 
       try {
@@ -1765,10 +1850,11 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             id: target,
-            ip: target.includes('.') || target.includes(':') ? target : ''
+            ip: target.includes('.') || target.includes(':') ? target : '',
+            status: 'RESOLVED'
           })
         });
-        showToast(`[DISMISS] Alert resolved & cleared`, 'ok');
+        showToast(`[DISMISS] Alert archived to SQLite history`, 'ok');
       } catch (err) {
         console.error('Dismiss failed:', err);
       }
@@ -1782,6 +1868,8 @@
       activeAlertsList = [];
       const badge = document.getElementById('badgeAlerts');
       if (badge) badge.textContent = '0';
+      const activeCount = document.getElementById('alertsActiveCount');
+      if (activeCount) activeCount.textContent = '0';
       renderAlerts(activeAlertsList);
 
       try {
@@ -1790,7 +1878,7 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({})
         });
-        showToast('[QUEUE] All active alerts cleared', 'ok');
+        showToast('[ARCHIVE] All active alerts moved to resolved history', 'ok');
       } catch (err) {
         console.error('Clear all failed:', err);
       }

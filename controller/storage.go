@@ -32,6 +32,7 @@ type StoredEvent struct {
 	AIAnalysis       string          `json:"ai_analysis,omitempty"`
 	AnalystNotes     string `json:"analyst_notes,omitempty"`
 	PlaybookProgress string `json:"playbook_progress,omitempty"`
+	TriageStatus     string `json:"triage_status,omitempty"`
 	CountryCode      string `json:"country_code,omitempty"`
 	CountryName      string `json:"country_name,omitempty"`
 	City             string `json:"city,omitempty"`
@@ -83,6 +84,7 @@ func (ev *StoredEvent) ToUnifiedTelemetry() *models.UnifiedTelemetry {
 			"threat_tier":   ev.ThreatTier,
 			"ml_anomaly":    ev.MLAnomaly,
 			"analyst_notes": ev.AnalystNotes,
+			"triage_status": ev.TriageStatus,
 		},
 	}
 }
@@ -177,7 +179,10 @@ func (s *StorageEngine) initSchema() error {
 		rule_id TEXT DEFAULT '',
 		mitre_technique_id TEXT DEFAULT '',
 		threat_score INTEGER DEFAULT 0,
-		ai_analysis TEXT DEFAULT ''
+		ai_analysis TEXT DEFAULT '',
+		analyst_notes TEXT DEFAULT '',
+		playbook_progress TEXT DEFAULT '',
+		triage_status TEXT DEFAULT 'ACTIVE'
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp_ms DESC);
@@ -185,6 +190,7 @@ func (s *StorageEngine) initSchema() error {
 	CREATE INDEX IF NOT EXISTS idx_events_mitre ON events(mitre_technique_id);
 	CREATE INDEX IF NOT EXISTS idx_events_threat_score ON events(threat_score DESC);
 	CREATE INDEX IF NOT EXISTS idx_events_node_id ON events(node_id);
+	CREATE INDEX IF NOT EXISTS idx_events_triage_status ON events(triage_status);
 
 	CREATE TABLE IF NOT EXISTS alerts (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -199,12 +205,14 @@ func (s *StorageEngine) initSchema() error {
 		threat_score INTEGER DEFAULT 0,
 		ai_analysis TEXT DEFAULT '',
 		analyst_notes TEXT DEFAULT '',
-		playbook_progress TEXT DEFAULT ''
+		playbook_progress TEXT DEFAULT '',
+		triage_status TEXT DEFAULT 'ACTIVE'
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_alerts_timestamp ON alerts(timestamp_ms DESC);
 	CREATE INDEX IF NOT EXISTS idx_alerts_client_ip ON alerts(client_ip);
 	CREATE INDEX IF NOT EXISTS idx_alerts_threat_score ON alerts(threat_score DESC);
+	CREATE INDEX IF NOT EXISTS idx_alerts_triage_status ON alerts(triage_status);
 
 	CREATE TABLE IF NOT EXISTS active_bans (
 		ip TEXT PRIMARY KEY,
@@ -287,6 +295,8 @@ func (s *StorageEngine) initSchema() error {
 		"ALTER TABLE node_registry ADD COLUMN uptime_seconds INTEGER DEFAULT 0",
 		"ALTER TABLE events ADD COLUMN analyst_notes TEXT DEFAULT ''",
 		"ALTER TABLE events ADD COLUMN playbook_progress TEXT DEFAULT ''",
+		"ALTER TABLE events ADD COLUMN triage_status TEXT DEFAULT 'ACTIVE'",
+		"ALTER TABLE alerts ADD COLUMN triage_status TEXT DEFAULT 'ACTIVE'",
 	}
 	for _, colSQL := range cols {
 		_, _ = s.db.Exec(colSQL)
@@ -345,9 +355,13 @@ func (s *StorageEngine) InsertEvent(ev *StoredEvent) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	query := `INSERT INTO events (node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis)
-	          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	res, err := s.db.Exec(query, ev.NodeID, ev.Source, ev.RawLine, ev.ClientIP, ev.StatusCode, ev.TimestampMs, ev.RuleID, ev.MitreTechniqueID, ev.ThreatScore, ev.AIAnalysis)
+	if ev.TriageStatus == "" {
+		ev.TriageStatus = "ACTIVE"
+	}
+
+	query := `INSERT INTO events (node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis, analyst_notes, playbook_progress, triage_status)
+	          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	res, err := s.db.Exec(query, ev.NodeID, ev.Source, ev.RawLine, ev.ClientIP, ev.StatusCode, ev.TimestampMs, ev.RuleID, ev.MitreTechniqueID, ev.ThreatScore, ev.AIAnalysis, ev.AnalystNotes, ev.PlaybookProgress, ev.TriageStatus)
 	if err != nil {
 		return err
 	}
@@ -361,9 +375,13 @@ func (s *StorageEngine) InsertAlert(ev *StoredEvent) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	query := `INSERT INTO alerts (node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis, analyst_notes, playbook_progress)
-	          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	res, err := s.db.Exec(query, ev.NodeID, ev.Source, ev.RawLine, ev.ClientIP, ev.StatusCode, ev.TimestampMs, ev.RuleID, ev.MitreTechniqueID, ev.ThreatScore, ev.AIAnalysis, ev.AnalystNotes, ev.PlaybookProgress)
+	if ev.TriageStatus == "" {
+		ev.TriageStatus = "ACTIVE"
+	}
+
+	query := `INSERT INTO alerts (node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis, analyst_notes, playbook_progress, triage_status)
+	          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	res, err := s.db.Exec(query, ev.NodeID, ev.Source, ev.RawLine, ev.ClientIP, ev.StatusCode, ev.TimestampMs, ev.RuleID, ev.MitreTechniqueID, ev.ThreatScore, ev.AIAnalysis, ev.AnalystNotes, ev.PlaybookProgress, ev.TriageStatus)
 	if err != nil {
 		return err
 	}
@@ -372,14 +390,53 @@ func (s *StorageEngine) InsertAlert(ev *StoredEvent) error {
 	return nil
 }
 
-// GetRecentAlerts retrieves the latest security alerts from SQLite.
-func (s *StorageEngine) GetRecentAlerts(limit int) ([]*StoredEvent, error) {
+// SetAlertStatus atomically transitions an alert's triage status (ACTIVE, RESOLVED, MITIGATED, FALSE_POSITIVE) in SQLite.
+func (s *StorageEngine) SetAlertStatus(id string, status string, notes string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return nil
+	}
+	if status == "" {
+		status = "RESOLVED"
+	}
+
+	if numID, err := strconv.ParseInt(id, 10, 64); err == nil && numID > 0 {
+		if notes != "" {
+			_, _ = s.db.Exec(`UPDATE alerts SET triage_status = ?, analyst_notes = ? WHERE id = ?`, status, notes, numID)
+			_, _ = s.db.Exec(`UPDATE events SET triage_status = ?, analyst_notes = ? WHERE id = ?`, status, notes, numID)
+		} else {
+			_, _ = s.db.Exec(`UPDATE alerts SET triage_status = ? WHERE id = ?`, status, numID)
+			_, _ = s.db.Exec(`UPDATE events SET triage_status = ? WHERE id = ?`, status, numID)
+		}
+		return nil
+	}
+
+	if notes != "" {
+		_, _ = s.db.Exec(`UPDATE alerts SET triage_status = ?, analyst_notes = ? WHERE client_ip = ? OR rule_id = ?`, status, notes, id, id)
+		_, _ = s.db.Exec(`UPDATE events SET triage_status = ?, analyst_notes = ? WHERE client_ip = ? OR rule_id = ?`, status, notes, id, id)
+	} else {
+		_, _ = s.db.Exec(`UPDATE alerts SET triage_status = ? WHERE client_ip = ? OR rule_id = ?`, status, id, id)
+		_, _ = s.db.Exec(`UPDATE events SET triage_status = ? WHERE client_ip = ? OR rule_id = ?`, status, id, id)
+	}
+	return nil
+}
+
+// GetActiveAlerts retrieves actionable alerts with status 'ACTIVE' (or NULL) strictly excluding resolved items.
+func (s *StorageEngine) GetActiveAlerts(limit int) ([]*StoredEvent, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	query := `SELECT id, node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis, analyst_notes, playbook_progress
+	if limit <= 0 {
+		limit = 500
+	}
+
+	query := `SELECT id, node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis, analyst_notes, playbook_progress, triage_status
 	          FROM alerts
 	          WHERE threat_score >= 40 
+	            AND (triage_status = 'ACTIVE' OR triage_status = '' OR triage_status IS NULL)
 	            AND rule_id != 'sudo_execution'
 	            AND NOT (client_ip IN ('127.0.0.1', '::1', 'localhost', 'local', '-') AND threat_score < 70 AND rule_id NOT LIKE 'sigma%')
 	          ORDER BY timestamp_ms DESC LIMIT ?`
@@ -394,11 +451,12 @@ func (s *StorageEngine) GetRecentAlerts(limit int) ([]*StoredEvent, error) {
 		return nil, err
 	}
 
-	// Fallback to events table with threat_score >= 40 if alerts table is empty
+	// Fallback to events table with threat_score >= 40 and ACTIVE status if alerts table is empty
 	if len(alerts) == 0 {
-		fallbackQuery := `SELECT id, node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis, analyst_notes, playbook_progress
+		fallbackQuery := `SELECT id, node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis, analyst_notes, playbook_progress, triage_status
 		                  FROM events
 		                  WHERE threat_score >= 40 
+		                    AND (triage_status = 'ACTIVE' OR triage_status = '' OR triage_status IS NULL)
 		                    AND rule_id != 'sudo_execution'
 		                    AND NOT (client_ip IN ('127.0.0.1', '::1', 'localhost', 'local', '-') AND threat_score < 70 AND rule_id NOT LIKE 'sigma%')
 		                  ORDER BY timestamp_ms DESC LIMIT ?`
@@ -412,32 +470,68 @@ func (s *StorageEngine) GetRecentAlerts(limit int) ([]*StoredEvent, error) {
 	return alerts, nil
 }
 
-// DismissAlert purges a triaged alert from the active SQLite alerts table.
-func (s *StorageEngine) DismissAlert(id string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+// GetResolvedAlerts retrieves historically resolved/mitigated security alerts from SQLite archive.
+func (s *StorageEngine) GetResolvedAlerts(limit int) ([]*StoredEvent, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 
-	id = strings.TrimSpace(id)
-	if id == "" {
-		return nil
+	if limit <= 0 {
+		limit = 500
 	}
 
-	if numID, err := strconv.ParseInt(id, 10, 64); err == nil && numID > 0 {
-		_, err := s.db.Exec(`DELETE FROM alerts WHERE id = ?`, numID)
-		return err
+	query := `SELECT id, node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis, analyst_notes, playbook_progress, triage_status
+	          FROM alerts
+	          WHERE triage_status IN ('RESOLVED', 'MITIGATED', 'FALSE_POSITIVE')
+	          ORDER BY timestamp_ms DESC LIMIT ?`
+	rows, err := s.db.Query(query, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	alerts, err := scanEvents(rows)
+	if err != nil {
+		return nil, err
 	}
 
-	_, err := s.db.Exec(`DELETE FROM alerts WHERE client_ip = ? OR rule_id = ?`, id, id)
-	return err
+	if len(alerts) == 0 {
+		fallbackQuery := `SELECT id, node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis, analyst_notes, playbook_progress, triage_status
+		                  FROM events
+		                  WHERE triage_status IN ('RESOLVED', 'MITIGATED', 'FALSE_POSITIVE')
+		                  ORDER BY timestamp_ms DESC LIMIT ?`
+		fbRows, fbErr := s.db.Query(fallbackQuery, limit)
+		if fbErr == nil {
+			defer fbRows.Close()
+			return scanEvents(fbRows)
+		}
+	}
+
+	return alerts, nil
 }
 
-// ClearAllAlerts purges all active alerts from the SQLite alerts table.
-func (s *StorageEngine) ClearAllAlerts() error {
+// GetRecentAlerts retrieves alerts (defaults to active alerts).
+func (s *StorageEngine) GetRecentAlerts(limit int) ([]*StoredEvent, error) {
+	return s.GetActiveAlerts(limit)
+}
+
+// DismissAlert marks a triaged alert as RESOLVED in the database.
+func (s *StorageEngine) DismissAlert(id string) error {
+	return s.SetAlertStatus(id, "RESOLVED", "")
+}
+
+// ClearAllActiveAlerts archives all active alerts to RESOLVED status in SQLite.
+func (s *StorageEngine) ClearAllActiveAlerts() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	_, err := s.db.Exec(`DELETE FROM alerts`)
-	return err
+	_, _ = s.db.Exec(`UPDATE alerts SET triage_status = 'RESOLVED' WHERE (triage_status = 'ACTIVE' OR triage_status = '' OR triage_status IS NULL)`)
+	_, _ = s.db.Exec(`UPDATE events SET triage_status = 'RESOLVED' WHERE threat_score >= 40 AND (triage_status = 'ACTIVE' OR triage_status = '' OR triage_status IS NULL)`)
+	return nil
+}
+
+// ClearAllAlerts purges or archives all active alerts.
+func (s *StorageEngine) ClearAllAlerts() error {
+	return s.ClearAllActiveAlerts()
 }
 
 // UpdateEventAI updates the AI analysis field for a stored incident.
@@ -673,7 +767,7 @@ func (s *StorageEngine) GetRecentEvents(limit int) ([]*StoredEvent, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	query := `SELECT id, node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis, analyst_notes, playbook_progress
+	query := `SELECT id, node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis, analyst_notes, playbook_progress, triage_status
 	          FROM events ORDER BY timestamp_ms DESC LIMIT ?`
 	rows, err := s.db.Query(query, limit)
 	if err != nil {
@@ -689,7 +783,7 @@ func (s *StorageEngine) GetCriticalEvents(limit int) ([]*StoredEvent, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	query := `SELECT id, node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis, analyst_notes, playbook_progress
+	query := `SELECT id, node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis, analyst_notes, playbook_progress, triage_status
 	          FROM events WHERE threat_score >= 50 ORDER BY timestamp_ms DESC LIMIT ?`
 	rows, err := s.db.Query(query, limit)
 	if err != nil {
@@ -754,7 +848,7 @@ func (s *StorageEngine) SearchEvents(filterStr string, limit int) ([]*StoredEven
 		whereClause = "WHERE " + strings.Join(conditions, " AND ")
 	}
 
-	query := fmt.Sprintf(`SELECT id, node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis, analyst_notes, playbook_progress
+	query := fmt.Sprintf(`SELECT id, node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis, analyst_notes, playbook_progress, triage_status
 	                       FROM events %s ORDER BY timestamp_ms DESC LIMIT ?`, whereClause)
 	args = append(args, limit)
 
@@ -774,10 +868,15 @@ func scanEvents(rows *sql.Rows) ([]*StoredEvent, error) {
 		ev := &StoredEvent{}
 		var notes sql.NullString
 		var pb sql.NullString
-		if err := rows.Scan(&ev.ID, &ev.NodeID, &ev.Source, &ev.RawLine, &ev.ClientIP, &ev.StatusCode, &ev.TimestampMs, &ev.RuleID, &ev.MitreTechniqueID, &ev.ThreatScore, &ev.AIAnalysis, &notes, &pb); err == nil {
+		var tStatus sql.NullString
+		if err := rows.Scan(&ev.ID, &ev.NodeID, &ev.Source, &ev.RawLine, &ev.ClientIP, &ev.StatusCode, &ev.TimestampMs, &ev.RuleID, &ev.MitreTechniqueID, &ev.ThreatScore, &ev.AIAnalysis, &notes, &pb, &tStatus); err == nil {
 			ev.Severity = models.CalculateSeverity(ev.ThreatScore)
 			ev.AnalystNotes = notes.String
 			ev.PlaybookProgress = pb.String
+			ev.TriageStatus = tStatus.String
+			if ev.TriageStatus == "" {
+				ev.TriageStatus = "ACTIVE"
+			}
 			if ev.ClientIP != "" && ev.ClientIP != "-" {
 				loc := geo.Lookup(ev.ClientIP)
 				ev.CountryCode = loc.CountryCode

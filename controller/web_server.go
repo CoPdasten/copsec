@@ -963,7 +963,16 @@ func (ws *WebSOCServer) handleAlerts(w http.ResponseWriter, r *http.Request) {
 		limit = l
 	}
 
-	events, err := ws.storage.GetRecentAlerts(limit)
+	statusFilter := strings.ToUpper(strings.TrimSpace(r.URL.Query().Get("status")))
+	var events []*StoredEvent
+	var err error
+
+	if statusFilter == "RESOLVED" || statusFilter == "ARCHIVE" || statusFilter == "MITIGATED" {
+		events, err = ws.storage.GetResolvedAlerts(limit)
+	} else {
+		events, err = ws.storage.GetActiveAlerts(limit)
+	}
+
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -1033,7 +1042,11 @@ func (ws *WebSOCServer) handleAlerts(w http.ResponseWriter, r *http.Request) {
 		isHostLocal := scope == sigma.ScopeHostLocal || ev.ClientIP == "127.0.0.1" || ev.ClientIP == "local" || isProtectedIP(ev.ClientIP)
 
 		containment := "UNMITIGATED"
-		if isHostLocal {
+		if ev.TriageStatus == "MITIGATED" {
+			containment = "MITIGATED"
+		} else if ev.TriageStatus == "RESOLVED" {
+			containment = "RESOLVED"
+		} else if isHostLocal {
 			containment = "HOST CONTAINED"
 		} else if activeBansMap[ev.ClientIP] {
 			containment = "BANNED (XDP)"
@@ -1083,10 +1096,12 @@ func (ws *WebSOCServer) handleAlertsTriage(w http.ResponseWriter, r *http.Reques
 	}
 
 	var req struct {
-		Action  string `json:"action"` // ban, tarpit, dismiss, whitelist
-		IP      string `json:"ip"`
-		EventID int64  `json:"event_id"`
-		Reason  string `json:"reason"`
+		Action  string      `json:"action"` // ban, tarpit, dismiss, whitelist, resolve
+		IP      string      `json:"ip"`
+		EventID interface{} `json:"event_id"`
+		ID      interface{} `json:"id"`
+		Reason  string      `json:"reason"`
+		Status  string      `json:"status"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -1095,6 +1110,17 @@ func (ws *WebSOCServer) handleAlertsTriage(w http.ResponseWriter, r *http.Reques
 	}
 
 	cleanIP := strings.TrimSpace(req.IP)
+	idStr := ""
+	if req.ID != nil {
+		idStr = strings.TrimSpace(fmt.Sprintf("%v", req.ID))
+	}
+	if (idStr == "" || idStr == "0" || idStr == "<nil>") && req.EventID != nil {
+		idStr = strings.TrimSpace(fmt.Sprintf("%v", req.EventID))
+	}
+	if idStr == "" || idStr == "0" || idStr == "<nil>" {
+		idStr = cleanIP
+	}
+
 	switch req.Action {
 	case "ban":
 		if cleanIP != "" && !isProtectedIP(cleanIP) && ws.ttlManager != nil {
@@ -1104,11 +1130,17 @@ func (ws *WebSOCServer) handleAlertsTriage(w http.ResponseWriter, r *http.Reques
 			}
 			_, _ = ws.ttlManager.BanIP(cleanIP, reason, 86400, TierExtendedQuarantine)
 		}
+		if ws.storage != nil && idStr != "" {
+			_ = ws.storage.SetAlertStatus(idStr, "MITIGATED", "Mitigated via XDP Drop")
+		}
 	case "tarpit":
 		if cleanIP != "" && !isProtectedIP(cleanIP) {
 			if ws.ttlManager != nil {
 				_, _ = ws.ttlManager.BanIP(cleanIP, "Analyst Triage: Zero-Window Tarpit Trap", 3600, TierTempIsolation)
 			}
+		}
+		if ws.storage != nil && idStr != "" {
+			_ = ws.storage.SetAlertStatus(idStr, "MITIGATED", "Mitigated via Tarpit Trap")
 		}
 	case "whitelist":
 		if cleanIP != "" && ws.ttlManager != nil {
@@ -1117,13 +1149,16 @@ func (ws *WebSOCServer) handleAlertsTriage(w http.ResponseWriter, r *http.Reques
 		if ws.server != nil && ws.server.threatEngine != nil && cleanIP != "" {
 			_ = ws.server.threatEngine.AddWhitelistCIDR(cleanIP)
 		}
-	case "dismiss":
-		if ws.storage != nil {
-			if req.EventID > 0 {
-				_ = ws.storage.DismissAlert(fmt.Sprintf("%d", req.EventID))
-			} else if cleanIP != "" {
-				_ = ws.storage.DismissAlert(cleanIP)
-			}
+		if ws.storage != nil && idStr != "" {
+			_ = ws.storage.SetAlertStatus(idStr, "FALSE_POSITIVE", "Whitelisted by analyst")
+		}
+	case "dismiss", "resolve":
+		st := req.Status
+		if st == "" {
+			st = "RESOLVED"
+		}
+		if ws.storage != nil && idStr != "" {
+			_ = ws.storage.SetAlertStatus(idStr, st, "")
 		}
 	}
 
@@ -1131,6 +1166,7 @@ func (ws *WebSOCServer) handleAlertsTriage(w http.ResponseWriter, r *http.Reques
 		"success": true,
 		"action":  req.Action,
 		"ip":      cleanIP,
+		"id":      idStr,
 	})
 }
 
@@ -1142,8 +1178,10 @@ func (ws *WebSOCServer) handleAlertsDismiss(w http.ResponseWriter, r *http.Reque
 	}
 
 	var req struct {
-		ID interface{} `json:"id"`
-		IP string      `json:"ip"`
+		ID     interface{} `json:"id"`
+		IP     string      `json:"ip"`
+		Status string      `json:"status"`
+		Notes  string      `json:"notes"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -1158,13 +1196,20 @@ func (ws *WebSOCServer) handleAlertsDismiss(w http.ResponseWriter, r *http.Reque
 		idStr = strings.TrimSpace(req.IP)
 	}
 
+	status := strings.TrimSpace(req.Status)
+	if status == "" {
+		status = "RESOLVED"
+	}
+
 	if ws.storage != nil && idStr != "" {
-		_ = ws.storage.DismissAlert(idStr)
+		_ = ws.storage.SetAlertStatus(idStr, status, req.Notes)
 	}
 
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"status": "dismissed",
+		"status": "ok",
+		"action": "archived",
 		"id":     idStr,
+		"state":  status,
 	})
 }
 
@@ -1176,11 +1221,12 @@ func (ws *WebSOCServer) handleAlertsClear(w http.ResponseWriter, r *http.Request
 	}
 
 	if ws.storage != nil {
-		_ = ws.storage.ClearAllAlerts()
+		_ = ws.storage.ClearAllActiveAlerts()
 	}
 
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"status": "cleared",
+		"status":        "ok",
+		"cleared_count": 1,
 	})
 }
 
