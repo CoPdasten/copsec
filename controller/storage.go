@@ -167,7 +167,7 @@ func (s *StorageEngine) initSchema() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	schema := `
+	baseTables := `
 	CREATE TABLE IF NOT EXISTS events (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		node_id TEXT NOT NULL,
@@ -184,13 +184,6 @@ func (s *StorageEngine) initSchema() error {
 		playbook_progress TEXT DEFAULT '',
 		triage_status TEXT DEFAULT 'ACTIVE'
 	);
-
-	CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp_ms DESC);
-	CREATE INDEX IF NOT EXISTS idx_events_client_ip ON events(client_ip);
-	CREATE INDEX IF NOT EXISTS idx_events_mitre ON events(mitre_technique_id);
-	CREATE INDEX IF NOT EXISTS idx_events_threat_score ON events(threat_score DESC);
-	CREATE INDEX IF NOT EXISTS idx_events_node_id ON events(node_id);
-	CREATE INDEX IF NOT EXISTS idx_events_triage_status ON events(triage_status);
 
 	CREATE TABLE IF NOT EXISTS alerts (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -209,10 +202,22 @@ func (s *StorageEngine) initSchema() error {
 		triage_status TEXT DEFAULT 'ACTIVE'
 	);
 
-	CREATE INDEX IF NOT EXISTS idx_alerts_timestamp ON alerts(timestamp_ms DESC);
-	CREATE INDEX IF NOT EXISTS idx_alerts_client_ip ON alerts(client_ip);
-	CREATE INDEX IF NOT EXISTS idx_alerts_threat_score ON alerts(threat_score DESC);
-	CREATE INDEX IF NOT EXISTS idx_alerts_triage_status ON alerts(triage_status);
+	CREATE TABLE IF NOT EXISTS telemetry (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		node_id TEXT NOT NULL,
+		source TEXT NOT NULL,
+		raw_line TEXT NOT NULL,
+		client_ip TEXT NOT NULL,
+		status_code INTEGER DEFAULT 0,
+		timestamp_ms INTEGER NOT NULL,
+		rule_id TEXT DEFAULT '',
+		mitre_technique_id TEXT DEFAULT '',
+		threat_score INTEGER DEFAULT 0,
+		ai_analysis TEXT DEFAULT '',
+		analyst_notes TEXT DEFAULT '',
+		playbook_progress TEXT DEFAULT '',
+		triage_status TEXT DEFAULT 'ACTIVE'
+	);
 
 	CREATE TABLE IF NOT EXISTS active_bans (
 		ip TEXT PRIMARY KEY,
@@ -271,41 +276,69 @@ func (s *StorageEngine) initSchema() error {
 		timestamp_ms INTEGER NOT NULL,
 		auto_banned INTEGER DEFAULT 1
 	);
-
-	CREATE INDEX IF NOT EXISTS idx_honeypot_time ON honeypot_events(timestamp_ms DESC);
 	`
-	_, err := s.db.Exec(schema)
-	if err != nil {
+	if _, err := s.db.Exec(baseTables); err != nil {
 		return err
 	}
 
-	// Safe column migration check for active_bans & node_registry if tables existed previously
-	cols := []string{
-		"ALTER TABLE active_bans ADD COLUMN expire_time_ms INTEGER DEFAULT 0",
-		"ALTER TABLE active_bans ADD COLUMN penalty_tier TEXT DEFAULT 'TEMP_ISOLATION'",
-		"ALTER TABLE active_bans ADD COLUMN l3_active INTEGER DEFAULT 1",
-		"ALTER TABLE active_bans ADD COLUMN l4_active INTEGER DEFAULT 1",
-		"ALTER TABLE active_bans ADD COLUMN l7_active INTEGER DEFAULT 1",
-		"ALTER TABLE active_bans ADD COLUMN offense_count INTEGER DEFAULT 1",
-		"ALTER TABLE node_registry ADD COLUMN group_name TEXT DEFAULT 'DEFAULT_EDGE'",
-		"ALTER TABLE node_registry ADD COLUMN remote_addr TEXT DEFAULT ''",
-		"ALTER TABLE node_registry ADD COLUMN cpu_usage REAL DEFAULT 0",
-		"ALTER TABLE node_registry ADD COLUMN memory_usage REAL DEFAULT 0",
-		"ALTER TABLE node_registry ADD COLUMN active_bans_count INTEGER DEFAULT 0",
-		"ALTER TABLE node_registry ADD COLUMN uptime_seconds INTEGER DEFAULT 0",
-		"ALTER TABLE events ADD COLUMN analyst_notes TEXT DEFAULT ''",
-		"ALTER TABLE events ADD COLUMN playbook_progress TEXT DEFAULT ''",
-		"ALTER TABLE events ADD COLUMN triage_status TEXT DEFAULT 'ACTIVE'",
-		"ALTER TABLE alerts ADD COLUMN triage_status TEXT DEFAULT 'ACTIVE'",
-	}
-	for _, colSQL := range cols {
-		_, _ = s.db.Exec(colSQL)
+	// Safe, Idempotent column migrations on pre-existing tables BEFORE index creation
+	s.ensureColumnExists("events", "analyst_notes", "TEXT DEFAULT ''")
+	s.ensureColumnExists("events", "playbook_progress", "TEXT DEFAULT ''")
+	s.ensureColumnExists("events", "triage_status", "TEXT DEFAULT 'ACTIVE'")
+	s.ensureColumnExists("alerts", "analyst_notes", "TEXT DEFAULT ''")
+	s.ensureColumnExists("alerts", "playbook_progress", "TEXT DEFAULT ''")
+	s.ensureColumnExists("alerts", "triage_status", "TEXT DEFAULT 'ACTIVE'")
+	s.ensureColumnExists("telemetry", "analyst_notes", "TEXT DEFAULT ''")
+	s.ensureColumnExists("telemetry", "playbook_progress", "TEXT DEFAULT ''")
+	s.ensureColumnExists("telemetry", "triage_status", "TEXT DEFAULT 'ACTIVE'")
+	s.ensureColumnExists("active_bans", "expire_time_ms", "INTEGER DEFAULT 0")
+	s.ensureColumnExists("active_bans", "penalty_tier", "TEXT DEFAULT 'TEMP_ISOLATION'")
+	s.ensureColumnExists("active_bans", "l3_active", "INTEGER DEFAULT 1")
+	s.ensureColumnExists("active_bans", "l4_active", "INTEGER DEFAULT 1")
+	s.ensureColumnExists("active_bans", "l7_active", "INTEGER DEFAULT 1")
+	s.ensureColumnExists("active_bans", "offense_count", "INTEGER DEFAULT 1")
+	s.ensureColumnExists("node_registry", "group_name", "TEXT DEFAULT 'DEFAULT_EDGE'")
+	s.ensureColumnExists("node_registry", "remote_addr", "TEXT DEFAULT ''")
+	s.ensureColumnExists("node_registry", "cpu_usage", "REAL DEFAULT 0")
+	s.ensureColumnExists("node_registry", "memory_usage", "REAL DEFAULT 0")
+	s.ensureColumnExists("node_registry", "active_bans_count", "INTEGER DEFAULT 0")
+	s.ensureColumnExists("node_registry", "uptime_seconds", "INTEGER DEFAULT 0")
+
+	// Safe index creation (guaranteed all target columns exist now)
+	indexes := `
+	CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp_ms DESC);
+	CREATE INDEX IF NOT EXISTS idx_events_client_ip ON events(client_ip);
+	CREATE INDEX IF NOT EXISTS idx_events_mitre ON events(mitre_technique_id);
+	CREATE INDEX IF NOT EXISTS idx_events_threat_score ON events(threat_score DESC);
+	CREATE INDEX IF NOT EXISTS idx_events_node_id ON events(node_id);
+	CREATE INDEX IF NOT EXISTS idx_events_triage_status ON events(triage_status);
+
+	CREATE INDEX IF NOT EXISTS idx_alerts_timestamp ON alerts(timestamp_ms DESC);
+	CREATE INDEX IF NOT EXISTS idx_alerts_client_ip ON alerts(client_ip);
+	CREATE INDEX IF NOT EXISTS idx_alerts_threat_score ON alerts(threat_score DESC);
+	CREATE INDEX IF NOT EXISTS idx_alerts_triage_status ON alerts(triage_status);
+
+	CREATE INDEX IF NOT EXISTS idx_honeypot_time ON honeypot_events(timestamp_ms DESC);
+	`
+	if _, err := s.db.Exec(indexes); err != nil {
+		return err
 	}
 
 	// Auto-Heal: Evict invalid historical quarantines caused by host-local rules or protected/empty IPs
 	s.flushInvalidQuarantinesLocked()
 
 	return nil
+}
+
+// ensureColumnExists checks if a column exists in a given table using pragma_table_info and creates it idempotently.
+func (s *StorageEngine) ensureColumnExists(table, column, colDef string) {
+	var count int
+	query := fmt.Sprintf("SELECT COUNT(*) FROM pragma_table_info('%s') WHERE name = '%s'", table, column)
+	err := s.db.QueryRow(query).Scan(&count)
+	if err == nil && count == 0 {
+		alterSQL := fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, colDef)
+		_, _ = s.db.Exec(alterSQL)
+	}
 }
 
 func (s *StorageEngine) flushInvalidQuarantinesLocked() {
