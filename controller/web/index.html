@@ -360,12 +360,30 @@
       border-bottom: 1px solid #18181b;
       white-space: nowrap;
     }
+    tr {
+      transition: background-color 0.15s ease, opacity 0.18s ease-out, transform 0.18s ease-out;
+    }
     tr:hover td {
       background: #18181b;
     }
     tr.selected-alert-row td {
-      background: #27272a !important;
+      background: rgba(39, 39, 42, 0.6) !important;
       color: #ffffff !important;
+    }
+    tr.selected-alert-row td:first-child {
+      border-left: 2px solid #ffffff !important;
+    }
+    tr.row-pulse {
+      animation: rowPulse 1s ease-out forwards;
+    }
+    tr.row-exit {
+      opacity: 0 !important;
+      transform: translateX(30px) !important;
+      pointer-events: none !important;
+    }
+    @keyframes rowPulse {
+      0% { background-color: #27272a; }
+      100% { background-color: transparent; }
     }
 
     /* Toolbar */
@@ -386,19 +404,24 @@
     #drawer {
       position: fixed;
       top: 0;
-      right: -750px;
+      right: 0;
       width: 720px;
       height: 100vh;
       background: var(--surface);
       border-left: 1px solid var(--border-accent);
       box-shadow: -10px 0 30px rgba(0, 0, 0, 0.95);
-      transition: right 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+      transform: translateX(100%);
+      opacity: 0;
+      transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s ease;
       z-index: 1000;
       display: flex;
       flex-direction: column;
+      pointer-events: none;
     }
     #drawer.open {
-      right: 0;
+      transform: translateX(0);
+      opacity: 1;
+      pointer-events: auto;
     }
     .drawer-header {
       padding: 12px 16px;
@@ -1067,6 +1090,10 @@
     let activeAlertsList = [];
     let allRulesList = [];
 
+    // High-Frequency Zero-Lag Telemetry Batch Queue
+    window.streamBufferQueue = [];
+    let isTelemetryBatchScheduled = false;
+
     // LRU IPInfo Cache
     const ipinfoCache = new Map();
 
@@ -1278,6 +1305,7 @@
         if (existingIdx >= 0) {
           activeAlertsList[existingIdx] = ev;
         } else {
+          ev._isNew = true;
           activeAlertsList.unshift(ev);
         }
         const badge = document.getElementById('badgeAlerts');
@@ -1293,6 +1321,9 @@
         if (ev.threat_score >= 40) {
           const existingIdx = activeAlertsList.findIndex(a => a.id && ev.id && a.id === ev.id);
           if (existingIdx < 0) {
+            if (ev.threat_score >= 85 || ev.severity === 'CRITICAL') {
+              ev._isNew = true;
+            }
             activeAlertsList.unshift(ev);
             const badge = document.getElementById('badgeAlerts');
             if (badge) badge.textContent = activeAlertsList.length;
@@ -1430,27 +1461,30 @@
       }
     }
 
-    // Telemetry Feed Rendering with Configurable Rolling Window Buffer
-    function appendTelemetryRow(ev) {
-      telemetryEvents.unshift(ev);
-      const cap = maxTelemetryRows > 0 ? maxTelemetryRows : 10000;
-      if (telemetryEvents.length > cap) {
-        telemetryEvents.pop();
+    // Telemetry Feed Zero-Lag Batch Rendering Engine
+    function queueTelemetryEvent(ev) {
+      window.streamBufferQueue.push(ev);
+      scheduleTelemetryBatchFlush();
+    }
+
+    function scheduleTelemetryBatchFlush() {
+      if (isTelemetryBatchScheduled) return;
+      isTelemetryBatchScheduled = true;
+      if (window.requestAnimationFrame) {
+        window.requestAnimationFrame(flushTelemetryBatch);
+      } else {
+        setTimeout(flushTelemetryBatch, 80);
       }
+    }
 
-      const badge = document.getElementById('badgeTelemetry');
-      if (badge) badge.textContent = telemetryEvents.length;
-
-      const tbody = document.getElementById('telemetryTableBody');
-      if (!tbody) return;
-
+    function createTelemetryRowElement(ev) {
       const tr = document.createElement('tr');
       tr.onclick = () => openDrawer(ev);
 
       const d = new Date(ev.timestamp_ms);
       const timeStr = d.toTimeString().split(' ')[0];
       const isInfo = ev.threat_score === 0 || ev.severity === 'INFO' || ev.threat_score < 30;
-      const ruleStyle = isInfo ? 'color: var(--text-muted); font-size: 11px;' : 'color: var(--cyan); font-weight: 500;';
+      const ruleStyle = isInfo ? 'color: var(--text-muted); font-size: 11px;' : 'color: var(--text); font-weight: 500;';
 
       tr.innerHTML = `
         <td style="color: var(--text-muted);">${timeStr}</td>
@@ -1463,8 +1497,36 @@
         <td style="${ruleStyle}">${escapeHTML(ev.rule_matched)}</td>
         <td style="max-width: 380px; overflow: hidden; text-overflow: ellipsis; color: var(--text-muted);">${escapeHTML(ev.raw_line)}</td>
       `;
+      return tr;
+    }
 
-      tbody.insertBefore(tr, tbody.firstChild);
+    function flushTelemetryBatch() {
+      isTelemetryBatchScheduled = false;
+      if (!window.streamBufferQueue || window.streamBufferQueue.length === 0) return;
+
+      const batch = window.streamBufferQueue.splice(0, window.streamBufferQueue.length);
+      const cap = maxTelemetryRows > 0 ? maxTelemetryRows : 10000;
+
+      // Update in-memory telemetryEvents (newest first)
+      for (let i = batch.length - 1; i >= 0; i--) {
+        telemetryEvents.unshift(batch[i]);
+      }
+      if (telemetryEvents.length > cap) {
+        telemetryEvents = telemetryEvents.slice(0, cap);
+      }
+
+      const badge = document.getElementById('badgeTelemetry');
+      if (badge) badge.textContent = telemetryEvents.length;
+
+      const tbody = document.getElementById('telemetryTableBody');
+      if (!tbody) return;
+
+      const fragment = document.createDocumentFragment();
+      for (let i = batch.length - 1; i >= 0; i--) {
+        fragment.appendChild(createTelemetryRowElement(batch[i]));
+      }
+
+      tbody.insertBefore(fragment, tbody.firstChild);
 
       while (tbody.children.length > cap) {
         tbody.removeChild(tbody.lastChild);
@@ -1475,12 +1537,17 @@
       }
     }
 
+    function appendTelemetryRow(ev) {
+      queueTelemetryEvent(ev);
+    }
+
     function toggleAutoScroll() {
       autoScroll = !autoScroll;
       document.getElementById('btnAutoScroll').textContent = autoScroll ? 'AUTO-SCROLL: ON' : 'AUTO-SCROLL: OFF';
     }
 
     function clearTelemetryFeed() {
+      window.streamBufferQueue = [];
       telemetryEvents = [];
       document.getElementById('telemetryTableBody').innerHTML = '';
       document.getElementById('badgeTelemetry').textContent = '0';
@@ -1578,6 +1645,10 @@
         if (idx === selectedAlertIndex) {
           tr.classList.add('selected-alert-row');
         }
+        if (a._isNew) {
+          tr.classList.add('row-pulse');
+          delete a._isNew;
+        }
         tr.id = `alert-row-${idx}`;
         tr.onclick = () => selectAlertRow(idx);
 
@@ -1659,6 +1730,28 @@
       if (e && e.stopPropagation) e.stopPropagation();
       const target = String(idOrIP || '').trim();
       if (!target) return;
+
+      // Find DOM row if present and apply .row-exit transition
+      let rowEl = null;
+      if (e && e.target) {
+        rowEl = e.target.closest('tr');
+      }
+      if (!rowEl) {
+        const rows = document.getElementById('alertsTableBody')?.getElementsByTagName('tr');
+        if (rows) {
+          for (let r of rows) {
+            if (r.textContent.includes(target)) {
+              rowEl = r;
+              break;
+            }
+          }
+        }
+      }
+
+      if (rowEl) {
+        rowEl.classList.add('row-exit');
+        await new Promise(r => setTimeout(r, 180));
+      }
 
       // Optimistically remove from local state immediately
       activeAlertsList = activeAlertsList.filter(a => String(a.id) !== target && a.source_ip !== target);
@@ -2153,32 +2246,29 @@
 
       if (layer === 'WAF' || mitre.includes('T1190') || (mitre.includes('T1059') && !mitre.includes('T1059.004'))) {
         return [
-          { title: "1. Inspect Web Server Offending Requests & Payloads", cmd: `grep -E '(\\.\\./|/bin/sh|<script|UNION SELECT)' /var/log/nginx/access.log | grep '${ip}' | tail -n 25` },
-          { title: "2. Verify Ingress Web Health & Header Integrity", cmd: `curl -sI -A 'CoPSeC-Probe' 'http://localhost/' | head -n 15` },
-          { title: "3. Inspect Established Web TCP Sockets for Attacker IP", cmd: `lsof -i :80 -i :443 -sTCP:ESTABLISHED | grep '${ip}'` },
-          { title: "4. Review Web Server Error Logs in Systemd Journal", cmd: `journalctl -u nginx --since "1 hour ago" --no-pager | grep -i error | tail -n 20` }
-        ];
-      } else if (layer === 'EDR' || mitre.includes('T1059.004') || mitre.includes('T1014') || mitre.includes('T1070') || mitre.includes('T1055')) {
-        return [
-          { title: "1. Inspect Process Tree & Parent PID Hierarchy", cmd: `pstree -apsh $(pgrep -f '${ip}' 2>/dev/null || echo $$)` },
-          { title: "2. Audit Suspicious Open Sockets and TCP FDs in /proc", cmd: `ls -la /proc/*/fd/* 2>/dev/null | grep -E 'socket:|/dev/tcp'` },
-          { title: "3. Dump Kernel TCP Socket Table State", cmd: `cat /proc/net/tcp /proc/net/tcp6 | awk '{print $2, $3, $4}'` },
-          { title: "4. Audit Recent Execve & Socket System Calls", cmd: `ausearch -i -m execve,socketcall --start recent | tail -n 30` }
+          { title: "1. All Requests from IP (Nginx/Apache)", cmd: `grep '${ip}' /var/log/nginx/*access*.log 2>/dev/null | tail -n 25 || grep '${ip}' /var/log/apache2/*access*.log 2>/dev/null | tail -n 25` },
+          { title: "2. Attack Pattern Extraction (SQLi / Traversal / RCE / Probes)", cmd: `grep -E '(\\.\\./|etc/passwd|/bin/|<script|SELECT|UNION|POST|HEAD|\\.env|\\.git|\\.php)' /var/log/nginx/access.log 2>/dev/null | grep '${ip}' | tail -n 20` },
+          { title: "3. Non-Blocking Active Socket Check (Fast -n -P)", cmd: `ss -tnp dst '${ip}' 2>/dev/null || lsof -nPi :80,:443 -sTCP:ESTABLISHED | grep '${ip}'` },
+          { title: "4. Nginx Error / Block Logs", cmd: `grep '${ip}' /var/log/nginx/error.log 2>/dev/null | tail -n 20 || journalctl -u nginx --since "2 hours ago" --no-pager | grep '${ip}' | tail -n 20` }
         ];
       } else if (layer === 'AUTH' || mitre.includes('T1110') || mitre.includes('T1078')) {
         return [
-          { title: "1. Tally Failed Authentication Usernames & Attempts", cmd: `grep 'Failed password' /var/log/auth.log | grep '${ip}' | awk '{print $(NF-5)}' | sort | uniq -c | sort -nr | head -n 10` },
-          { title: "2. Audit Failed Badlogins via lastb", cmd: `lastb -n 20 -a | grep '${ip}'` },
-          { title: "3. Check Account Lockout State & PAM Counters", cmd: `faillog -u root 2>/dev/null || pam_tally2 --user=root` },
-          { title: "4. Query Live Inbound SSH Connections", cmd: `ss -tnp '( dport = :22 )' | grep '${ip}'` }
+          { title: "1. Failed Auth Username Breakdown", cmd: `grep -E 'Failed password|authentication failure' /var/log/auth.log 2>/dev/null | grep '${ip}' | awk '{for(i=1;i<=NF;i++) if($i=="for") print $(i+1)}' | sort | uniq -c | sort -nr | head -n 10` },
+          { title: "2. Raw Auth Entries for Offender", cmd: `grep '${ip}' /var/log/auth.log 2>/dev/null | tail -n 25` },
+          { title: "3. Active Connection & PAM Tally", cmd: `ss -tnp '( dport = :22 )' | grep '${ip}' && lastb -n 10 -a | grep '${ip}'` }
+        ];
+      } else if (layer === 'EDR' || mitre.includes('T1059.004') || mitre.includes('T1014') || mitre.includes('T1070') || mitre.includes('T1055')) {
+        return [
+          { title: "1. Active Sockets & Associated PIDs", cmd: `ss -tupna | grep -E '(${ip}|ESTAB)' | head -n 25` },
+          { title: "2. Process Hierarchy & Arguments", cmd: `ps auxf | grep -E '(/bin/sh|/bin/bash|python|curl|wget|nc|socat|ncat)' | grep -v grep | head -n 20` },
+          { title: "3. Auditd Process Execution Events", cmd: `ausearch -i -m execve,socketcall --start recent 2>/dev/null | tail -n 30 || journalctl _COMM=sudo --since "1 hour ago" --no-pager | tail -n 20` }
         ];
       } else {
         // NET layer / default
         return [
-          { title: "1. Dump Netfilter Conntrack State for Attacker IP", cmd: `conntrack -L -s '${ip}' 2>/dev/null | head -n 30` },
-          { title: "2. Inspect Socket Summary & Destination IP Flows", cmd: `ss -s && ss -tnp dst '${ip}'` },
-          { title: "3. Search Kernel Buffer for SYN Floods & XDP Drops", cmd: `dmesg -T | grep -Ei '(syn flood|port scan|xdp|drop)' | tail -n 25` },
-          { title: "4. Query Kernel Routing Decision for Target IP", cmd: `ip route get '${ip}'` }
+          { title: "1. Kernel Drop Notices & XDP Events", cmd: `dmesg -T | grep -Ei '(xdp|syn flood|drop|blocked)' | tail -n 25` },
+          { title: "2. Route & Conntrack State", cmd: `ip route get '${ip}' && conntrack -L -s '${ip}' 2>/dev/null | head -n 20` },
+          { title: "3. Live Packet Probe (5 Packets Sniff)", cmd: `timeout 3 tcpdump -nn -c 5 -i any host '${ip}' 2>/dev/null || echo "[Probe Done]"` }
         ];
       }
     }
@@ -2202,7 +2292,6 @@
         row.style.gap = '6px';
         row.style.padding = '4px 6px';
         row.style.background = 'rgba(255,255,255,0.02)';
-        row.style.borderRadius = '4px';
         row.style.border = '1px solid var(--border)';
 
         const textDiv = document.createElement('div');
@@ -2210,7 +2299,7 @@
         textDiv.style.overflow = 'hidden';
         textDiv.innerHTML = `
           <div style="font-size: 10px; font-weight: 600; color: var(--text);">${item.title}:</div>
-          <div style="font-size: 10px; font-family: monospace; color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHTML(item.cmd)}</div>
+          <div style="font-size: 10px; font-family: monospace; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHTML(item.cmd)}</div>
         `;
 
         const btn = document.createElement('button');
@@ -2235,7 +2324,7 @@
       }
       const cmds = getCurrentRunbookCommands(currentDrawerEvent);
       if (cmds.length === 0) return;
-      const scriptText = cmds.map(c => c.cmd).join(';\n');
+      const scriptText = cmds.map(c => `# ${c.title}\n${c.cmd}`).join('\n\n');
       window.copyToClipboard(scriptText, btnElement || document.getElementById('btnCopyAllRunbook'));
     }
 
