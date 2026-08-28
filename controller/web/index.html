@@ -1790,7 +1790,7 @@
 
       if (!alerts || alerts.length === 0) {
         selectedAlertIndex = -1;
-        const msg = currentAlertsView === 'RESOLVED' ? 'No resolved/archived incident cases found' : 'No actionable active security alerts';
+        const msg = currentAlertsView === 'RESOLVED' ? 'No resolved/archived incident cases found' : 'No actionable alerts remaining in active queue.';
         tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-muted); padding: 20px;">${msg}</td></tr>`;
         return;
       }
@@ -1897,6 +1897,157 @@
       else openDrawer({ source_ip: ip, threat_score: 85, mitre_id: 'T1190', rule_matched: 'Active Alert' });
     }
 
+    function dismissCurrentDrawerAlert() {
+      if (!currentDrawerEvent) return;
+      handleAndAdvance(currentDrawerEvent.id || currentDrawerEvent.source_ip, 'dismiss', currentDrawerEvent.source_ip);
+    }
+
+    async function handleAndAdvance(alertId, actionType, ipOverride) {
+      const target = String(alertId || '').trim();
+      const ip = String(ipOverride || (currentDrawerEvent && currentDrawerEvent.source_ip) || (target.includes('.') ? target : '')).trim();
+      const drawer = document.getElementById('drawer');
+      const isDrawerOpen = drawer && drawer.classList.contains('open');
+
+      // 1. Identify current row and find next row in DOM
+      const tbody = document.getElementById('alertsTableBody');
+      let currentRow = null;
+      let nextAlert = null;
+      let nextRow = null;
+
+      if (tbody) {
+        if (target) {
+          currentRow = document.getElementById(`alert-row-${target}`);
+        }
+        if (!currentRow && ip) {
+          const rows = Array.from(tbody.querySelectorAll('tr'));
+          currentRow = rows.find(r => r.dataset?.sourceIp === ip || r.textContent.includes(ip));
+        }
+        if (!currentRow && selectedAlertIndex >= 0) {
+          const rows = Array.from(tbody.querySelectorAll('tr'));
+          currentRow = rows[selectedAlertIndex];
+        }
+
+        if (currentRow) {
+          let sibling = currentRow.nextElementSibling;
+          while (sibling && sibling.tagName === 'TR') {
+            const sid = sibling.dataset?.alertId;
+            const sip = sibling.dataset?.sourceIp;
+            if (sid || sip) {
+              nextRow = sibling;
+              nextAlert = activeAlertsList.find(a => (sid && String(a.id) === sid) || (sip && (a.source_ip === sip || a.client_ip === sip)));
+              break;
+            }
+            sibling = sibling.nextElementSibling;
+          }
+        }
+      }
+
+      // Fallback finding nextAlert from activeAlertsList array if not found via DOM
+      if (!nextAlert && activeAlertsList.length > 0) {
+        const curIdx = activeAlertsList.findIndex(a => (target && String(a.id) === target) || (ip && (a.source_ip === ip || a.client_ip === ip)));
+        if (curIdx >= 0 && curIdx + 1 < activeAlertsList.length) {
+          nextAlert = activeAlertsList[curIdx + 1];
+        } else if (curIdx > 0 && curIdx === activeAlertsList.length - 1) {
+          // If at the end, next can be the previous one
+          nextAlert = activeAlertsList[curIdx - 1];
+        }
+      }
+
+      // 2. Register in handled / suppressed sets
+      if (target) {
+        window.handledAlertIds.add(target);
+        if (Number(target)) window.handledAlertIds.add(Number(target));
+      }
+      if (ip && ip !== '-' && ip !== '127.0.0.1') {
+        window.suppressedIPs.add(ip);
+        window.handledIPs.add(ip);
+      }
+
+      // 3. Fast exit transition & removal of current row
+      if (currentRow) {
+        currentRow.classList.add('row-exit');
+        setTimeout(() => {
+          if (currentRow.parentNode) currentRow.remove();
+        }, 120);
+      }
+
+      // 4. Optimistically filter activeAlertsList
+      activeAlertsList = activeAlertsList.filter(a => {
+        const matchId = target && String(a.id) === target;
+        const matchIp = ip && (a.source_ip === ip || a.client_ip === ip);
+        return !matchId && !matchIp;
+      });
+
+      const badge = document.getElementById('badgeAlerts');
+      if (badge) badge.textContent = activeAlertsList.length;
+      const activeCount = document.getElementById('alertsActiveCount');
+      if (activeCount) activeCount.textContent = activeAlertsList.length;
+
+      // 5. Auto-advance drawer and selection if next alert exists
+      if (nextAlert) {
+        // Re-calculate new index for nextAlert
+        const newIdx = activeAlertsList.findIndex(a => a === nextAlert || (a.id && a.id === nextAlert.id) || (a.source_ip && a.source_ip === nextAlert.source_ip));
+        selectedAlertIndex = newIdx >= 0 ? newIdx : 0;
+        selectAlertRow(selectedAlertIndex);
+
+        if (isDrawerOpen) {
+          // Immediately load incident details into the open Forensic Drawer without flicker
+          openDrawer(nextAlert);
+        }
+      } else {
+        selectedAlertIndex = -1;
+        if (isDrawerOpen) {
+          closeDrawer();
+        }
+        if (activeAlertsList.length === 0) {
+          renderAlerts([]);
+        }
+      }
+
+      // 6. Execute backend request asynchronously
+      try {
+        if (actionType === 'ban') {
+          await fetch('/api/quarantine/ban', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              ip: ip,
+              duration_seconds: 3600,
+              reason: `Analyst Auto-Advance: Instant XDP Drop on ${ip}`
+            })
+          });
+          showToast(`[⚡ XDP_DROP] Enforced 1h blackhole on ${ip}`, 'ok');
+          fetchQuarantineBans();
+        } else if (actionType === 'tarpit') {
+          await fetch('/api/mitigation/tarpit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              ip: ip,
+              duration_seconds: 3600,
+              reason: `Analyst Auto-Advance: Zero-Window Tarpit on ${ip}`
+            })
+          });
+          showToast(`[🕳️ TARPIT] Trapped ${ip} in zero-window buffer`, 'ok');
+          fetchQuarantineBans();
+        } else {
+          // dismiss
+          await fetch('/api/alerts/dismiss', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              id: target,
+              ip: ip,
+              status: 'RESOLVED'
+            })
+          });
+          showToast(`[DISMISS] Alert archived & advanced`, 'ok');
+        }
+      } catch (e) {
+        console.error(`Action ${actionType} error:`, e);
+      }
+    }
+
     async function suppressAndRemoveIP(ip) {
       const cleanIP = String(ip || '').trim();
       if (!cleanIP || cleanIP === '-' || cleanIP === '127.0.0.1') return;
@@ -1922,22 +2073,19 @@
     }
 
     async function triageAction(action, ip, eventId) {
-      if (eventId) {
-        window.handledAlertIds.add(String(eventId));
-        window.handledAlertIds.add(Number(eventId));
-      }
       if (action === 'ban' || action === 'tarpit' || action === 'dismiss') {
-        if (ip) suppressAndRemoveIP(ip);
+        handleAndAdvance(eventId || ip, action, ip);
+      } else {
+        try {
+          await fetch('/api/alerts/triage', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action, ip, event_id: eventId || 0 })
+          });
+          showToast(`[ACTION] ${action.toUpperCase()} enforced on ${ip}`, 'ok');
+          fetchAlerts();
+        } catch (e) {}
       }
-      try {
-        await fetch('/api/alerts/triage', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action, ip, event_id: eventId || 0 })
-        });
-        showToast(`[ACTION] ${action.toUpperCase()} enforced on ${ip}`, 'ok');
-        fetchAlerts();
-      } catch (e) {}
     }
 
     async function restoreAlert(idOrIP) {
@@ -1966,61 +2114,7 @@
       if (e && e.stopPropagation) e.stopPropagation();
       const target = String(idOrIP || '').trim();
       if (!target) return;
-
-      // 1. Instantly register in Handled sets
-      window.handledAlertIds.add(target);
-      if (Number(target)) window.handledAlertIds.add(Number(target));
-
-      if (target.includes('.') || target.includes(':')) {
-        window.suppressedIPs.add(target);
-        window.handledIPs.add(target);
-      } else {
-        const found = activeAlertsList.find(a => String(a.id) === target);
-        if (found && found.source_ip) {
-          window.suppressedIPs.add(found.source_ip);
-          window.handledIPs.add(found.source_ip);
-        }
-      }
-
-      // 2. Remove row immediately from DOM
-      const directRow = document.getElementById(`alert-row-${target}`);
-      if (directRow) {
-        directRow.remove();
-      } else {
-        const tbody = document.getElementById('alertsTableBody');
-        if (tbody) {
-          const rows = Array.from(tbody.querySelectorAll('tr'));
-          for (let r of rows) {
-            if (r.dataset?.alertId === target || r.dataset?.sourceIp === target || r.textContent.includes(target)) {
-              r.remove();
-              break;
-            }
-          }
-        }
-      }
-
-      // 3. Optimistically remove from local state immediately
-      activeAlertsList = activeAlertsList.filter(a => String(a.id) !== target && a.source_ip !== target);
-      const badge = document.getElementById('badgeAlerts');
-      if (badge) badge.textContent = activeAlertsList.length;
-      const activeCount = document.getElementById('alertsActiveCount');
-      if (activeCount) activeCount.textContent = activeAlertsList.length;
-      renderAlerts(activeAlertsList);
-
-      try {
-        await fetch('/api/alerts/dismiss', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            id: target,
-            ip: target.includes('.') || target.includes(':') ? target : '',
-            status: 'RESOLVED'
-          })
-        });
-        showToast(`[DISMISS] Alert archived to SQLite history`, 'ok');
-      } catch (err) {
-        console.error('Dismiss failed:', err);
-      }
+      handleAndAdvance(target, 'dismiss');
     }
 
     async function clearAllActiveAlerts() {
@@ -2768,50 +2862,14 @@ ${notes}
     // 1-Click Mitigation Actions
     async function quickDrawerBan() {
       if (!currentEventIP || currentEventIP === '127.0.0.1' || currentEventIP === '-' || currentEventIP === 'N/A') return;
-      const targetIP = currentEventIP;
-      suppressAndRemoveIP(targetIP);
-      try {
-        const res = await fetch('/api/quarantine/ban', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            ip: targetIP,
-            duration_seconds: 3600,
-            reason: `Analyst 1-Click: Instant XDP Drop (1h) on ${targetIP}`
-          })
-        });
-        if (res.ok) {
-          showToast(`[⚡ XDP_DROP] Enforced 1h blackhole on ${targetIP}`, 'ok');
-          fetchQuarantineBans();
-          fetchAlerts();
-        }
-      } catch (e) {
-        showToast('Ban failed: ' + e.message, 'crit');
-      }
+      const target = currentDrawerEvent ? (currentDrawerEvent.id || currentDrawerEvent.source_ip) : currentEventIP;
+      handleAndAdvance(target, 'ban', currentEventIP);
     }
 
     async function quickDrawerTarpit() {
       if (!currentEventIP || currentEventIP === '127.0.0.1' || currentEventIP === '-' || currentEventIP === 'N/A') return;
-      const targetIP = currentEventIP;
-      suppressAndRemoveIP(targetIP);
-      try {
-        const res = await fetch('/api/mitigation/tarpit', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            ip: targetIP,
-            duration_seconds: 3600,
-            reason: `Analyst 1-Click: Zero-Window Tarpit Trap on ${targetIP}`
-          })
-        });
-        if (res.ok) {
-          showToast(`[🕳️ TARPIT] Trapped ${targetIP} in zero-window buffer`, 'ok');
-          fetchQuarantineBans();
-          fetchAlerts();
-        }
-      } catch (e) {
-        showToast('Tarpit failed: ' + e.message, 'crit');
-      }
+      const target = currentDrawerEvent ? (currentDrawerEvent.id || currentDrawerEvent.source_ip) : currentEventIP;
+      handleAndAdvance(target, 'tarpit', currentEventIP);
     }
 
     async function quickDrawerUnban() {
@@ -2882,10 +2940,39 @@ ${notes}
         const isDrawerOpen = drawer && drawer.classList.contains('open');
 
         // Hotkeys when drawer is open
-        if ((e.key === 'x' || e.key === 'X' || e.key === 'd' || e.key === 'D' || e.key === 'Delete') && currentDrawerEvent && isDrawerOpen) {
-          e.preventDefault();
-          dismissCurrentDrawerAlert();
-          return;
+        if (isDrawerOpen && currentDrawerEvent) {
+          if (e.key === 'x' || e.key === 'X' || e.key === 'Delete') {
+            e.preventDefault();
+            dismissCurrentDrawerAlert();
+            return;
+          }
+          if (e.key === 'b' || e.key === 'B') {
+            e.preventDefault();
+            quickDrawerBan();
+            return;
+          }
+          if (e.key === 't' || e.key === 'T') {
+            e.preventDefault();
+            quickDrawerTarpit();
+            return;
+          }
+          if (e.key === 'j' || e.key === 'J' || e.key === 'ArrowDown') {
+            e.preventDefault();
+            if (activeAlertsList.length > 0) {
+              const nextIdx = selectedAlertIndex + 1 < activeAlertsList.length ? selectedAlertIndex + 1 : 0;
+              selectAlertRow(nextIdx);
+              openDrawer(activeAlertsList[nextIdx]);
+            }
+            return;
+          } else if (e.key === 'k' || e.key === 'K' || e.key === 'ArrowUp') {
+            e.preventDefault();
+            if (activeAlertsList.length > 0) {
+              const prevIdx = selectedAlertIndex - 1 >= 0 ? selectedAlertIndex - 1 : activeAlertsList.length - 1;
+              selectAlertRow(prevIdx);
+              openDrawer(activeAlertsList[prevIdx]);
+            }
+            return;
+          }
         }
 
         if (e.key === ' ' || e.key === 'Spacebar') {
@@ -2910,7 +2997,14 @@ ${notes}
             if (selectedAlertIndex >= 0 && selectedAlertIndex < activeAlertsList.length) {
               e.preventDefault();
               const sel = activeAlertsList[selectedAlertIndex];
-              dismissAlert(null, sel.id || sel.source_ip);
+              handleAndAdvance(sel.id || sel.source_ip, 'dismiss', sel.source_ip);
+              return;
+            }
+          } else if (e.key === 'b' || e.key === 'B') {
+            if (selectedAlertIndex >= 0 && selectedAlertIndex < activeAlertsList.length) {
+              e.preventDefault();
+              const sel = activeAlertsList[selectedAlertIndex];
+              handleAndAdvance(sel.id || sel.source_ip, 'ban', sel.source_ip);
               return;
             }
           } else if (e.key === 'Enter') {
