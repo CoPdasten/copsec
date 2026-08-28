@@ -131,8 +131,9 @@ type NodeRegistryRecord struct {
 
 // StorageEngine manages the embedded WAL-mode SQLite database.
 type StorageEngine struct {
-	mu sync.RWMutex
-	db *sql.DB
+	mu           sync.RWMutex
+	db           *sql.DB
+	mitigatedIPs sync.Map // map[string]time.Time
 }
 
 // NewStorageEngine creates and initializes the SQLite database with WAL mode and indexes.
@@ -161,6 +162,49 @@ func NewStorageEngine(dbPath string) (*StorageEngine, error) {
 
 	log.Printf("[INFO] Embedded Storage initialized (WAL-mode SQLite) at %s", dbPath)
 	return engine, nil
+}
+
+// AddMitigatedIP registers an IP in the in-memory suppression pool for the given duration.
+func (s *StorageEngine) AddMitigatedIP(ip string, duration time.Duration) {
+	cleanIP := strings.TrimSpace(ip)
+	if cleanIP == "" || cleanIP == "-" || cleanIP == "127.0.0.1" || cleanIP == "::1" || cleanIP == "localhost" || cleanIP == "local" {
+		return
+	}
+	if duration <= 0 {
+		duration = 1 * time.Hour
+	}
+	expiry := time.Now().Add(duration)
+	s.mitigatedIPs.Store(cleanIP, expiry)
+}
+
+// IsIPMitigated checks if an IP is currently suppressed and removes it if expired.
+func (s *StorageEngine) IsIPMitigated(ip string) bool {
+	cleanIP := strings.TrimSpace(ip)
+	if cleanIP == "" {
+		return false
+	}
+	val, ok := s.mitigatedIPs.Load(cleanIP)
+	if !ok {
+		return false
+	}
+	expiry, ok := val.(time.Time)
+	if !ok {
+		s.mitigatedIPs.Delete(cleanIP)
+		return false
+	}
+	if time.Now().After(expiry) {
+		s.mitigatedIPs.Delete(cleanIP)
+		return false
+	}
+	return true
+}
+
+// RemoveMitigatedIP removes an IP from the in-memory suppression pool.
+func (s *StorageEngine) RemoveMitigatedIP(ip string) {
+	cleanIP := strings.TrimSpace(ip)
+	if cleanIP != "" {
+		s.mitigatedIPs.Delete(cleanIP)
+	}
 }
 
 func (s *StorageEngine) initSchema() error {
@@ -436,6 +480,19 @@ func (s *StorageEngine) SetAlertStatus(id string, status string, notes string) e
 		status = "RESOLVED"
 	}
 
+	// If transitioning to MITIGATED, RESOLVED, or FALSE_POSITIVE, register IP in suppression pool
+	if status == "MITIGATED" || status == "RESOLVED" || status == "FALSE_POSITIVE" {
+		var clientIP string
+		if numID, err := strconv.ParseInt(id, 10, 64); err == nil && numID > 0 {
+			_ = s.db.QueryRow(`SELECT client_ip FROM alerts WHERE id = ? UNION SELECT client_ip FROM events WHERE id = ? LIMIT 1`, numID, numID).Scan(&clientIP)
+		} else if strings.Contains(id, ".") || strings.Contains(id, ":") {
+			clientIP = id
+		}
+		if clientIP != "" {
+			s.AddMitigatedIP(clientIP, 1*time.Hour)
+		}
+	}
+
 	if numID, err := strconv.ParseInt(id, 10, 64); err == nil && numID > 0 {
 		if notes != "" {
 			_, _ = s.db.Exec(`UPDATE alerts SET triage_status = ?, analyst_notes = ? WHERE id = ?`, status, notes, numID)
@@ -686,6 +743,14 @@ func (s *StorageEngine) RecordDetailedBan(b *DetailedBanRecord) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if b.Status == "ACTIVE" && b.IP != "" {
+		dur := 1 * time.Hour
+		if b.DurationSeconds > 0 {
+			dur = time.Duration(b.DurationSeconds) * time.Second
+		}
+		s.AddMitigatedIP(b.IP, dur)
+	}
+
 	query := `INSERT OR REPLACE INTO active_bans (ip, reason, ban_time_ms, duration_seconds, expire_time_ms, penalty_tier, status, l3_active, l4_active, l7_active, offense_count)
 	          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 	_, err := s.db.Exec(query, b.IP, b.Reason, b.BanTimeMs, b.DurationSeconds, b.ExpireTimeMs, string(b.PenaltyTier), b.Status, b.L3Active, b.L4Active, b.L7Active, b.OffenseCount)
@@ -697,6 +762,10 @@ func (s *StorageEngine) UpdateBanStatus(ip, status string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if status == "MANUAL_UNBAN" || status == "EXPIRED" {
+		s.RemoveMitigatedIP(ip)
+	}
+
 	query := `UPDATE active_bans SET status = ?, l3_active = 0, l4_active = 0, l7_active = 0 WHERE ip = ?`
 	_, err := s.db.Exec(query, status, ip)
 	return err
@@ -706,6 +775,8 @@ func (s *StorageEngine) UpdateBanStatus(ip, status string) error {
 func (s *StorageEngine) RemoveBan(ip string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	s.RemoveMitigatedIP(ip)
 
 	query := `DELETE FROM active_bans WHERE ip = ?`
 	_, err := s.db.Exec(query, ip)

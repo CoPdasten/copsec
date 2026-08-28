@@ -737,3 +737,93 @@ func TestPersistentConfigAndIPInfoEndpoints(t *testing.T) {
 	}
 }
 
+func TestIPAlertSuppressionEngine(t *testing.T) {
+	tmpDir := t.TempDir()
+	store, err := NewStorageEngine(filepath.Join(tmpDir, "test_suppression.db"))
+	if err != nil {
+		t.Fatalf("Failed to init storage: %v", err)
+	}
+	defer store.Close()
+
+	analyzer := NewRuleEngine("")
+	server := NewCentralServer(store, analyzer)
+	ttlMgr := NewTTLBanManager(store, server)
+	defer ttlMgr.Stop()
+	wsHub := NewWSHub()
+	webSoc := NewWebSOCServer(":0", server, store, ttlMgr, nil, wsHub)
+
+	mitigatedIP := "198.51.100.111"
+
+	// 1. Initially IP is not mitigated
+	if store.IsIPMitigated(mitigatedIP) {
+		t.Fatalf("IP %s should not be mitigated initially", mitigatedIP)
+	}
+
+	// 2. Perform mitigation via triage action (ban)
+	triageBody, _ := json.Marshal(map[string]interface{}{
+		"action": "ban",
+		"ip":     mitigatedIP,
+	})
+	req := httptest.NewRequest("POST", "/api/alerts/triage", bytes.NewBuffer(triageBody))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	webSoc.handleAlertsTriage(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("handleAlertsTriage returned %d", rec.Code)
+	}
+
+	// Verify suppression pool registration
+	if !store.IsIPMitigated(mitigatedIP) {
+		t.Fatalf("IP %s must be registered in suppression pool", mitigatedIP)
+	}
+
+	// 3. Process new high-threat event from suppressed IP
+	event := &copsecproto.LogEvent{
+		Source:           "nginx",
+		ClientIp:         mitigatedIP,
+		StatusCode:       403,
+		TimestampMs:      time.Now().UnixMilli(),
+		RuleId:           "sigma-web-rce",
+		MitreTechniqueId: "T1059",
+		ThreatScore:      90,
+		RawLine:          "GET /shell.php?cmd=id HTTP/1.1 403",
+	}
+
+	server.processEvent("node-test", event)
+
+	// Verify event was saved to raw telemetry with triage_status = MITIGATED
+	events, err := store.GetRecentEvents(10)
+	if err != nil || len(events) == 0 {
+		t.Fatalf("Expected raw telemetry event to be recorded, err: %v", err)
+	}
+	if events[0].TriageStatus != "MITIGATED" {
+		t.Errorf("Expected triage_status = 'MITIGATED', got %s", events[0].TriageStatus)
+	}
+
+	// Verify active alerts table does NOT contain new alert for this suppressed IP
+	activeAlerts, err := store.GetActiveAlerts(10)
+	if err != nil {
+		t.Fatalf("GetActiveAlerts failed: %v", err)
+	}
+	for _, a := range activeAlerts {
+		if a.ClientIP == mitigatedIP {
+			t.Errorf("Active alerts queue must NOT contain records for suppressed IP %s", mitigatedIP)
+		}
+	}
+
+	// 4. Test unban releases suppression
+	unbanBody, _ := json.Marshal(map[string]interface{}{
+		"ip": mitigatedIP,
+	})
+	unbanReq := httptest.NewRequest("POST", "/api/quarantine/unban", bytes.NewBuffer(unbanBody))
+	unbanReq.Header.Set("Content-Type", "application/json")
+	unbanRec := httptest.NewRecorder()
+	webSoc.handleSOARUnban(unbanRec, unbanReq)
+
+	if store.IsIPMitigated(mitigatedIP) {
+		t.Errorf("IP %s should no longer be suppressed after unban", mitigatedIP)
+	}
+}
+
+

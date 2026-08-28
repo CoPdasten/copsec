@@ -19,6 +19,32 @@
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    /* Sleek Minimalist Terminal Scrollbar */
+    ::-webkit-scrollbar {
+      width: 5px;
+      height: 5px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: #09090b;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: #27272a;
+      border-radius: 2px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: #52525b;
+    }
+
+    /* Firefox Scrollbar Support */
+    * {
+      scrollbar-width: thin;
+      scrollbar-color: #27272a #09090b;
+    }
+
     body {
       background-color: var(--bg);
       color: var(--text);
@@ -400,7 +426,6 @@
       gap: 8px;
     }
 
-    /* Drawer */
     #drawer {
       position: fixed;
       top: 0;
@@ -417,6 +442,8 @@
       display: flex;
       flex-direction: column;
       pointer-events: none;
+      overflow-x: hidden;
+      overflow-y: auto;
     }
     #drawer.open {
       transform: translateX(0);
@@ -434,11 +461,19 @@
     }
     .drawer-body {
       padding: 16px;
+      overflow-x: hidden;
       overflow-y: auto;
       flex: 1;
       display: flex;
       flex-direction: column;
       gap: 14px;
+    }
+    pre, code, .terminal-box {
+      overflow-x: auto;
+      whitespace-pre-wrap: pre-wrap;
+      white-space: pre-wrap;
+      word-break: break-all;
+      break-all: break-all;
     }
     .terminal-box {
       background: #000000;
@@ -447,8 +482,6 @@
       padding: 10px;
       font-size: 11px;
       color: #f4f4f5;
-      word-break: break-all;
-      white-space: pre-wrap;
       max-height: 160px;
       overflow-y: auto;
     }
@@ -569,6 +602,9 @@
       <span id="liveStatus" class="stat-pill"><span class="live-dot" id="liveDot"></span> <span id="connLabel">STREAM CONNECTED</span></span>
     </div>
     <div class="top-stats">
+      <button id="btnPauseStream" class="btn" style="padding: 3px 8px; font-size: 11px; display: flex; align-items: center; gap: 4px;" onclick="toggleStreamPause()">
+        <span>⏸</span> <span>PAUSE STREAM (Space)</span>
+      </button>
       <div class="stat-pill">EPS: <span class="val" id="statEPS">0</span></div>
       <div class="stat-pill">TOTAL EVENTS: <span class="val" id="statTotal">0</span></div>
       <div class="stat-pill">FLEET NODES: <span class="val" id="statNodes">0</span></div>
@@ -1095,6 +1131,37 @@
     let allRulesList = [];
     let currentAlertsView = 'ACTIVE'; // 'ACTIVE' or 'RESOLVED'
 
+    // Stream Freeze & Suppression State
+    window.isStreamPaused = false;
+    window.pausedEventQueue = [];
+    window.suppressedIPs = new Set();
+
+    function setStreamPaused(paused) {
+      window.isStreamPaused = !!paused;
+      const btn = document.getElementById('btnPauseStream');
+      if (btn) {
+        if (window.isStreamPaused) {
+          btn.innerHTML = `<span>▶</span> <span>RESUME STREAM (Space)</span>`;
+          btn.classList.add('btn-accent');
+        } else {
+          btn.innerHTML = `<span>⏸</span> <span>PAUSE STREAM (Space)</span>`;
+          btn.classList.remove('btn-accent');
+        }
+      }
+
+      if (!window.isStreamPaused && window.pausedEventQueue.length > 0) {
+        const queue = window.pausedEventQueue.splice(0, window.pausedEventQueue.length);
+        queue.forEach(item => {
+          handleIncomingMessage(item, true);
+        });
+      }
+    }
+
+    function toggleStreamPause() {
+      setStreamPaused(!window.isStreamPaused);
+      showToast(window.isStreamPaused ? 'Stream paused' : 'Stream resumed', 'ok');
+    }
+
     // High-Frequency Zero-Lag Telemetry Batch Queue
     window.streamBufferQueue = [];
     let isTelemetryBatchScheduled = false;
@@ -1295,7 +1362,7 @@
       };
     }
 
-    function handleIncomingMessage(data) {
+    function handleIncomingMessage(data, isFromQueue = false) {
       const type = data.type;
       const payload = data.payload;
 
@@ -1304,8 +1371,37 @@
         document.getElementById('statTotal').textContent = payload.total_events || 0;
         document.getElementById('statNodes').textContent = payload.nodes_count || 0;
         document.getElementById('statBans').textContent = payload.active_bans || 0;
-      } else if (type === 'ALERT_NEW' || type === 'alert') {
+        return;
+      }
+
+      if (type === 'ban_change') {
+        const ip = payload.ban?.ip || 'IP';
+        const act = String(payload.action || '').toUpperCase();
+        if (act.includes('UNBAN') && window.suppressedIPs.has(ip)) {
+          window.suppressedIPs.delete(ip);
+        }
+        showToast(`[XDP_DROP] Quarantine ${act}: ${ip}`, 'ok');
+        fetchQuarantineBans();
+        return;
+      }
+
+      // Check client-side IP suppression cache
+      const srcIP = payload ? (payload.source_ip || payload.client_ip || payload.ip || '') : '';
+      if (srcIP && window.suppressedIPs && window.suppressedIPs.has(srcIP)) {
+        return; // Drop suppressed IP events from client side immediately
+      }
+
+      // If stream is paused and not currently replaying from queue, buffer it
+      if (window.isStreamPaused && !isFromQueue) {
+        window.pausedEventQueue.push(data);
+        return;
+      }
+
+      if (type === 'ALERT_NEW' || type === 'alert') {
         const ev = normalizeEvent(payload);
+        if (ev.source_ip && window.suppressedIPs && window.suppressedIPs.has(ev.source_ip)) {
+          return;
+        }
         const existingIdx = activeAlertsList.findIndex(a => a.id && ev.id && a.id === ev.id);
         if (existingIdx >= 0) {
           activeAlertsList[existingIdx] = ev;
@@ -1323,7 +1419,7 @@
         appendTelemetryRow(ev);
         updateDashboardAggregates(ev);
 
-        if (ev.threat_score >= 40) {
+        if (ev.threat_score >= 40 && (!ev.source_ip || !window.suppressedIPs || !window.suppressedIPs.has(ev.source_ip))) {
           const existingIdx = activeAlertsList.findIndex(a => a.id && ev.id && a.id === ev.id);
           if (existingIdx < 0) {
             if (ev.threat_score >= 85 || ev.severity === 'CRITICAL') {
@@ -1338,10 +1434,6 @@
             showToast(`[ALERT] ${ev.rule_id || 'Critical Threat'} from ${ev.source_ip}`, 'crit');
           }
         }
-      } else if (type === 'ban_change') {
-        const ip = payload.ban?.ip || 'IP';
-        showToast(`[XDP_DROP] Quarantine ${String(payload.action).toUpperCase()}: ${ip}`, 'ok');
-        fetchQuarantineBans();
       }
     }
 
@@ -1783,7 +1875,36 @@
       else openDrawer({ source_ip: ip, threat_score: 85, mitre_id: 'T1190', rule_matched: 'Active Alert' });
     }
 
+    async function suppressAndRemoveIP(ip) {
+      const cleanIP = String(ip || '').trim();
+      if (!cleanIP || cleanIP === '-' || cleanIP === '127.0.0.1') return;
+
+      window.suppressedIPs.add(cleanIP);
+
+      // Find all DOM rows with this IP across Alerts table and apply exit animation
+      const tbody = document.getElementById('alertsTableBody');
+      if (tbody) {
+        const rows = Array.from(tbody.querySelectorAll('tr'));
+        const matchedRows = rows.filter(r => r.textContent.includes(cleanIP));
+        matchedRows.forEach(r => r.classList.add('row-exit'));
+        if (matchedRows.length > 0) {
+          await new Promise(r => setTimeout(r, 180));
+        }
+      }
+
+      // Filter local state
+      activeAlertsList = activeAlertsList.filter(a => (a.source_ip || a.client_ip) !== cleanIP);
+      const badge = document.getElementById('badgeAlerts');
+      if (badge) badge.textContent = activeAlertsList.length;
+      const activeCount = document.getElementById('alertsActiveCount');
+      if (activeCount) activeCount.textContent = activeAlertsList.length;
+      renderAlerts(activeAlertsList);
+    }
+
     async function triageAction(action, ip, eventId) {
+      if (action === 'ban' || action === 'tarpit' || action === 'dismiss') {
+        if (ip) suppressAndRemoveIP(ip);
+      }
       try {
         await fetch('/api/alerts/triage', {
           method: 'POST',
@@ -1798,6 +1919,9 @@
     async function restoreAlert(idOrIP) {
       const target = String(idOrIP || '').trim();
       if (!target) return;
+      if (window.suppressedIPs.has(target)) {
+        window.suppressedIPs.delete(target);
+      }
       try {
         await fetch('/api/alerts/triage', {
           method: 'POST',
@@ -1813,6 +1937,16 @@
       if (e && e.stopPropagation) e.stopPropagation();
       const target = String(idOrIP || '').trim();
       if (!target) return;
+
+      // Optimistically register suppression if target is an IP
+      if (target.includes('.') || target.includes(':')) {
+        window.suppressedIPs.add(target);
+      } else {
+        const found = activeAlertsList.find(a => String(a.id) === target);
+        if (found && found.source_ip) {
+          window.suppressedIPs.add(found.source_ip);
+        }
+      }
 
       // Find DOM row if present and apply .row-exit transition
       let rowEl = null;
@@ -2224,6 +2358,9 @@
 
       const drawer = document.getElementById('drawer');
       if (drawer) drawer.classList.add('open');
+
+      // Auto-freeze stream while inspecting forensic details
+      setStreamPaused(true);
     }
 
     function hydrateEvidenceTable(ev) {
@@ -2508,6 +2645,8 @@ ${notes}
     function closeDrawer() {
       const drawer = document.getElementById('drawer');
       if (drawer) drawer.classList.remove('open');
+      // Restore live streaming upon closing drawer
+      setStreamPaused(false);
     }
 
     function copyRawLog(btnElement) {
@@ -2589,18 +2728,20 @@ ${notes}
     // 1-Click Mitigation Actions
     async function quickDrawerBan() {
       if (!currentEventIP || currentEventIP === '127.0.0.1' || currentEventIP === '-' || currentEventIP === 'N/A') return;
+      const targetIP = currentEventIP;
+      suppressAndRemoveIP(targetIP);
       try {
         const res = await fetch('/api/quarantine/ban', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            ip: currentEventIP,
+            ip: targetIP,
             duration_seconds: 3600,
-            reason: `Analyst 1-Click: Instant XDP Drop (1h) on ${currentEventIP}`
+            reason: `Analyst 1-Click: Instant XDP Drop (1h) on ${targetIP}`
           })
         });
         if (res.ok) {
-          showToast(`[⚡ XDP_DROP] Enforced 1h blackhole on ${currentEventIP}`, 'ok');
+          showToast(`[⚡ XDP_DROP] Enforced 1h blackhole on ${targetIP}`, 'ok');
           fetchQuarantineBans();
           fetchAlerts();
         }
@@ -2611,18 +2752,20 @@ ${notes}
 
     async function quickDrawerTarpit() {
       if (!currentEventIP || currentEventIP === '127.0.0.1' || currentEventIP === '-' || currentEventIP === 'N/A') return;
+      const targetIP = currentEventIP;
+      suppressAndRemoveIP(targetIP);
       try {
         const res = await fetch('/api/mitigation/tarpit', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            ip: currentEventIP,
+            ip: targetIP,
             duration_seconds: 3600,
-            reason: `Analyst 1-Click: Zero-Window Tarpit Trap on ${currentEventIP}`
+            reason: `Analyst 1-Click: Zero-Window Tarpit Trap on ${targetIP}`
           })
         });
         if (res.ok) {
-          showToast(`[🕳️ TARPIT] Trapped ${currentEventIP} in zero-window buffer`, 'ok');
+          showToast(`[🕳️ TARPIT] Trapped ${targetIP} in zero-window buffer`, 'ok');
           fetchQuarantineBans();
           fetchAlerts();
         }
@@ -2633,6 +2776,9 @@ ${notes}
 
     async function quickDrawerUnban() {
       if (!currentEventIP || currentEventIP === '127.0.0.1' || currentEventIP === '-' || currentEventIP === 'N/A') return;
+      if (window.suppressedIPs.has(currentEventIP)) {
+        window.suppressedIPs.delete(currentEventIP);
+      }
       try {
         const res = await fetch('/api/quarantine/unban', {
           method: 'POST',
@@ -2702,6 +2848,12 @@ ${notes}
           return;
         }
 
+        if (e.key === ' ' || e.key === 'Spacebar') {
+          e.preventDefault();
+          toggleStreamPause();
+          return;
+        }
+
         // Hotkeys when on Alerts tab (and drawer not open)
         if (isAlertsTab && !isDrawerOpen && activeAlertsList.length > 0) {
           if (e.key === 'j' || e.key === 'J' || e.key === 'ArrowDown') {
@@ -2721,7 +2873,7 @@ ${notes}
               dismissAlert(null, sel.id || sel.source_ip);
               return;
             }
-          } else if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+          } else if (e.key === 'Enter') {
             if (selectedAlertIndex >= 0 && selectedAlertIndex < activeAlertsList.length) {
               e.preventDefault();
               openDrawer(activeAlertsList[selectedAlertIndex]);

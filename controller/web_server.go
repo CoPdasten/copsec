@@ -527,6 +527,10 @@ func (ws *WebSOCServer) handleSOARBan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if ws.storage != nil {
+		ws.storage.AddMitigatedIP(req.IP, 1*time.Hour)
+	}
+
 	json.NewEncoder(w).Encode(record)
 }
 
@@ -550,6 +554,10 @@ func (ws *WebSOCServer) handleSOARUnban(w http.ResponseWriter, r *http.Request) 
 	if err := ws.ttlManager.UnbanIP(req.IP); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
+	}
+
+	if ws.storage != nil {
+		ws.storage.RemoveMitigatedIP(req.IP)
 	}
 
 	json.NewEncoder(w).Encode(map[string]interface{}{
@@ -589,6 +597,10 @@ func (ws *WebSOCServer) handleMitigationTarpit(w http.ResponseWriter, r *http.Re
 	reason := req.Reason
 	if reason == "" {
 		reason = "Analyst Instant Action: Zero-Window Tarpit Trap"
+	}
+
+	if ws.storage != nil {
+		ws.storage.AddMitigatedIP(cleanIP, time.Duration(dur)*time.Second)
 	}
 
 	if ws.ttlManager != nil {

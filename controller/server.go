@@ -507,14 +507,20 @@ func (s *CentralServer) processEvent(nodeID string, event *copsecproto.LogEvent)
 		stored.TimestampMs = time.Now().UnixMilli()
 	}
 
+	// Check if IP is in the Active Mitigation/Suppression Pool
+	isMitigated := s.storage != nil && s.storage.IsIPMitigated(stored.ClientIP)
+	if isMitigated {
+		stored.TriageStatus = "MITIGATED"
+	}
+
 	// Persist to embedded SQLite (Telemetry table)
 	if s.storage != nil {
 		_ = s.storage.InsertEvent(stored)
 
-		// Persist to dedicated Alerts table strictly for actionable threats (threat_score >= 40, non-whitelisted, non-routine-sudo)
+		// Persist to dedicated Alerts table strictly for actionable threats (threat_score >= 40, non-whitelisted, non-routine-sudo, not mitigated/suppressed)
 		isWhitelisted := (s.threatEngine != nil && s.threatEngine.IsWhitelisted(stored.ClientIP)) || isProtectedIP(stored.ClientIP)
 		isRoutineSudo := stored.RuleID == "sudo_execution" || (strings.Contains(strings.ToLower(stored.RuleID), "sudo") && stored.ThreatScore < 70)
-		isAlert := stored.ThreatScore >= 40 && !isRoutineSudo && !isWhitelisted
+		isAlert := stored.ThreatScore >= 40 && !isRoutineSudo && !isWhitelisted && !isMitigated
 		if isAlert {
 			_ = s.storage.InsertAlert(stored)
 		}
@@ -525,8 +531,10 @@ func (s *CentralServer) processEvent(nodeID string, event *copsecproto.LogEvent)
 		ipinfo.GetDefaultClient().LookupAsync(stored.ClientIP)
 	}
 
-	// Check Autonomous Auto-Ban Policy & Dynamic TTL Management
-	s.checkAutonomousBanPolicy(stored)
+	// Check Autonomous Auto-Ban Policy & Dynamic TTL Management (only if not already mitigated)
+	if !isMitigated {
+		s.checkAutonomousBanPolicy(stored)
+	}
 
 	// Broadcast event directly to Web SOC via WebSocket Hub
 	s.mu.RLock()
@@ -537,7 +545,7 @@ func (s *CentralServer) processEvent(nodeID string, event *copsecproto.LogEvent)
 		hub.Broadcast("event", stored)
 		isWhitelisted := (s.threatEngine != nil && s.threatEngine.IsWhitelisted(stored.ClientIP)) || isProtectedIP(stored.ClientIP)
 		isRoutineSudo := stored.RuleID == "sudo_execution" || (strings.Contains(strings.ToLower(stored.RuleID), "sudo") && stored.ThreatScore < 70)
-		if stored.ThreatScore >= 40 && !isRoutineSudo && !isWhitelisted {
+		if stored.ThreatScore >= 40 && !isRoutineSudo && !isWhitelisted && !isMitigated {
 			hub.Broadcast("ALERT_NEW", stored)
 		}
 	}
