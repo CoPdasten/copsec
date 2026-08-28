@@ -164,12 +164,109 @@ func NewStorageEngine(dbPath string) (*StorageEngine, error) {
 	return engine, nil
 }
 
+// Global Triage Blacklist / Handled Cache
+var (
+	HandledAlertIDs sync.Map // map[int64]bool or map[string]bool
+	HandledIPs      sync.Map // map[string]bool
+)
+
+// MarkAlertHandled registers an alert ID as handled/dismissed across memory.
+func MarkAlertHandled(id interface{}) {
+	if id == nil {
+		return
+	}
+	switch v := id.(type) {
+	case int64:
+		if v > 0 {
+			HandledAlertIDs.Store(v, true)
+			HandledAlertIDs.Store(fmt.Sprintf("%d", v), true)
+		}
+	case int:
+		if v > 0 {
+			HandledAlertIDs.Store(int64(v), true)
+			HandledAlertIDs.Store(fmt.Sprintf("%d", v), true)
+		}
+	case string:
+		clean := strings.TrimSpace(v)
+		if clean != "" && clean != "0" {
+			HandledAlertIDs.Store(clean, true)
+			if numID, err := strconv.ParseInt(clean, 10, 64); err == nil && numID > 0 {
+				HandledAlertIDs.Store(numID, true)
+			}
+		}
+	}
+}
+
+// MarkIPHandled registers an IP as handled/mitigated.
+func MarkIPHandled(ip string) {
+	cleanIP := strings.TrimSpace(ip)
+	if cleanIP != "" && cleanIP != "-" && cleanIP != "127.0.0.1" {
+		HandledIPs.Store(cleanIP, true)
+	}
+}
+
+// IsAlertHandled checks if an alert ID has been handled/dismissed.
+func IsAlertHandled(id interface{}) bool {
+	if id == nil {
+		return false
+	}
+	switch v := id.(type) {
+	case int64:
+		if _, ok := HandledAlertIDs.Load(v); ok {
+			return true
+		}
+		if _, ok := HandledAlertIDs.Load(fmt.Sprintf("%d", v)); ok {
+			return true
+		}
+	case int:
+		if _, ok := HandledAlertIDs.Load(int64(v)); ok {
+			return true
+		}
+		if _, ok := HandledAlertIDs.Load(fmt.Sprintf("%d", v)); ok {
+			return true
+		}
+	case string:
+		clean := strings.TrimSpace(v)
+		if clean == "" || clean == "0" {
+			return false
+		}
+		if _, ok := HandledAlertIDs.Load(clean); ok {
+			return true
+		}
+		if numID, err := strconv.ParseInt(clean, 10, 64); err == nil && numID > 0 {
+			if _, ok := HandledAlertIDs.Load(numID); ok {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// IsIPHandled checks if an IP has been marked handled/mitigated.
+func IsIPHandled(ip string) bool {
+	cleanIP := strings.TrimSpace(ip)
+	if cleanIP == "" {
+		return false
+	}
+	_, ok := HandledIPs.Load(cleanIP)
+	return ok
+}
+
+// UnmarkIPHandled removes an IP from HandledIPs.
+func UnmarkIPHandled(ip string) {
+	cleanIP := strings.TrimSpace(ip)
+	if cleanIP != "" {
+		HandledIPs.Delete(cleanIP)
+	}
+}
+
 // AddMitigatedIP registers an IP in the in-memory suppression pool for the given duration.
 func (s *StorageEngine) AddMitigatedIP(ip string, duration time.Duration) {
 	cleanIP := strings.TrimSpace(ip)
 	if cleanIP == "" || cleanIP == "-" || cleanIP == "127.0.0.1" || cleanIP == "::1" || cleanIP == "localhost" || cleanIP == "local" {
 		return
 	}
+	MarkIPHandled(cleanIP)
 	if duration <= 0 {
 		duration = 1 * time.Hour
 	}
@@ -182,6 +279,9 @@ func (s *StorageEngine) IsIPMitigated(ip string) bool {
 	cleanIP := strings.TrimSpace(ip)
 	if cleanIP == "" {
 		return false
+	}
+	if IsIPHandled(cleanIP) {
+		return true
 	}
 	val, ok := s.mitigatedIPs.Load(cleanIP)
 	if !ok {
@@ -204,6 +304,7 @@ func (s *StorageEngine) RemoveMitigatedIP(ip string) {
 	cleanIP := strings.TrimSpace(ip)
 	if cleanIP != "" {
 		s.mitigatedIPs.Delete(cleanIP)
+		UnmarkIPHandled(cleanIP)
 	}
 }
 
@@ -494,22 +595,28 @@ func (s *StorageEngine) SetAlertStatus(id string, status string, notes string) e
 	}
 
 	if numID, err := strconv.ParseInt(id, 10, 64); err == nil && numID > 0 {
+		MarkAlertHandled(numID)
 		if notes != "" {
 			_, _ = s.db.Exec(`UPDATE alerts SET triage_status = ?, analyst_notes = ? WHERE id = ?`, status, notes, numID)
 			_, _ = s.db.Exec(`UPDATE events SET triage_status = ?, analyst_notes = ? WHERE id = ?`, status, notes, numID)
+			_, _ = s.db.Exec(`UPDATE telemetry SET triage_status = ?, analyst_notes = ? WHERE id = ?`, status, notes, numID)
 		} else {
 			_, _ = s.db.Exec(`UPDATE alerts SET triage_status = ? WHERE id = ?`, status, numID)
 			_, _ = s.db.Exec(`UPDATE events SET triage_status = ? WHERE id = ?`, status, numID)
+			_, _ = s.db.Exec(`UPDATE telemetry SET triage_status = ? WHERE id = ?`, status, numID)
 		}
 		return nil
 	}
 
+	MarkAlertHandled(id)
 	if notes != "" {
 		_, _ = s.db.Exec(`UPDATE alerts SET triage_status = ?, analyst_notes = ? WHERE client_ip = ? OR rule_id = ?`, status, notes, id, id)
 		_, _ = s.db.Exec(`UPDATE events SET triage_status = ?, analyst_notes = ? WHERE client_ip = ? OR rule_id = ?`, status, notes, id, id)
+		_, _ = s.db.Exec(`UPDATE telemetry SET triage_status = ?, analyst_notes = ? WHERE client_ip = ? OR rule_id = ?`, status, notes, id, id)
 	} else {
 		_, _ = s.db.Exec(`UPDATE alerts SET triage_status = ? WHERE client_ip = ? OR rule_id = ?`, status, id, id)
 		_, _ = s.db.Exec(`UPDATE events SET triage_status = ? WHERE client_ip = ? OR rule_id = ?`, status, id, id)
+		_, _ = s.db.Exec(`UPDATE telemetry SET triage_status = ? WHERE client_ip = ? OR rule_id = ?`, status, id, id)
 	}
 	return nil
 }
@@ -541,6 +648,15 @@ func (s *StorageEngine) GetActiveAlerts(limit int) ([]*StoredEvent, error) {
 		return nil, err
 	}
 
+	// Filter out any items in HandledAlertIDs or HandledIPs
+	var filtered []*StoredEvent
+	for _, a := range alerts {
+		if !IsAlertHandled(a.ID) && !IsIPHandled(a.ClientIP) {
+			filtered = append(filtered, a)
+		}
+	}
+	alerts = filtered
+
 	// Fallback to events table with threat_score >= 40 and ACTIVE status if alerts table is empty
 	if len(alerts) == 0 {
 		fallbackQuery := `SELECT id, node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis, analyst_notes, playbook_progress, triage_status
@@ -553,7 +669,14 @@ func (s *StorageEngine) GetActiveAlerts(limit int) ([]*StoredEvent, error) {
 		fbRows, fbErr := s.db.Query(fallbackQuery, limit)
 		if fbErr == nil {
 			defer fbRows.Close()
-			return scanEvents(fbRows)
+			fbEvents, err := scanEvents(fbRows)
+			if err == nil {
+				for _, fe := range fbEvents {
+					if !IsAlertHandled(fe.ID) && !IsIPHandled(fe.ClientIP) {
+						alerts = append(alerts, fe)
+					}
+				}
+			}
 		}
 	}
 
@@ -606,6 +729,7 @@ func (s *StorageEngine) GetRecentAlerts(limit int) ([]*StoredEvent, error) {
 
 // DismissAlert marks a triaged alert as RESOLVED in the database.
 func (s *StorageEngine) DismissAlert(id string) error {
+	MarkAlertHandled(id)
 	return s.SetAlertStatus(id, "RESOLVED", "")
 }
 
@@ -614,8 +738,24 @@ func (s *StorageEngine) ClearAllActiveAlerts() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Load active IDs into HandledAlertIDs before updating
+	rows, err := s.db.Query(`SELECT id, client_ip FROM alerts WHERE (triage_status = 'ACTIVE' OR triage_status = '' OR triage_status IS NULL)
+	                         UNION
+	                         SELECT id, client_ip FROM events WHERE threat_score >= 40 AND (triage_status = 'ACTIVE' OR triage_status = '' OR triage_status IS NULL)`)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var id int64
+			var ip string
+			if err := rows.Scan(&id, &ip); err == nil {
+				MarkAlertHandled(id)
+			}
+		}
+	}
+
 	_, _ = s.db.Exec(`UPDATE alerts SET triage_status = 'RESOLVED' WHERE (triage_status = 'ACTIVE' OR triage_status = '' OR triage_status IS NULL)`)
-	_, _ = s.db.Exec(`UPDATE events SET triage_status = 'RESOLVED' WHERE threat_score >= 40 AND (triage_status = 'ACTIVE' OR triage_status = '' OR triage_status IS NULL)`)
+	_, _ = s.db.Exec(`UPDATE events SET triage_status = 'RESOLVED' WHERE (triage_status = 'ACTIVE' OR triage_status = '' OR triage_status IS NULL)`)
+	_, _ = s.db.Exec(`UPDATE telemetry SET triage_status = 'RESOLVED' WHERE (triage_status = 'ACTIVE' OR triage_status = '' OR triage_status IS NULL)`)
 	return nil
 }
 

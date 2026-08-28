@@ -1135,6 +1135,8 @@
     window.isStreamPaused = false;
     window.pausedEventQueue = [];
     window.suppressedIPs = new Set();
+    window.handledAlertIds = new Set();
+    window.handledIPs = new Set();
 
     function setStreamPaused(paused) {
       window.isStreamPaused = !!paused;
@@ -1385,10 +1387,14 @@
         return;
       }
 
-      // Check client-side IP suppression cache
+      // Check client-side IP suppression and handled cache
       const srcIP = payload ? (payload.source_ip || payload.client_ip || payload.ip || '') : '';
-      if (srcIP && window.suppressedIPs && window.suppressedIPs.has(srcIP)) {
-        return; // Drop suppressed IP events from client side immediately
+      if (srcIP && ((window.suppressedIPs && window.suppressedIPs.has(srcIP)) || (window.handledIPs && window.handledIPs.has(srcIP)))) {
+        return; // Drop handled/suppressed IP events from client side immediately
+      }
+      const eventId = payload ? (payload.id || '') : '';
+      if (eventId && window.handledAlertIds && (window.handledAlertIds.has(String(eventId)) || window.handledAlertIds.has(Number(eventId)))) {
+        return; // Drop handled alert events from client side immediately
       }
 
       // If stream is paused and not currently replaying from queue, buffer it
@@ -1399,7 +1405,10 @@
 
       if (type === 'ALERT_NEW' || type === 'alert') {
         const ev = normalizeEvent(payload);
-        if (ev.source_ip && window.suppressedIPs && window.suppressedIPs.has(ev.source_ip)) {
+        if (ev.source_ip && ((window.suppressedIPs && window.suppressedIPs.has(ev.source_ip)) || (window.handledIPs && window.handledIPs.has(ev.source_ip)))) {
+          return;
+        }
+        if (ev.id && window.handledAlertIds && (window.handledAlertIds.has(String(ev.id)) || window.handledAlertIds.has(Number(ev.id)))) {
           return;
         }
         const existingIdx = activeAlertsList.findIndex(a => a.id && ev.id && a.id === ev.id);
@@ -1419,7 +1428,10 @@
         appendTelemetryRow(ev);
         updateDashboardAggregates(ev);
 
-        if (ev.threat_score >= 40 && (!ev.source_ip || !window.suppressedIPs || !window.suppressedIPs.has(ev.source_ip))) {
+        const isHandledAlert = (ev.id && window.handledAlertIds && (window.handledAlertIds.has(String(ev.id)) || window.handledAlertIds.has(Number(ev.id)))) ||
+                               (ev.source_ip && ((window.suppressedIPs && window.suppressedIPs.has(ev.source_ip)) || (window.handledIPs && window.handledIPs.has(ev.source_ip))));
+
+        if (ev.threat_score >= 40 && !isHandledAlert && (ev.triage_status === 'ACTIVE' || !ev.triage_status)) {
           const existingIdx = activeAlertsList.findIndex(a => a.id && ev.id && a.id === ev.id);
           if (existingIdx < 0) {
             if (ev.threat_score >= 85 || ev.severity === 'CRITICAL') {
@@ -1713,7 +1725,14 @@
         } else if (rawAlerts && Array.isArray(rawAlerts.alerts)) {
           list = rawAlerts.alerts;
         }
-        const alerts = list.map(normalizeEvent);
+        let alerts = list.map(normalizeEvent);
+        if (currentAlertsView === 'ACTIVE') {
+          alerts = alerts.filter(a => {
+            const isIdHandled = a.id && window.handledAlertIds && (window.handledAlertIds.has(String(a.id)) || window.handledAlertIds.has(Number(a.id)));
+            const isIpHandled = a.source_ip && ((window.suppressedIPs && window.suppressedIPs.has(a.source_ip)) || (window.handledIPs && window.handledIPs.has(a.source_ip)));
+            return !isIdHandled && !isIpHandled;
+          });
+        }
         activeAlertsList = alerts;
 
         if (currentAlertsView === 'ACTIVE') {
@@ -1789,7 +1808,10 @@
           tr.classList.add('row-pulse');
           delete a._isNew;
         }
-        tr.id = `alert-row-${idx}`;
+        const rowId = a.id ? `alert-row-${a.id}` : `alert-row-${idx}`;
+        tr.id = rowId;
+        tr.dataset.alertId = String(a.id || '');
+        tr.dataset.sourceIp = a.source_ip || a.client_ip || '';
         tr.onclick = () => selectAlertRow(idx);
 
         const d = new Date(a.timestamp_ms || Date.now());
@@ -1880,16 +1902,14 @@
       if (!cleanIP || cleanIP === '-' || cleanIP === '127.0.0.1') return;
 
       window.suppressedIPs.add(cleanIP);
+      window.handledIPs.add(cleanIP);
 
-      // Find all DOM rows with this IP across Alerts table and apply exit animation
+      // Find all DOM rows with this IP across Alerts table and remove them
       const tbody = document.getElementById('alertsTableBody');
       if (tbody) {
         const rows = Array.from(tbody.querySelectorAll('tr'));
-        const matchedRows = rows.filter(r => r.textContent.includes(cleanIP));
-        matchedRows.forEach(r => r.classList.add('row-exit'));
-        if (matchedRows.length > 0) {
-          await new Promise(r => setTimeout(r, 180));
-        }
+        const matchedRows = rows.filter(r => r.dataset?.sourceIp === cleanIP || r.textContent.includes(cleanIP));
+        matchedRows.forEach(r => r.remove());
       }
 
       // Filter local state
@@ -1902,6 +1922,10 @@
     }
 
     async function triageAction(action, ip, eventId) {
+      if (eventId) {
+        window.handledAlertIds.add(String(eventId));
+        window.handledAlertIds.add(Number(eventId));
+      }
       if (action === 'ban' || action === 'tarpit' || action === 'dismiss') {
         if (ip) suppressAndRemoveIP(ip);
       }
@@ -1922,6 +1946,11 @@
       if (window.suppressedIPs.has(target)) {
         window.suppressedIPs.delete(target);
       }
+      if (window.handledIPs.has(target)) {
+        window.handledIPs.delete(target);
+      }
+      window.handledAlertIds.delete(target);
+      window.handledAlertIds.delete(Number(target));
       try {
         await fetch('/api/alerts/triage', {
           method: 'POST',
@@ -1938,39 +1967,39 @@
       const target = String(idOrIP || '').trim();
       if (!target) return;
 
-      // Optimistically register suppression if target is an IP
+      // 1. Instantly register in Handled sets
+      window.handledAlertIds.add(target);
+      if (Number(target)) window.handledAlertIds.add(Number(target));
+
       if (target.includes('.') || target.includes(':')) {
         window.suppressedIPs.add(target);
+        window.handledIPs.add(target);
       } else {
         const found = activeAlertsList.find(a => String(a.id) === target);
         if (found && found.source_ip) {
           window.suppressedIPs.add(found.source_ip);
+          window.handledIPs.add(found.source_ip);
         }
       }
 
-      // Find DOM row if present and apply .row-exit transition
-      let rowEl = null;
-      if (e && e.target) {
-        rowEl = e.target.closest('tr');
-      }
-      if (!rowEl) {
-        const rows = document.getElementById('alertsTableBody')?.getElementsByTagName('tr');
-        if (rows) {
+      // 2. Remove row immediately from DOM
+      const directRow = document.getElementById(`alert-row-${target}`);
+      if (directRow) {
+        directRow.remove();
+      } else {
+        const tbody = document.getElementById('alertsTableBody');
+        if (tbody) {
+          const rows = Array.from(tbody.querySelectorAll('tr'));
           for (let r of rows) {
-            if (r.textContent.includes(target)) {
-              rowEl = r;
+            if (r.dataset?.alertId === target || r.dataset?.sourceIp === target || r.textContent.includes(target)) {
+              r.remove();
               break;
             }
           }
         }
       }
 
-      if (rowEl) {
-        rowEl.classList.add('row-exit');
-        await new Promise(r => setTimeout(r, 180));
-      }
-
-      // Optimistically remove from local state immediately
+      // 3. Optimistically remove from local state immediately
       activeAlertsList = activeAlertsList.filter(a => String(a.id) !== target && a.source_ip !== target);
       const badge = document.getElementById('badgeAlerts');
       if (badge) badge.textContent = activeAlertsList.length;
@@ -1999,6 +2028,17 @@
         showToast('No active alerts to clear', 'ok');
         return;
       }
+      // Register all current active alerts into handled sets
+      activeAlertsList.forEach(a => {
+        if (a.id) {
+          window.handledAlertIds.add(String(a.id));
+          window.handledAlertIds.add(Number(a.id));
+        }
+        if (a.source_ip) {
+          window.handledIPs.add(a.source_ip);
+        }
+      });
+
       activeAlertsList = [];
       const badge = document.getElementById('badgeAlerts');
       if (badge) badge.textContent = '0';

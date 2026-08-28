@@ -401,7 +401,7 @@ func TestSOCAlertsTriageAPI(t *testing.T) {
 		NodeID:           "node-1",
 		Source:           "nginx",
 		RawLine:          `GET /api/v1/stream HTTP/1.1 500`,
-		ClientIP:         "198.51.100.88",
+		ClientIP:         "198.51.100.89",
 		ThreatScore:      80,
 		RuleID:           "ml_flow_anomaly",
 		MitreTechniqueID: "T1071",
@@ -825,5 +825,103 @@ func TestIPAlertSuppressionEngine(t *testing.T) {
 		t.Errorf("IP %s should no longer be suppressed after unban", mitigatedIP)
 	}
 }
+
+func TestPermanentAlertLifecycleSync(t *testing.T) {
+	tmpDir := t.TempDir()
+	store, err := NewStorageEngine(filepath.Join(tmpDir, "test_lifecycle.db"))
+	if err != nil {
+		t.Fatalf("Failed to init storage: %v", err)
+	}
+	defer store.Close()
+
+	analyzer := NewRuleEngine("")
+	server := NewCentralServer(store, analyzer)
+	ttlMgr := NewTTLBanManager(store, server)
+	defer ttlMgr.Stop()
+	wsHub := NewWSHub()
+	webSoc := NewWebSOCServer(":0", server, store, ttlMgr, nil, wsHub)
+
+	// 1. Insert active alert
+	alert := &StoredEvent{
+		NodeID:           "node-test",
+		Source:           "nginx",
+		ClientIP:         "198.51.100.222",
+		StatusCode:       401,
+		TimestampMs:      time.Now().UnixMilli(),
+		RuleID:           "test_brute_force",
+		MitreTechniqueID: "T1110",
+		ThreatScore:      80,
+		TriageStatus:     "ACTIVE",
+		RawLine:          "POST /login HTTP/1.1 401",
+	}
+	_ = store.InsertEvent(alert)
+	_ = store.InsertAlert(alert)
+
+	activeAlerts, _ := store.GetActiveAlerts(10)
+	if len(activeAlerts) != 1 {
+		t.Fatalf("Expected 1 active alert, got %d", len(activeAlerts))
+	}
+
+	// 2. Dismiss the alert via REST endpoint
+	dismissBody, _ := json.Marshal(map[string]interface{}{
+		"id": alert.ID,
+		"ip": alert.ClientIP,
+	})
+	req := httptest.NewRequest("POST", "/api/alerts/dismiss", bytes.NewBuffer(dismissBody))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	webSoc.handleAlertsDismiss(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("handleAlertsDismiss returned %d", rec.Code)
+	}
+
+	// Verify Handled cache
+	if !IsAlertHandled(alert.ID) {
+		t.Errorf("Expected alert.ID %d to be in HandledAlertIDs cache", alert.ID)
+	}
+
+	// Verify active alerts query returns 0
+	activeAfterDismiss, _ := store.GetActiveAlerts(10)
+	if len(activeAfterDismiss) != 0 {
+		t.Errorf("Expected 0 active alerts after dismiss, got %d", len(activeAfterDismiss))
+	}
+
+	// 3. Verify ClearAllActiveAlerts
+	// Insert another alert
+	alert2 := &StoredEvent{
+		NodeID:           "node-test",
+		Source:           "nginx",
+		ClientIP:         "198.51.100.223",
+		StatusCode:       403,
+		TimestampMs:      time.Now().UnixMilli(),
+		RuleID:           "test_rce",
+		MitreTechniqueID: "T1059",
+		ThreatScore:      85,
+		TriageStatus:     "ACTIVE",
+		RawLine:          "GET /eval.php HTTP/1.1 403",
+	}
+	_ = store.InsertEvent(alert2)
+	_ = store.InsertAlert(alert2)
+
+	clearReq := httptest.NewRequest("POST", "/api/alerts/clear", bytes.NewBuffer([]byte("{}")))
+	clearReq.Header.Set("Content-Type", "application/json")
+	clearRec := httptest.NewRecorder()
+	webSoc.handleAlertsClear(clearRec, clearReq)
+
+	if clearRec.Code != http.StatusOK {
+		t.Fatalf("handleAlertsClear returned %d", clearRec.Code)
+	}
+
+	if !IsAlertHandled(alert2.ID) {
+		t.Errorf("Expected alert2.ID %d to be in HandledAlertIDs cache after clear", alert2.ID)
+	}
+
+	activeAfterClear, _ := store.GetActiveAlerts(10)
+	if len(activeAfterClear) != 0 {
+		t.Errorf("Expected 0 active alerts after clear, got %d", len(activeAfterClear))
+	}
+}
+
 
 

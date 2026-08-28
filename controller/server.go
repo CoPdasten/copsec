@@ -545,7 +545,8 @@ func (s *CentralServer) processEvent(nodeID string, event *copsecproto.LogEvent)
 		hub.Broadcast("event", stored)
 		isWhitelisted := (s.threatEngine != nil && s.threatEngine.IsWhitelisted(stored.ClientIP)) || isProtectedIP(stored.ClientIP)
 		isRoutineSudo := stored.RuleID == "sudo_execution" || (strings.Contains(strings.ToLower(stored.RuleID), "sudo") && stored.ThreatScore < 70)
-		if stored.ThreatScore >= 40 && !isRoutineSudo && !isWhitelisted && !isMitigated {
+		isHandled := IsAlertHandled(stored.ID) || IsIPHandled(stored.ClientIP) || isMitigated
+		if stored.ThreatScore >= 40 && !isRoutineSudo && !isWhitelisted && !isHandled && stored.TriageStatus == "ACTIVE" {
 			hub.Broadcast("ALERT_NEW", stored)
 		}
 	}
