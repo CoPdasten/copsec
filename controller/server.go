@@ -563,15 +563,24 @@ func (s *CentralServer) processEvent(nodeID string, event *copsecproto.LogEvent)
 		ipinfo.GetDefaultClient().LookupAsync(stored.ClientIP)
 	}
 
-	// Check Autonomous Auto-Ban Policy & Dynamic TTL Management (only if not already mitigated)
-	if !isMitigated {
-		s.checkAutonomousBanPolicy(stored)
-	}
-
 	// Broadcast event directly to Web SOC via WebSocket Hub
 	s.mu.RLock()
 	hub := s.wsHub
 	s.mu.RUnlock()
+
+	// 2. Evaluate Contextual Zero Trust Engine Real-Time Penalties
+	zte := GetDefaultZeroTrustEngine()
+	zte.SetDependencies(s, hub, s.storage)
+	_, isolated, _ := zte.EvaluateEvent(stored)
+	if isolated {
+		stored.TriageStatus = "AUTO_MITIGATED"
+		isMitigated = true
+	}
+
+	// Check Autonomous Auto-Ban Policy & Dynamic TTL Management (only if not already mitigated)
+	if !isMitigated {
+		s.checkAutonomousBanPolicy(stored)
+	}
 
 	if hub != nil {
 		hub.Broadcast("event", stored)

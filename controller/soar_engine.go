@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"math"
@@ -371,6 +372,13 @@ func (ase *AutonomousSOAREngine) ExecuteAutonomousBan(sourceIP string, duration 
 		dispatchedCount = server.BroadcastSOARCommandWithReason("BAN_IP", cleanIP, reason, duration)
 	}
 
+	// 2b. Program Upstream SDN Router & Linux IP-Route Blackholes
+	go func(targetIP string, dur int64) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = GetDefaultSDNRouter().EnforceEdgeDrop(ctx, targetIP, dur)
+	}(cleanIP, duration)
+
 	// 3. Insert / Update SQLite with triage_status = 'AUTO_MITIGATED', containment_state = 'XDP_DROP'
 	if storage != nil {
 		storage.AddMitigatedIP(cleanIP, time.Duration(duration)*time.Second)
@@ -429,6 +437,55 @@ func (ase *AutonomousSOAREngine) ExecuteAutonomousBan(sourceIP string, duration 
 			"duration": fmt.Sprintf("%ds", duration),
 			"reason":   reason,
 		})
+	}
+}
+
+// ExecuteAutonomousDeception redirects an attacker into internal shadow honeypot traps.
+func (ase *AutonomousSOAREngine) ExecuteAutonomousDeception(ip string, reason string, event *StoredEvent) {
+	cleanIP := strings.TrimSpace(ip)
+	if isProtectedIP(cleanIP) {
+		return
+	}
+
+	ase.mu.RLock()
+	storage := ase.storage
+	server := ase.server
+	hub := ase.wsHub
+	ase.mu.RUnlock()
+
+	log.Printf("[SOAR_DECEPTION] 🍯 EXECUTE AUTONOMOUS DECEPTION: IP=%s, Reason=%s", cleanIP, reason)
+
+	// 1. Dispatch DECEIVE / CONTAINMENT_HONEYPOT to all edge nodes
+	var dispatchedCount int
+	if server != nil {
+		dispatchedCount = server.BroadcastSOARCommandWithReason("CONTAINMENT_HONEYPOT", cleanIP, reason, 86400)
+	}
+
+	// 2. Persist CONTAINMENT_HONEYPOT state in SQLite
+	if storage != nil {
+		storage.mu.Lock()
+		_, _ = storage.db.Exec(`UPDATE telemetry SET triage_status = 'AUTO_MITIGATED', containment_state = 'CONTAINMENT_HONEYPOT' WHERE client_ip = ?`, cleanIP)
+		_, _ = storage.db.Exec(`UPDATE alerts SET triage_status = 'AUTO_MITIGATED', containment_state = 'CONTAINMENT_HONEYPOT' WHERE client_ip = ?`, cleanIP)
+		_, _ = storage.db.Exec(`UPDATE events SET triage_status = 'AUTO_MITIGATED', containment_state = 'CONTAINMENT_HONEYPOT' WHERE client_ip = ?`, cleanIP)
+		storage.mu.Unlock()
+
+		_ = storage.RecordSOARAction("CONTAINMENT_HONEYPOT", cleanIP, dispatchedCount)
+	}
+
+	// 3. Broadcast Deception Audit to Web SOC
+	if hub != nil {
+		auditEvent := map[string]interface{}{
+			"type":              "SOAR_DECEPTION_ACTIVE",
+			"tag":               "[SOAR DECEPTION / HONEYPOT]",
+			"source_ip":         cleanIP,
+			"reason":            reason,
+			"containment_state": "CONTAINMENT_HONEYPOT",
+			"triage_status":     "AUTO_MITIGATED",
+			"dispatched_nodes":  dispatchedCount,
+			"timestamp_ms":      time.Now().UnixMilli(),
+		}
+		hub.Broadcast("ALERT_NEW", auditEvent)
+		hub.Broadcast("honeypot_hit", auditEvent)
 	}
 }
 

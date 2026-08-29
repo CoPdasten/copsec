@@ -15,8 +15,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	copsecproto "github.com/copsec/collector/proto"
 	"github.com/copsec/collector/pkg/ebpf"
+	"github.com/copsec/collector/pkg/honeypot"
+	copsecproto "github.com/copsec/collector/proto"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
@@ -443,6 +444,16 @@ func (c *ControllerClient) executeSOARCommand(cmd *copsecproto.SOARCommand, stre
 
 		success = true
 		output = fmt.Sprintf("Successfully whitelisted IP %s and cleared iptables rule", targetIP)
+
+	case "DECEIVE", "HONEYPOT", "CONTAINMENT_HONEYPOT", "ACTION_DECEIVE":
+		hp := honeypot.GetDefaultShadowHoneypot()
+		err := hp.RedirectAttackerToHoneypot(targetIP, "ALL")
+		if err == nil {
+			success = true
+			output = fmt.Sprintf("Successfully diverted attacker %s to Shadow Honeypot (SSH:2222, HTTP:8088)", targetIP)
+		} else {
+			output = fmt.Sprintf("Failed to configure honeypot redirection for %s: %v", targetIP, err)
+		}
 
 	case "FLUSH_BANS":
 		_ = ebpf.GetXDPEngine().Flush()

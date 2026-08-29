@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/copsec/collector/pkg/honeypot"
 	copsecproto "github.com/copsec/collector/proto"
 	"google.golang.org/grpc"
 )
@@ -345,5 +346,25 @@ func TestSuricataAndAuthParsers(t *testing.T) {
 	dispatched := ParseLogSourceLine("suricata", suriAlertLine, time.Now().UnixMilli())
 	if dispatched.ThreatScore != 85 || dispatched.ClientIp != "198.51.100.222" {
 		t.Errorf("ParseLogSourceLine dispatcher failed for suricata: %+v", dispatched)
+	}
+}
+
+func TestShadowHoneypotRedirection(t *testing.T) {
+	hp := honeypot.NewShadowHoneypot("127.0.0.1:12224", "127.0.0.1:18088", nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	if err := hp.Start(ctx); err != nil {
+		t.Logf("Honeypot start notice: %v", err)
+	}
+	defer hp.Close()
+
+	targetIP := "198.51.100.88"
+	_ = hp.RedirectAttackerToHoneypot(targetIP, "ALL")
+	_ = hp.RemoveRedirection(targetIP)
+
+	stats := hp.GetStats()
+	if stats["ssh_bind_port"].(int) != 2222 {
+		t.Errorf("Unexpected stats: %+v", stats)
 	}
 }

@@ -1,7 +1,9 @@
 package main
 
 import (
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"os"
@@ -9,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/copsec/controller/pkg/geoip"
@@ -47,8 +50,10 @@ type StoredEvent struct {
 	SnortMsg         string  `json:"snort_msg,omitempty"`
 	SnortModelID     string  `json:"snort_model_id,omitempty"`
 	SnortAnomalyScore float64 `json:"snort_anomaly_score,omitempty"`
-	SnortConfidence  float64 `json:"snort_confidence,omitempty"`
-	SnortPriority    int     `json:"snort_priority,omitempty"`
+	SnortConfidence   float64 `json:"snort_confidence,omitempty"`
+	SnortPriority     int     `json:"snort_priority,omitempty"`
+	PrevHash          string  `json:"prev_hash,omitempty"`
+	EntryHash         string  `json:"entry_hash,omitempty"`
 }
 
 // ToUnifiedTelemetry converts a StoredEvent into the canonical UnifiedTelemetry contract.
@@ -361,7 +366,10 @@ func (s *StorageEngine) initSchema() error {
 		ai_analysis TEXT DEFAULT '',
 		analyst_notes TEXT DEFAULT '',
 		playbook_progress TEXT DEFAULT '',
-		triage_status TEXT DEFAULT 'ACTIVE'
+		triage_status TEXT DEFAULT 'ACTIVE',
+		containment_state TEXT DEFAULT 'ACTIVE',
+		prev_hash TEXT DEFAULT '',
+		entry_hash TEXT DEFAULT ''
 	);
 
 	CREATE TABLE IF NOT EXISTS active_bans (
@@ -436,6 +444,13 @@ func (s *StorageEngine) initSchema() error {
 	s.ensureColumnExists("telemetry", "analyst_notes", "TEXT DEFAULT ''")
 	s.ensureColumnExists("telemetry", "playbook_progress", "TEXT DEFAULT ''")
 	s.ensureColumnExists("telemetry", "triage_status", "TEXT DEFAULT 'ACTIVE'")
+	s.ensureColumnExists("telemetry", "containment_state", "TEXT DEFAULT 'ACTIVE'")
+	s.ensureColumnExists("telemetry", "prev_hash", "TEXT DEFAULT ''")
+	s.ensureColumnExists("telemetry", "entry_hash", "TEXT DEFAULT ''")
+	s.ensureColumnExists("events", "containment_state", "TEXT DEFAULT 'ACTIVE'")
+	s.ensureColumnExists("events", "prev_hash", "TEXT DEFAULT ''")
+	s.ensureColumnExists("events", "entry_hash", "TEXT DEFAULT ''")
+	s.ensureColumnExists("alerts", "containment_state", "TEXT DEFAULT 'ACTIVE'")
 	s.ensureColumnExists("active_bans", "expire_time_ms", "INTEGER DEFAULT 0")
 	s.ensureColumnExists("active_bans", "penalty_tier", "TEXT DEFAULT 'TEMP_ISOLATION'")
 	s.ensureColumnExists("active_bans", "l3_active", "INTEGER DEFAULT 1")
@@ -528,7 +543,21 @@ func (s *StorageEngine) FlushInvalidQuarantines() (int64, error) {
 	return res.RowsAffected()
 }
 
-// InsertEvent records a new LogEvent asynchronously with prepared statement.
+// Global Hash-Chaining State for Immutable Merkle/Hash Auditing
+var lastLogHash atomic.Value
+
+func init() {
+	lastLogHash.Store("0000000000000000000000000000000000000000000000000000000000000000")
+}
+
+// CalculateLogHash computes a cryptographic SHA-256 digest over log fields and the preceding hash.
+func CalculateLogHash(id int64, timestampMs int64, sourceIP string, threatScore int, prevHash string) string {
+	hasher := sha256.New()
+	hasher.Write([]byte(fmt.Sprintf("%d|%d|%s|%d|%s", id, timestampMs, sourceIP, threatScore, prevHash)))
+	return hex.EncodeToString(hasher.Sum(nil))
+}
+
+// InsertEvent records a new LogEvent asynchronously with prepared statement and cryptographic hash chaining.
 func (s *StorageEngine) InsertEvent(ev *StoredEvent) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -536,16 +565,89 @@ func (s *StorageEngine) InsertEvent(ev *StoredEvent) error {
 	if ev.TriageStatus == "" {
 		ev.TriageStatus = "ACTIVE"
 	}
+	if ev.TimestampMs == 0 {
+		ev.TimestampMs = time.Now().UnixMilli()
+	}
 
-	query := `INSERT INTO events (node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis, analyst_notes, playbook_progress, triage_status)
-	          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	res, err := s.db.Exec(query, ev.NodeID, ev.Source, ev.RawLine, ev.ClientIP, ev.StatusCode, ev.TimestampMs, ev.RuleID, ev.MitreTechniqueID, ev.ThreatScore, ev.AIAnalysis, ev.AnalystNotes, ev.PlaybookProgress, ev.TriageStatus)
+	// 1. Immutable Hash Chaining Pipeline
+	prevH, _ := lastLogHash.Load().(string)
+	if prevH == "" {
+		prevH = "0000000000000000000000000000000000000000000000000000000000000000"
+	}
+	ev.PrevHash = prevH
+
+	// Insert record to events table
+	query := `INSERT INTO events (node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis, analyst_notes, playbook_progress, triage_status, prev_hash, entry_hash)
+	          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	res, err := s.db.Exec(query, ev.NodeID, ev.Source, ev.RawLine, ev.ClientIP, ev.StatusCode, ev.TimestampMs, ev.RuleID, ev.MitreTechniqueID, ev.ThreatScore, ev.AIAnalysis, ev.AnalystNotes, ev.PlaybookProgress, ev.TriageStatus, ev.PrevHash, "")
 	if err != nil {
 		return err
 	}
 	id, _ := res.LastInsertId()
 	ev.ID = id
+
+	// Calculate deterministic entry hash with assigned ID
+	entryH := CalculateLogHash(ev.ID, ev.TimestampMs, ev.ClientIP, ev.ThreatScore, ev.PrevHash)
+	ev.EntryHash = entryH
+
+	// Update calculated hash in events table and insert into telemetry table with hash integrity
+	_, _ = s.db.Exec(`UPDATE events SET entry_hash = ? WHERE id = ?`, entryH, id)
+	_, _ = s.db.Exec(`INSERT INTO telemetry (id, node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis, analyst_notes, playbook_progress, triage_status, containment_state, prev_hash, entry_hash)
+	                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		ev.ID, ev.NodeID, ev.Source, ev.RawLine, ev.ClientIP, ev.StatusCode, ev.TimestampMs, ev.RuleID, ev.MitreTechniqueID, ev.ThreatScore, ev.AIAnalysis, ev.AnalystNotes, ev.PlaybookProgress, ev.TriageStatus, "ACTIVE", ev.PrevHash, entryH)
+
+	// Persist last computed hash atomically into memory buffer
+	lastLogHash.Store(entryH)
+
 	return nil
+}
+
+// VerifyLogIntegrity scans the telemetry log records sequentially and verifies the SHA-256 cryptographic chain.
+// Returns valid (bool), verifiedCount (int64), and lastVerifiedHash (string).
+func (s *StorageEngine) VerifyLogIntegrity() (bool, int64, string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	query := `SELECT id, timestamp_ms, client_ip, threat_score, prev_hash, entry_hash FROM telemetry WHERE entry_hash != '' ORDER BY id ASC`
+	rows, err := s.db.Query(query)
+	if err != nil {
+		return false, 0, "", err
+	}
+	defer rows.Close()
+
+	var verifiedCount int64 = 0
+	expectedPrevHash := "0000000000000000000000000000000000000000000000000000000000000000"
+	var lastHash string
+
+	for rows.Next() {
+		var id int64
+		var timestampMs int64
+		var clientIP string
+		var threatScore int
+		var prevHash string
+		var entryHash string
+
+		if err := rows.Scan(&id, &timestampMs, &clientIP, &threatScore, &prevHash, &entryHash); err != nil {
+			return false, verifiedCount, lastHash, fmt.Errorf("row scan error at index %d: %w", verifiedCount, err)
+		}
+
+		// 1. Verify previous hash linkage
+		if verifiedCount > 0 && prevHash != expectedPrevHash {
+			return false, verifiedCount, lastHash, fmt.Errorf("hash chain broken at id %d: expected prev_hash %s, got %s", id, expectedPrevHash, prevHash)
+		}
+
+		// 2. Recalculate and verify self entry hash
+		recalculated := CalculateLogHash(id, timestampMs, clientIP, threatScore, prevHash)
+		if recalculated != entryHash {
+			return false, verifiedCount, lastHash, fmt.Errorf("integrity violation at id %d: expected entry_hash %s, got %s", id, recalculated, entryHash)
+		}
+
+		expectedPrevHash = entryHash
+		lastHash = entryHash
+		verifiedCount++
+	}
+
+	return true, verifiedCount, lastHash, nil
 }
 
 // InsertAlert persists an active security alert into the dedicated SQLite alerts table.

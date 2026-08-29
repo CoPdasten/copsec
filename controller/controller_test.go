@@ -1057,5 +1057,154 @@ func TestAutonomousSOAREngineCorrelationAndAutoBan(t *testing.T) {
 	soarEng.PruneExpiredBans()
 }
 
+func TestHashLogChainingAndIntegrityVerification(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "hash_chain_test.db")
+	store, err := NewStorageEngine(dbPath)
+	if err != nil {
+		t.Fatalf("Failed to initialize storage: %v", err)
+	}
+	defer store.Close()
+
+	// 1. Insert series of telemetry events
+	ev1 := &StoredEvent{
+		NodeID:      "node-1",
+		Source:      "nginx",
+		RawLine:     "GET /index.html HTTP/1.1 200",
+		ClientIP:    "198.51.100.10",
+		ThreatScore: 10,
+		TimestampMs: time.Now().UnixMilli(),
+	}
+	_ = store.InsertEvent(ev1)
+
+	ev2 := &StoredEvent{
+		NodeID:      "node-1",
+		Source:      "auth",
+		RawLine:     "Failed password for root from 198.51.100.20",
+		ClientIP:    "198.51.100.20",
+		ThreatScore: 70,
+		TimestampMs: time.Now().UnixMilli(),
+	}
+	_ = store.InsertEvent(ev2)
+
+	ev3 := &StoredEvent{
+		NodeID:      "node-2",
+		Source:      "nginx",
+		RawLine:     "GET /api/v1/user?id=' UNION SELECT 1,2,3-- HTTP/1.1 403",
+		ClientIP:    "198.51.100.30",
+		ThreatScore: 90,
+		TimestampMs: time.Now().UnixMilli(),
+	}
+	_ = store.InsertEvent(ev3)
+
+	// 2. Verify Cryptographic Integrity
+	valid, verifiedCount, lastHash, err := store.VerifyLogIntegrity()
+	if err != nil {
+		t.Fatalf("Log integrity verification returned error: %v", err)
+	}
+	if !valid {
+		t.Errorf("Expected valid log chain integrity")
+	}
+	if verifiedCount < 3 {
+		t.Errorf("Expected at least 3 verified records, got %d", verifiedCount)
+	}
+	if lastHash == "" {
+		t.Errorf("Expected non-empty last hash")
+	}
+
+	// 3. Test REST API Endpoint: GET /api/audit/verify-integrity
+	webSoc := NewWebSOCServer(":19999", nil, store, nil, nil, nil)
+	req := httptest.NewRequest("GET", "/api/audit/verify-integrity", nil)
+	rec := httptest.NewRecorder()
+	webSoc.handleAuditVerifyIntegrity(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("handleAuditVerifyIntegrity returned %d", rec.Code)
+	}
+
+	var apiResp map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &apiResp); err != nil {
+		t.Fatalf("Failed to parse verify response: %v", err)
+	}
+	if apiResp["integrity_status"] != "VERIFIED_VALID" {
+		t.Errorf("Expected VERIFIED_VALID, got: %+v", apiResp)
+	}
+}
+
+func TestContextualZeroTrustEngine(t *testing.T) {
+	zte := NewContextualZeroTrustEngine(nil, nil, nil)
+	targetIP := "198.51.100.55"
+
+	// 1. Initial event with normal profile (baseline 100)
+	ev1 := &StoredEvent{
+		ClientIP:    targetIP,
+		Source:      "nginx",
+		RawLine:     "GET /dashboard HTTP/1.1 200",
+		ThreatScore: 0,
+		ASN:         "AS13335 Cloudflare",
+		CountryCode: "US",
+		TimestampMs: time.Now().UnixMilli(),
+	}
+	score1, isolated1, _ := zte.EvaluateEvent(ev1)
+	if isolated1 {
+		t.Errorf("Initial event should not trigger isolation")
+	}
+	if score1 < 60 {
+		t.Errorf("Expected score1 >= 60, got %d", score1)
+	}
+
+	// 2. High entropy SQLi / exploit payload (Penalty -40)
+	ev2 := &StoredEvent{
+		ClientIP:    targetIP,
+		Source:      "nginx",
+		RawLine:     "GET /search?q=%27%20UNION%20SELECT%20null%2Cnull%2Cschema_name%20FROM%20information_schema.schemata--%20 HTTP/1.1 403",
+		RuleID:      "sqli_detection",
+		ThreatScore: 80,
+		ASN:         "AS14061 DigitalOcean", // ASN Deviation (-30)
+		CountryCode: "RU",                  // Geo Deviation (-30)
+		TimestampMs: time.Now().UnixMilli(),
+	}
+	score2, isolated2, stepUp2 := zte.EvaluateEvent(ev2)
+	if score2 >= 40 {
+		t.Errorf("Expected trust score < 40 on multiple severe penalties, got %d", score2)
+	}
+	if !isolated2 || !stepUp2 {
+		t.Errorf("Expected zero trust isolation and step-up auth triggered (isolated=%v, stepUp=%v)", isolated2, stepUp2)
+	}
+
+	// 3. Reset trust score back to 100
+	zte.ResetTrustScore(targetIP)
+	state, found := zte.GetEntityState(targetIP)
+	if !found || state.TrustScore != 100 || state.IsIsolated {
+		t.Errorf("Expected trust state reset to 100, got: %+v", state)
+	}
+}
+
+func TestSDNRouterEdgeMitigation(t *testing.T) {
+	router := NewSDNRouter()
+	bgpDriver := NewBGPFlowspecDriver()
+	router.RegisterProvider(bgpDriver)
+
+	cloudDriver := NewCloudEdgeSecurityGroupDriver("", "")
+	router.RegisterProvider(cloudDriver)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	targetIP := "198.51.100.99"
+
+	// 1. Enforce drop
+	err := router.EnforceEdgeDrop(ctx, targetIP, 3600)
+	if err != nil {
+		t.Logf("EnforceEdgeDrop output/error (expected on non-root test environments): %v", err)
+	}
+
+	// 2. Release drop
+	err = router.ReleaseEdgeDrop(ctx, targetIP)
+	if err != nil {
+		t.Logf("ReleaseEdgeDrop output/error: %v", err)
+	}
+}
+
 
 

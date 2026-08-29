@@ -3,18 +3,22 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/copsec/collector/pkg/dns"
 	"github.com/copsec/collector/pkg/ebpf"
 	"github.com/copsec/collector/pkg/healing"
+	"github.com/copsec/collector/pkg/honeypot"
 	"github.com/copsec/collector/pkg/tarpit"
 	"github.com/copsec/collector/pkg/yara"
+	copsecproto "github.com/copsec/collector/proto"
 )
 
 func main() {
@@ -90,7 +94,7 @@ func main() {
 	collector := NewMultiLogCollector(sources, finalOffsetPath, finalWhitelistPath, controllerClient)
 	fallbackEngine.SetWhitelistFilter(collector.GetFilter(), finalWhitelistPath)
 
-	// 5. Start Defensive Subsystems (FIM, Tarpit, YARA, Integrity Guard, DNS Sinkhole)
+	// 5. Start Defensive Subsystems (FIM, Tarpit, Honeypot, YARA, Integrity Guard, DNS Sinkhole)
 	fimEngine := healing.GetDefaultFIMEngine()
 	go fimEngine.StartWatchLoop(ctx, 5*time.Second)
 
@@ -99,6 +103,26 @@ func main() {
 		_ = tarpitEngine.Start(ctx)
 	}()
 	defer tarpitEngine.Close()
+
+	honeypotEngine := honeypot.GetDefaultShadowHoneypot()
+	honeypotEngine.SetEventHandler(func(interaction honeypot.HoneypotInteraction) {
+		if controllerClient != nil {
+			ev := &copsecproto.LogEvent{
+				Source:           "honeypot",
+				RawLine:          fmt.Sprintf("[HONEYPOT_DECEPTION: %s] %s (is_honeypot=true)", interaction.TrapType, interaction.PayloadSummary),
+				ClientIp:         interaction.ClientIP,
+				ThreatScore:      95,
+				RuleId:           fmt.Sprintf("honeypot_%s", strings.ToLower(interaction.TrapType)),
+				MitreTechniqueId: interaction.MitreTechniqueID,
+				TimestampMs:      interaction.TimestampMs,
+			}
+			controllerClient.Submit(ev)
+		}
+	})
+	go func() {
+		_ = honeypotEngine.Start(ctx)
+	}()
+	defer honeypotEngine.Close()
 
 	_ = ebpf.GetDefaultIntegrityGuard()
 	_ = dns.GetDefaultSinkhole()

@@ -170,6 +170,9 @@ func (ws *WebSOCServer) Start() error {
 	mux.HandleFunc("/api/threat/intel", ws.handleThreatIntel)
 	mux.HandleFunc("/api/soar/autopilot", ws.handleSOARAutoPilot)
 	mux.HandleFunc("/api/soar/stats", ws.handleSOARStats)
+	mux.HandleFunc("/api/audit/verify-integrity", ws.handleAuditVerifyIntegrity)
+	mux.HandleFunc("/api/trust/score", ws.handleTrustScore)
+	mux.HandleFunc("/api/trust/entities", ws.handleTrustEntities)
 	mux.HandleFunc("/api/ml/stats", ws.handleMLStats)
 
 	// 3. Embedded Web SOC Static Files
@@ -1608,4 +1611,65 @@ func (ws *WebSOCServer) handleSOARStats(w http.ResponseWriter, r *http.Request) 
 	}
 
 	json.NewEncoder(w).Encode(soarEng.GetEngineStats())
+}
+
+func (ws *WebSOCServer) handleAuditVerifyIntegrity(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if ws.storage == nil {
+		http.Error(w, `{"error": "Storage engine unavailable"}`, http.StatusServiceUnavailable)
+		return
+	}
+
+	valid, verifiedCount, lastHash, err := ws.storage.VerifyLogIntegrity()
+	resp := map[string]interface{}{
+		"valid":              valid,
+		"records_verified":   verifiedCount,
+		"last_verified_hash": lastHash,
+		"timestamp":          time.Now().Format(time.RFC3339),
+	}
+	if err != nil {
+		resp["error"] = err.Error()
+		resp["integrity_status"] = "COMPROMISED"
+		w.WriteHeader(http.StatusOK)
+	} else {
+		resp["integrity_status"] = "VERIFIED_VALID"
+	}
+
+	json.NewEncoder(w).Encode(resp)
+}
+
+func (ws *WebSOCServer) handleTrustScore(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	ip := strings.TrimSpace(r.URL.Query().Get("ip"))
+	if ip == "" {
+		http.Error(w, `{"error": "ip parameter required"}`, http.StatusBadRequest)
+		return
+	}
+
+	zte := GetDefaultZeroTrustEngine()
+	state, found := zte.GetEntityState(ip)
+	if !found {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"ip":          ip,
+			"trust_score": 100,
+			"status":      "BASELINE_TRUSTED",
+			"isolated":    false,
+		})
+		return
+	}
+
+	json.NewEncoder(w).Encode(state)
+}
+
+func (ws *WebSOCServer) handleTrustEntities(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	zte := GetDefaultZeroTrustEngine()
+	entities := zte.GetAllEntities()
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"total_entities": len(entities),
+		"entities":       entities,
+	})
 }
