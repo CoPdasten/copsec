@@ -97,6 +97,13 @@ func main() {
 	centralServer.SetTTLManager(ttlManager)
 	defer ttlManager.Stop()
 
+	// Start Autonomous SOAR Engine with sliding-window threat correlator
+	if centralServer.GetSOAREngine() != nil {
+		centralServer.GetSOAREngine().SetDependencies(storage, centralServer, ttlManager, wsHub, centralServer.GetThreatIntel())
+		centralServer.GetSOAREngine().Start()
+		defer centralServer.GetSOAREngine().Stop()
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

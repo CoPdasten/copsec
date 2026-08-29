@@ -347,7 +347,13 @@ func (tm *TTLBanManager) pruneExpiredBans(now time.Time) {
 	}
 }
 
+// PruneExpiredBans manually triggers an expiration cycle.
+func (tm *TTLBanManager) PruneExpiredBans() {
+	tm.pruneExpiredBans(time.Now())
+}
+
 // Stop terminates the TTL pruning loop.
 func (tm *TTLBanManager) Stop() {
 	close(tm.stopChan)
 }
+

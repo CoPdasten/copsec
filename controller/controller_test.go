@@ -923,5 +923,139 @@ func TestPermanentAlertLifecycleSync(t *testing.T) {
 	}
 }
 
+func TestThreatIntelEngineMatchAndBoost(t *testing.T) {
+	intel := NewThreatIntelEngine()
+
+	// 1. Tor Exit Node Match
+	entry, matched := intel.MatchIP("185.220.101.5")
+	if !matched || entry == nil {
+		t.Fatalf("Expected Tor exit node 185.220.101.5 to match threat intel")
+	}
+	if entry.Category != "TOR_EXIT_NODE" || entry.Confidence < 90 {
+		t.Errorf("Unexpected entry category/confidence: %+v", entry)
+	}
+
+	// 2. Subnet Range Match (Censys scanner pool 162.142.125.0/24)
+	entry2, matched2 := intel.MatchIP("162.142.125.44")
+	if !matched2 || entry2 == nil {
+		t.Fatalf("Expected Censys scanner pool IP 162.142.125.44 to match threat intel")
+	}
+	if entry2.Category != "SCANNER_POOL" {
+		t.Errorf("Unexpected scanner category: %s", entry2.Category)
+	}
+
+	// 3. Benign / Whitelisted IP (Must not match)
+	_, matchedLocal := intel.MatchIP("127.0.0.1")
+	if matchedLocal {
+		t.Errorf("Loopback IP 127.0.0.1 must not match threat intel")
+	}
+
+	_, matchedDNS := intel.MatchIP("8.8.8.8")
+	if matchedDNS {
+		t.Errorf("Public DNS 8.8.8.8 must not match threat intel")
+	}
+
+	// 4. Stats check
+	stats := intel.GetStats()
+	if stats["exact_ips_count"].(int) == 0 || stats["cidr_blocks_count"].(int) == 0 {
+		t.Errorf("Expected populated stats, got: %+v", stats)
+	}
+}
+
+func TestAutonomousSOAREngineCorrelationAndAutoBan(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "soar_test.db")
+	store, err := NewStorageEngine(dbPath)
+	if err != nil {
+		t.Fatalf("Failed to initialize storage: %v", err)
+	}
+	defer store.Close()
+
+	analyzer := NewRuleEngine("")
+	server := NewCentralServer(store, analyzer)
+	hub := NewWSHub()
+	server.SetWSHub(hub)
+	ttlMgr := NewTTLBanManager(store, server)
+	server.SetTTLManager(ttlMgr)
+	defer ttlMgr.Stop()
+
+	intel := GetDefaultThreatIntel()
+	soarEng := NewAutonomousSOAREngine(store, server, ttlMgr, hub, intel)
+	server.SetSOAREngine(soarEng)
+
+	targetIP := "198.51.100.77"
+
+	// 1. Port scan signal (Port probes)
+	ev1 := &StoredEvent{
+		NodeID:      "node-1",
+		ClientIP:    targetIP,
+		Source:      "syslog",
+		RawLine:     "SYN flood / port scan probe detected on port 445",
+		RuleID:      "port_scan_recon",
+		ThreatScore: 40,
+		TimestampMs: time.Now().UnixMilli(),
+	}
+	score1, factors1, mitigated1 := soarEng.CorrelateSignal(ev1)
+	if mitigated1 {
+		t.Errorf("Signal 1 should not trigger auto-ban immediately")
+	}
+	if score1 < 40 {
+		t.Errorf("Expected score >= 40, got %d (factors: %s)", score1, factors1)
+	}
+
+	// 2. Auth Failure / Credential Stuffing signal
+	ev2 := &StoredEvent{
+		NodeID:      "node-1",
+		ClientIP:    targetIP,
+		Source:      "auth",
+		RawLine:     "Failed password for root from 198.51.100.77 port 48212 ssh2",
+		RuleID:      "ssh_failed_password",
+		ThreatScore: 50,
+		TimestampMs: time.Now().UnixMilli(),
+	}
+	score2, factors2, mitigated2 := soarEng.CorrelateSignal(ev2)
+	if mitigated2 {
+		t.Errorf("Signal 2 alone should not trigger auto-ban")
+	}
+	if score2 <= score1 {
+		t.Errorf("Expected score escalation on multi-signal correlation: score1=%d, score2=%d (factors: %s)", score1, score2, factors2)
+	}
+
+	// 3. High Entropy Exploit Payload / RCE injection signal (Should push score >= 90 and trigger auto-ban)
+	ev3 := &StoredEvent{
+		NodeID:      "node-1",
+		ClientIP:    targetIP,
+		Source:      "nginx",
+		RawLine:     "GET /cgi-bin/vulnerable.cgi?cmd=%2Fbin%2Fsh+-c+'id%3Bwhoami%3Bcat+%2Fetc%2Fpasswd' HTTP/1.1 500",
+		StatusCode:  500,
+		RuleID:      "sigma_linux_revshell",
+		ThreatScore: 85,
+		TimestampMs: time.Now().UnixMilli(),
+	}
+	score3, factors3, mitigated3 := soarEng.CorrelateSignal(ev3)
+	if !mitigated3 {
+		t.Errorf("Expected auto-ban mitigation on composite score >= 90 (score=%d, factors=%s)", score3, factors3)
+	}
+	if score3 < 90 {
+		t.Errorf("Expected composite score >= 90, got %d", score3)
+	}
+
+	// Verify ban in TTL manager / active bans
+	activeBans := ttlMgr.GetActiveBans()
+	banned := false
+	for _, b := range activeBans {
+		if b.IP == targetIP {
+			banned = true
+			break
+		}
+	}
+	if !banned {
+		t.Errorf("Expected IP %s to be registered in active bans", targetIP)
+	}
+
+	// 4. Test TTL Decay eviction cycle
+	soarEng.PruneExpiredBans()
+}
+
 
 

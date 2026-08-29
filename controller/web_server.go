@@ -167,6 +167,9 @@ func (ws *WebSOCServer) Start() error {
 	mux.HandleFunc("/api/security/yara", ws.handleSecurityYARA)
 	mux.HandleFunc("/api/security/integrity", ws.handleSecurityIntegrity)
 	mux.HandleFunc("/api/threat/inspect", ws.handleThreatInspect)
+	mux.HandleFunc("/api/threat/intel", ws.handleThreatIntel)
+	mux.HandleFunc("/api/soar/autopilot", ws.handleSOARAutoPilot)
+	mux.HandleFunc("/api/soar/stats", ws.handleSOARStats)
 	mux.HandleFunc("/api/ml/stats", ws.handleMLStats)
 
 	// 3. Embedded Web SOC Static Files
@@ -529,6 +532,19 @@ func (ws *WebSOCServer) handleSOARBan(w http.ResponseWriter, r *http.Request) {
 
 	if ws.storage != nil {
 		ws.storage.AddMitigatedIP(req.IP, 1*time.Hour)
+		containmentState := "BANNED (XDP)"
+		_, _ = ws.storage.db.Exec(
+			"UPDATE telemetry SET triage_status = 'MITIGATED', containment_state = ? WHERE client_ip = ? OR source_ip = ?",
+			containmentState, req.IP, req.IP,
+		)
+		_, _ = ws.storage.db.Exec(
+			"UPDATE alerts SET triage_status = 'MITIGATED', containment_state = ? WHERE client_ip = ?",
+			containmentState, req.IP,
+		)
+		_, _ = ws.storage.db.Exec(
+			"UPDATE events SET triage_status = 'MITIGATED', containment_state = ? WHERE client_ip = ?",
+			containmentState, req.IP,
+		)
 	}
 
 	json.NewEncoder(w).Encode(record)
@@ -601,6 +617,19 @@ func (ws *WebSOCServer) handleMitigationTarpit(w http.ResponseWriter, r *http.Re
 
 	if ws.storage != nil {
 		ws.storage.AddMitigatedIP(cleanIP, time.Duration(dur)*time.Second)
+		containmentState := "TARPITTED"
+		_, _ = ws.storage.db.Exec(
+			"UPDATE telemetry SET triage_status = 'MITIGATED', containment_state = ? WHERE client_ip = ? OR source_ip = ?",
+			containmentState, cleanIP, cleanIP,
+		)
+		_, _ = ws.storage.db.Exec(
+			"UPDATE alerts SET triage_status = 'MITIGATED', containment_state = ? WHERE client_ip = ?",
+			containmentState, cleanIP,
+		)
+		_, _ = ws.storage.db.Exec(
+			"UPDATE events SET triage_status = 'MITIGATED', containment_state = ? WHERE client_ip = ?",
+			containmentState, cleanIP,
+		)
 	}
 
 	if ws.ttlManager != nil {
@@ -1479,4 +1508,104 @@ func (ws *WebSOCServer) handleSOARExecute(w http.ResponseWriter, r *http.Request
 	}
 
 	_ = json.NewEncoder(w).Encode(res)
+}
+
+func (ws *WebSOCServer) handleThreatIntel(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	intel := GetDefaultThreatIntel()
+
+	if r.Method == http.MethodGet {
+		ip := r.URL.Query().Get("ip")
+		if ip != "" {
+			entry, matched := intel.MatchIP(ip)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"ip":      ip,
+				"matched": matched,
+				"entry":   entry,
+			})
+			return
+		}
+		json.NewEncoder(w).Encode(intel.GetStats())
+		return
+	}
+
+	if r.Method == http.MethodPost {
+		var req struct {
+			IP          string `json:"ip"`
+			Category    string `json:"category"`
+			Description string `json:"description"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if req.IP != "" {
+			intel.mu.Lock()
+			intel.exactIPs[req.IP] = &ThreatIntelEntry{
+				Indicator:   req.IP,
+				Category:    req.Category,
+				Confidence:  95,
+				SourceFeed:  "Manual-SOC-Enrichment",
+				Description: req.Description,
+				AddedAt:     time.Now(),
+			}
+			intel.mu.Unlock()
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"stats":   intel.GetStats(),
+		})
+	}
+}
+
+func (ws *WebSOCServer) handleSOARAutoPilot(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	var soarEng *AutonomousSOAREngine
+	if ws.server != nil {
+		soarEng = ws.server.GetSOAREngine()
+	}
+	if soarEng == nil {
+		soarEng = GetDefaultSOAREngine()
+	}
+
+	if r.Method == http.MethodGet {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"active": soarEng.IsAutoPilotActive(),
+			"stats":  soarEng.GetEngineStats(),
+		})
+		return
+	}
+
+	if r.Method == http.MethodPost {
+		var req struct {
+			Active *bool `json:"active"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if req.Active != nil {
+			soarEng.SetAutoPilotActive(*req.Active)
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"active":  soarEng.IsAutoPilotActive(),
+			"stats":   soarEng.GetEngineStats(),
+		})
+	}
+}
+
+func (ws *WebSOCServer) handleSOARStats(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	var soarEng *AutonomousSOAREngine
+	if ws.server != nil {
+		soarEng = ws.server.GetSOAREngine()
+	}
+	if soarEng == nil {
+		soarEng = GetDefaultSOAREngine()
+	}
+
+	json.NewEncoder(w).Encode(soarEng.GetEngineStats())
 }

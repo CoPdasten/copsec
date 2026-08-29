@@ -397,10 +397,10 @@ func (c *ControllerClient) executeSOARCommand(cmd *copsecproto.SOARCommand, stre
 	targetIP := strings.TrimSpace(cmd.TargetIp)
 
 	switch cmd.ActionType {
-	case "BAN_IP":
+	case "BAN_IP", "ACTION_BAN_IP", "FLEET_BAN":
 		success, output = ExecuteSOARBan(targetIP, cmd.DurationSeconds)
 
-	case "UNBAN_IP":
+	case "UNBAN_IP", "ACTION_UNBAN_IP":
 		success, output = ExecuteSOARUnban(targetIP)
 
 	case "WHITELIST_IP":

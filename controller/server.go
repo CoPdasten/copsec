@@ -56,6 +56,8 @@ type CentralServer struct {
 	ttlManager   *TTLBanManager
 	wsHub        *WSHub
 	threatEngine *threat.ScoringEngine
+	soarEngine   *AutonomousSOAREngine
+	threatIntel  *ThreatIntelEngine
 	nodes        map[string]*NodeSession
 	eventSubChan chan *StoredEvent
 
@@ -73,10 +75,12 @@ type CentralServer struct {
 
 // NewCentralServer creates a new CentralServer instance.
 func NewCentralServer(storage *StorageEngine, analyzer *RuleEngine) *CentralServer {
+	intelEngine := GetDefaultThreatIntel()
 	srv := &CentralServer{
 		storage:          storage,
 		analyzer:         analyzer,
 		threatEngine:     threat.GetDefaultEngine(),
+		threatIntel:      intelEngine,
 		nodes:            make(map[string]*NodeSession),
 		eventSubChan:     make(chan *StoredEvent, 4096),
 		autoBanEnabled:   true,
@@ -84,6 +88,7 @@ func NewCentralServer(storage *StorageEngine, analyzer *RuleEngine) *CentralServ
 		ipHistory:        make(map[string][]int64),
 		autoBanned:       make(map[string]int64),
 	}
+	srv.soarEngine = NewAutonomousSOAREngine(storage, srv, nil, nil, intelEngine)
 
 	// EPS Calculator ticker
 	go func() {
@@ -126,6 +131,9 @@ func (s *CentralServer) SetTTLManager(mgr *TTLBanManager) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.ttlManager = mgr
+	if s.soarEngine != nil {
+		s.soarEngine.SetDependencies(s.storage, s, mgr, s.wsHub, s.threatIntel)
+	}
 }
 
 // SetWSHub attaches the zero-backpressure WebSocket broadcast hub.
@@ -133,6 +141,30 @@ func (s *CentralServer) SetWSHub(hub *WSHub) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.wsHub = hub
+	if s.soarEngine != nil {
+		s.soarEngine.SetDependencies(s.storage, s, s.ttlManager, hub, s.threatIntel)
+	}
+}
+
+// SetSOAREngine attaches or overrides the AutonomousSOAREngine instance.
+func (s *CentralServer) SetSOAREngine(engine *AutonomousSOAREngine) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.soarEngine = engine
+}
+
+// GetSOAREngine returns the AutonomousSOAREngine instance.
+func (s *CentralServer) GetSOAREngine() *AutonomousSOAREngine {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.soarEngine
+}
+
+// GetThreatIntel returns the ThreatIntelEngine instance.
+func (s *CentralServer) GetThreatIntel() *ThreatIntelEngine {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.threatIntel
 }
 
 // SetAutoBanPolicy configures autonomous auto-ban behavior.
@@ -569,6 +601,27 @@ func (s *CentralServer) checkAutonomousBanPolicy(event *StoredEvent) {
 	ip := strings.TrimSpace(event.ClientIP)
 	if ip == "" || isProtectedIP(ip) || (s.threatEngine != nil && s.threatEngine.IsWhitelisted(ip)) {
 		return
+	}
+
+	// 1. Process through Autonomous SOAR Sliding Window Threat Correlator
+	s.mu.RLock()
+	soarEng := s.soarEngine
+	s.mu.RUnlock()
+
+	if soarEng != nil {
+		compositeScore, factors, mitigated := soarEng.CorrelateSignal(event)
+		if mitigated {
+			return
+		}
+		if compositeScore > event.ThreatScore {
+			event.ThreatScore = compositeScore
+			event.Severity = models.CalculateSeverity(compositeScore)
+			if event.ScoreBreakdown != "" {
+				event.ScoreBreakdown += " | " + factors
+			} else {
+				event.ScoreBreakdown = factors
+			}
+		}
 	}
 
 	s.autoBanMu.Lock()

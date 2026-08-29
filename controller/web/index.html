@@ -602,6 +602,10 @@
       <span id="liveStatus" class="stat-pill"><span class="live-dot" id="liveDot"></span> <span id="connLabel">STREAM CONNECTED</span></span>
     </div>
     <div class="top-stats">
+      <!-- SOAR Auto-Pilot Toggle -->
+      <div class="stat-pill clickable" id="soarAutopilotPill" onclick="toggleSOARAutoPilot()" title="Toggle Autonomous SOAR Zero-Touch Mitigation">
+        <span id="soarAutopilotIcon">⚡</span> <span id="soarAutopilotLabel" style="font-weight: 700;">SOAR AUTO-PILOT: ACTIVE</span>
+      </div>
       <button id="btnPauseStream" class="btn" style="padding: 3px 8px; font-size: 11px; display: flex; align-items: center; gap: 4px;" onclick="toggleStreamPause()">
         <span>⏸</span> <span>PAUSE STREAM (Space)</span>
       </button>
@@ -628,8 +632,8 @@
 
     <!-- Tab 0: Master Executive Dashboard -->
     <div id="tab-dashboard" class="tab-pane active">
-      <!-- 1. Severity Overview Metric Cards -->
-      <div class="metric-grid">
+      <!-- 1. Severity Overview & Fleet Quarantine Metric Cards Grid -->
+      <div class="metric-grid" style="grid-template-columns: repeat(5, 1fr);">
         <div class="metric-card" onclick="navigateTo('alerts', { severity: 'CRITICAL' })">
           <div class="metric-header">
             <span>CRITICAL SEVERITY</span>
@@ -656,11 +660,24 @@
         </div>
         <div class="metric-card" onclick="navigateTo('telemetry', { severity: 'INFO' })">
           <div class="metric-header">
-            <span>INFORMATIONAL / BENIGN</span>
+            <span>INFORMATIONAL</span>
             <span class="badge badge-info">[INFO]</span>
           </div>
           <div class="metric-val" id="dashInfoCount">0</div>
-          <div class="metric-desc">Normalized telemetry baseline events</div>
+          <div class="metric-desc">Normalized baseline events</div>
+        </div>
+        <!-- Fleet Status Card -->
+        <div class="metric-card" onclick="navigateTo('settings')">
+          <div class="metric-header">
+            <span>FLEET SYNC STATUS</span>
+            <span class="badge badge-layer" id="fleetSyncBadge">[SYNCED]</span>
+          </div>
+          <div class="metric-val" style="display: flex; align-items: baseline; gap: 8px;">
+            <span id="dashFleetNodesCount">0</span> <span style="font-size: 11px; color: var(--text-muted); font-weight: 500;">Nodes</span>
+            <span style="color: var(--border-accent);">|</span>
+            <span id="dashFleetQuarantineCount" style="color: #ffffff;">0</span> <span style="font-size: 11px; color: var(--text-muted); font-weight: 500;">Quarantined</span>
+          </div>
+          <div class="metric-desc" id="dashFleetSyncDesc">Cross-fleet eBPF / XDP drop synchronized</div>
         </div>
       </div>
 
@@ -989,7 +1006,19 @@
       </div>
     </div>
     <div class="drawer-body">
-      <!-- 1. IPinfo Metadata Box (LRU Cached Live Lookup) -->
+      <!-- 1. SOAR Autonomous Multi-Signal Correlation Factors Box -->
+      <div class="card" id="drawerCorrelationCard">
+        <div class="card-title">
+          <span>Autonomous SOAR Correlation Factors</span>
+          <span class="badge badge-crit" id="dCorrelateStatus">[AUTO-PILOT MITIGATED]</span>
+        </div>
+        <div style="background: #000000; border: 1px solid var(--border); padding: 8px 10px; font-size: 11px; color: #f4f4f5; display: flex; flex-direction: column; gap: 4px;">
+          <div style="font-weight: 700; color: #ffffff;" id="dCorrelateSummary">Port Scan + Credential Stuffing + Entropy Spike -&gt; Auto Banned</div>
+          <div style="font-size: 10px; color: var(--text-muted);" id="dCorrelateDetails">Sliding 60-second window composite threat evaluation: score 100/100</div>
+        </div>
+      </div>
+
+      <!-- 2. IPinfo Metadata Box (LRU Cached Live Lookup) -->
       <div class="card">
         <div class="card-title">
           <span>Threat Intelligence & IPinfo Metadata</span>
@@ -1006,7 +1035,7 @@
         </table>
       </div>
 
-      <!-- 2. Evidence Analysis Table (Matched substrings, target URLs, process commandlines) -->
+      <!-- 3. Evidence Analysis Table (Matched substrings, target URLs, process commandlines) -->
       <div class="card">
         <div class="card-title">Evidence & Offending Payload Analysis</div>
         <table class="kv-table">
@@ -1369,10 +1398,26 @@
       const payload = data.payload;
 
       if (type === 'stats') {
+        const nodesCount = payload.nodes_count || 0;
+        const activeBans = payload.active_bans || 0;
         document.getElementById('statEPS').textContent = payload.eps || 0;
         document.getElementById('statTotal').textContent = payload.total_events || 0;
-        document.getElementById('statNodes').textContent = payload.nodes_count || 0;
-        document.getElementById('statBans').textContent = payload.active_bans || 0;
+        document.getElementById('statNodes').textContent = nodesCount;
+        document.getElementById('statBans').textContent = activeBans;
+
+        // Update Fleet Status Dashboard Card
+        const dNodes = document.getElementById('dashFleetNodesCount');
+        if (dNodes) dNodes.textContent = nodesCount;
+        const dBans = document.getElementById('dashFleetQuarantineCount');
+        if (dBans) dBans.textContent = activeBans;
+        const fBadge = document.getElementById('fleetSyncBadge');
+        if (fBadge) fBadge.textContent = nodesCount > 0 ? '[SYNCED]' : '[STANDALONE]';
+        return;
+      }
+
+      if (type === 'soar_autopilot_toggle') {
+        renderAutoPilotToggle(payload.active);
+        showToast(`SOAR Auto-Pilot is now ${payload.active ? 'ACTIVE' : 'PAUSED'}`, 'ok');
         return;
       }
 
@@ -1810,6 +1855,8 @@
         }
         const rowId = a.id ? `alert-row-${a.id}` : `alert-row-${idx}`;
         tr.id = rowId;
+        tr.dataset.id = String(a.id || '');
+        tr.dataset.ip = a.source_ip || a.client_ip || '';
         tr.dataset.alertId = String(a.id || '');
         tr.dataset.sourceIp = a.source_ip || a.client_ip || '';
         tr.onclick = () => selectAlertRow(idx);
@@ -2484,6 +2531,9 @@
       // Extract Evidence Analysis details safely
       hydrateEvidenceTable(ev);
 
+      // Hydrate SOAR Multi-Signal Correlation Factors
+      hydrateCorrelationFactors(ev);
+
       // Hydrate MITRE Investigation Commands safely
       hydrateMitreCommands(ev);
 
@@ -2495,6 +2545,54 @@
 
       // Auto-freeze stream while inspecting forensic details
       setStreamPaused(true);
+    }
+
+    function hydrateCorrelationFactors(ev) {
+      const card = document.getElementById('drawerCorrelationCard');
+      const dSummary = document.getElementById('dCorrelateSummary');
+      const dDetails = document.getElementById('dCorrelateDetails');
+      const dStatus = document.getElementById('dCorrelateStatus');
+      if (!card || !dSummary) return;
+
+      const raw = ev.raw_line || '';
+      const score = ev.threat_score || 0;
+      const breakdown = ev.score_breakdown || '';
+      const isAutoBanned = (ev.containment_state === 'XDP_DROP' || ev.triage_status === 'AUTO_MITIGATED' || ev.triage_status === 'MITIGATED' || score >= 85);
+
+      // Determine correlation factors from telemetry signals
+      let factors = [];
+      const rawLower = raw.toLowerCase();
+      const ruleLower = (ev.rule_matched || '').toLowerCase();
+
+      if (ruleLower.includes('scan') || rawLower.includes('port scan') || rawLower.includes('syn probe') || rawLower.includes('syn flood')) {
+        factors.push('Port Scan');
+      }
+      if (ruleLower.includes('auth') || rawLower.includes('failed password') || rawLower.includes('authentication failure')) {
+        factors.push('Credential Stuffing');
+      }
+      if (ev.status_code >= 400 || rawLower.includes(' 404 ') || rawLower.includes(' 403 ') || rawLower.includes(' 500 ')) {
+        factors.push('HTTP 4xx/5xx Spike');
+      }
+      if (rawLower.includes('sqli') || rawLower.includes('rce') || rawLower.includes('union select') || rawLower.includes('id') || rawLower.includes('/bin/sh') || rawLower.includes('high entropy') || ev.ml_anomaly) {
+        factors.push('Entropy Spike / Payload Anomaly');
+      }
+      if (breakdown.includes('THREAT INTEL') || raw.includes('THREAT INTEL')) {
+        factors.push('Threat Intel Hit');
+      }
+
+      if (factors.length === 0) {
+        factors.push('Heuristic Anomaly');
+      }
+
+      if (isAutoBanned) {
+        dSummary.textContent = `${factors.join(' + ')} -> Auto Banned [eBPF XDP DROP]`;
+        dStatus.innerHTML = `<span class="badge badge-crit">[AUTO-PILOT MITIGATED]</span>`;
+        dDetails.textContent = `Sliding 60-second window composite threat evaluation: score ${score}/100 | Containment: XDP Fast-Path Blackhole`;
+      } else {
+        dSummary.textContent = `${factors.join(' + ')} (Score: ${score}/100)`;
+        dStatus.innerHTML = `<span class="badge badge-layer">[MONITORED]</span>`;
+        dDetails.textContent = `Sliding window active tracking: ${factors.length} correlated vectors evaluated`;
+      }
     }
 
     function hydrateEvidenceTable(ev) {
@@ -2859,17 +2957,111 @@ ${notes}
       } catch (e) {}
     }
 
-    // 1-Click Mitigation Actions
+    // Helper to update active alert counter badge immediately
+    function updateAlertCounter(delta = 0) {
+      if (typeof delta === 'number') {
+        const badge = document.getElementById('badgeAlerts');
+        const activeCount = document.getElementById('alertsActiveCount');
+        const curCount = activeAlertsList ? activeAlertsList.length : 0;
+        const newCount = Math.max(0, curCount + delta);
+        if (badge) badge.textContent = newCount;
+        if (activeCount) activeCount.textContent = newCount;
+      }
+    }
+
+    // Inspect incident helper function for auto-advance or row selection
+    function inspectIncident(alertIdOrIP) {
+      const target = String(alertIdOrIP || '').trim();
+      if (!target) return;
+      const matched = activeAlertsList.find(a => String(a.id) === target || a.source_ip === target || a.client_ip === target) ||
+                      telemetryEvents.find(e => String(e.id) === target || e.source_ip === target || e.client_ip === target);
+      if (matched) {
+        const idx = activeAlertsList.findIndex(a => String(a.id) === target || a.source_ip === target || a.client_ip === target);
+        if (idx >= 0) selectAlertRow(idx);
+        openDrawer(matched);
+      } else {
+        openDrawerFromAlert(target);
+      }
+    }
+
+    // 1-Click Forensic Drawer Mitigation & Instant Table Row Eviction
+    async function executeMitigationAndEvict(ip, type) {
+      const cleanIP = String(ip || currentEventIP || '').trim();
+      if (!cleanIP || cleanIP === '-' || cleanIP === '127.0.0.1' || cleanIP === 'N/A') return;
+
+      // 1. Add to client suppression set immediately
+      window.suppressedIPs = window.suppressedIPs || new Set();
+      window.suppressedIPs.add(cleanIP);
+      window.handledIPs = window.handledIPs || new Set();
+      window.handledIPs.add(cleanIP);
+
+      // 2. Find and evict ALL table rows for this IP instantly
+      const rows = document.querySelectorAll(`tr[data-ip="${cleanIP}"], tr[data-source-ip="${cleanIP}"]`);
+      let nextFocusRow = null;
+
+      rows.forEach((row, idx) => {
+        if (idx === 0 && row.nextElementSibling) {
+          nextFocusRow = row.nextElementSibling;
+        }
+        row.style.opacity = '0';
+        row.style.transform = 'translateX(30px)';
+        setTimeout(() => {
+          if (row.parentNode) row.remove();
+        }, 150);
+      });
+
+      // Also evict from in-memory active alerts
+      const evictedCount = rows.length > 0 ? rows.length : activeAlertsList.filter(a => (a.source_ip || a.client_ip) === cleanIP).length;
+      activeAlertsList = activeAlertsList.filter(a => (a.source_ip || a.client_ip) !== cleanIP);
+
+      // 3. Update the active alert counter badge immediately
+      updateAlertCounter(-evictedCount);
+
+      // 4. Send backend ban request
+      const endpoint = type === 'xdp' ? '/api/quarantine/ban' : '/api/mitigation/tarpit';
+      try {
+        await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ip: cleanIP,
+            duration: '1h',
+            duration_seconds: 3600,
+            reason: type === 'xdp' ? `Analyst Auto-Advance: Instant XDP Drop on ${cleanIP}` : `Analyst Auto-Advance: Zero-Window Tarpit on ${cleanIP}`
+          })
+        });
+        showToast(type === 'xdp' ? `[⚡ XDP_DROP] Enforced 1h blackhole on ${cleanIP}` : `[🕳️ TARPIT] Trapped ${cleanIP} in zero-window buffer`, 'ok');
+        fetchQuarantineBans();
+      } catch (e) {
+        console.error(`Mitigation error:`, e);
+      }
+
+      // 5. Auto-advance to the next alert if available, otherwise close drawer
+      const nextId = nextFocusRow ? (nextFocusRow.dataset.id || nextFocusRow.dataset.alertId) : null;
+      if (nextId) {
+        inspectIncident(nextId);
+      } else if (activeAlertsList.length > 0) {
+        inspectIncident(activeAlertsList[0].id || activeAlertsList[0].source_ip);
+      } else {
+        closeDrawer();
+        renderAlerts([]);
+      }
+    }
+
+    async function mitigateXDP(ip) {
+      return executeMitigationAndEvict(ip || currentEventIP, 'xdp');
+    }
+
+    async function mitigateTarpit(ip) {
+      return executeMitigationAndEvict(ip || currentEventIP, 'tarpit');
+    }
+
     async function quickDrawerBan() {
-      if (!currentEventIP || currentEventIP === '127.0.0.1' || currentEventIP === '-' || currentEventIP === 'N/A') return;
-      const target = currentDrawerEvent ? (currentDrawerEvent.id || currentDrawerEvent.source_ip) : currentEventIP;
-      handleAndAdvance(target, 'ban', currentEventIP);
+      return mitigateXDP(currentEventIP);
     }
 
     async function quickDrawerTarpit() {
-      if (!currentEventIP || currentEventIP === '127.0.0.1' || currentEventIP === '-' || currentEventIP === 'N/A') return;
-      const target = currentDrawerEvent ? (currentDrawerEvent.id || currentDrawerEvent.source_ip) : currentEventIP;
-      handleAndAdvance(target, 'tarpit', currentEventIP);
+      return mitigateTarpit(currentEventIP);
     }
 
     async function quickDrawerUnban() {
@@ -3074,10 +3266,63 @@ ${notes}
       }[tag] || tag));
     }
 
+    // SOAR Auto-Pilot Toggle & Sync Functions
+    let isSOARAutoPilotActive = true;
+
+    async function fetchSOARAutoPilotStatus() {
+      try {
+        const res = await fetch('/api/soar/autopilot');
+        if (res.ok) {
+          const data = await res.json();
+          isSOARAutoPilotActive = data.active !== false;
+          renderAutoPilotToggle(isSOARAutoPilotActive);
+        }
+      } catch (e) {}
+    }
+
+    function renderAutoPilotToggle(active) {
+      isSOARAutoPilotActive = !!active;
+      const pill = document.getElementById('soarAutopilotPill');
+      const label = document.getElementById('soarAutopilotLabel');
+      const icon = document.getElementById('soarAutopilotIcon');
+      if (!pill || !label) return;
+
+      if (isSOARAutoPilotActive) {
+        pill.style.borderColor = '#ffffff';
+        pill.style.color = '#ffffff';
+        icon.textContent = '⚡';
+        label.textContent = 'SOAR AUTO-PILOT: ACTIVE';
+      } else {
+        pill.style.borderColor = 'var(--border)';
+        pill.style.color = 'var(--text-muted)';
+        icon.textContent = '⏸';
+        label.textContent = 'SOAR AUTO-PILOT: PAUSED';
+      }
+    }
+
+    async function toggleSOARAutoPilot() {
+      const newState = !isSOARAutoPilotActive;
+      try {
+        const res = await fetch('/api/soar/autopilot', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ active: newState })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          renderAutoPilotToggle(data.active);
+          showToast(`SOAR Auto-Pilot ${data.active ? 'ENABLED (Zero-Touch Active)' : 'PAUSED (Manual Triage Only)'}`, 'ok');
+        }
+      } catch (e) {
+        showToast('Failed to toggle SOAR Auto-Pilot', 'crit');
+      }
+    }
+
     // Initial Startup
     window.addEventListener('DOMContentLoaded', () => {
       connectWS();
       checkIPInfoStatus();
+      fetchSOARAutoPilotStatus();
       fetchAlerts();
       fetchRules();
       fetchQuarantineBans();
@@ -3085,6 +3330,7 @@ ${notes}
       setInterval(fetchAlerts, 8000);
       setInterval(fetchQuarantineBans, 10000);
       setInterval(fetchTopActors, 15000);
+      setInterval(fetchSOARAutoPilotStatus, 30000);
     });
   </script>
 </body>
