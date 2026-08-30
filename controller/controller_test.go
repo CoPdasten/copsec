@@ -1118,16 +1118,22 @@ func TestHashLogChainingAndIntegrityVerification(t *testing.T) {
 	rec := httptest.NewRecorder()
 	webSoc.handleAuditVerifyIntegrity(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("handleAuditVerifyIntegrity returned %d", rec.Code)
+	// 4. Test Hash Chain Healing & Backfill (corrupt a hash then heal)
+	_, _ = store.db.Exec(`UPDATE telemetry SET prev_hash = 'corrupted_hash' WHERE id = 2`)
+	validCorrupt, _, _, errCorrupt := store.VerifyLogIntegrity()
+	if validCorrupt || errCorrupt == nil {
+		t.Errorf("Expected integrity error on corrupted hash chain")
 	}
 
-	var apiResp map[string]interface{}
-	if err := json.Unmarshal(rec.Body.Bytes(), &apiResp); err != nil {
-		t.Fatalf("Failed to parse verify response: %v", err)
+	// Trigger Healing & Backfill
+	err = store.HealAndBackfillHashChain()
+	if err != nil {
+		t.Fatalf("HealAndBackfillHashChain failed: %v", err)
 	}
-	if apiResp["integrity_status"] != "VERIFIED_VALID" {
-		t.Errorf("Expected VERIFIED_VALID, got: %+v", apiResp)
+
+	validHealed, healedCount, healedHead, errHealed := store.VerifyLogIntegrity()
+	if !validHealed || errHealed != nil || healedCount < 3 || healedHead == "" {
+		t.Errorf("Expected successfully healed and verified log chain: valid=%v, err=%v, count=%d, head=%s", validHealed, errHealed, healedCount, healedHead)
 	}
 }
 

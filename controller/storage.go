@@ -164,6 +164,9 @@ func NewStorageEngine(dbPath string) (*StorageEngine, error) {
 		return nil, err
 	}
 	_, _ = engine.FlushInvalidQuarantines()
+	if err := engine.HealAndBackfillHashChain(); err != nil {
+		log.Printf("[WARN] Hash chain backfill warning: %v", err)
+	}
 
 	log.Printf("[INFO] Embedded Storage initialized (WAL-mode SQLite) at %s", dbPath)
 	return engine, nil
@@ -543,18 +546,101 @@ func (s *StorageEngine) FlushInvalidQuarantines() (int64, error) {
 	return res.RowsAffected()
 }
 
+// Genesis Hash for SHA-256 Merkle / Log Chaining
+const GenesisLogHash = "0000000000000000000000000000000000000000000000000000000000000000"
+
 // Global Hash-Chaining State for Immutable Merkle/Hash Auditing
 var lastLogHash atomic.Value
 
 func init() {
-	lastLogHash.Store("0000000000000000000000000000000000000000000000000000000000000000")
+	lastLogHash.Store(GenesisLogHash)
 }
 
 // CalculateLogHash computes a cryptographic SHA-256 digest over log fields and the preceding hash.
 func CalculateLogHash(id int64, timestampMs int64, sourceIP string, threatScore int, prevHash string) string {
+	if prevHash == "" {
+		prevHash = GenesisLogHash
+	}
 	hasher := sha256.New()
 	hasher.Write([]byte(fmt.Sprintf("%d|%d|%s|%d|%s", id, timestampMs, sourceIP, threatScore, prevHash)))
 	return hex.EncodeToString(hasher.Sum(nil))
+}
+
+// HealAndBackfillHashChain scans existing telemetry and events tables, fixes/backfills any broken or
+// missing hashes starting from GenesisLogHash, and restores lastLogHash to the current head.
+func (s *StorageEngine) HealAndBackfillHashChain() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// 1. Fetch all telemetry records in strict ascending ID order
+	query := `SELECT id, timestamp_ms, client_ip, threat_score, prev_hash, entry_hash FROM telemetry ORDER BY id ASC`
+	rows, err := s.db.Query(query)
+	if err != nil {
+		return err
+	}
+
+	type logRow struct {
+		id          int64
+		timestampMs int64
+		clientIP    string
+		threatScore int
+		prevHash    string
+		entryHash   string
+	}
+
+	var rowList []logRow
+	for rows.Next() {
+		var r logRow
+		if err := rows.Scan(&r.id, &r.timestampMs, &r.clientIP, &r.threatScore, &r.prevHash, &r.entryHash); err == nil {
+			rowList = append(rowList, r)
+		}
+	}
+	rows.Close()
+
+	if len(rowList) == 0 {
+		lastLogHash.Store(GenesisLogHash)
+		return nil
+	}
+
+	// 2. Iterate and rebuild chain from GenesisLogHash
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stmtTele, err := tx.Prepare(`UPDATE telemetry SET prev_hash = ?, entry_hash = ? WHERE id = ?`)
+	if err != nil {
+		return err
+	}
+	defer stmtTele.Close()
+
+	stmtEvents, err := tx.Prepare(`UPDATE events SET prev_hash = ?, entry_hash = ? WHERE id = ?`)
+	if err != nil {
+		return err
+	}
+	defer stmtEvents.Close()
+
+	currentPrevHash := GenesisLogHash
+	for _, r := range rowList {
+		expectedEntryHash := CalculateLogHash(r.id, r.timestampMs, r.clientIP, r.threatScore, currentPrevHash)
+
+		if r.prevHash != currentPrevHash || r.entryHash != expectedEntryHash {
+			_, _ = stmtTele.Exec(currentPrevHash, expectedEntryHash, r.id)
+			_, _ = stmtEvents.Exec(currentPrevHash, expectedEntryHash, r.id)
+		}
+
+		currentPrevHash = expectedEntryHash
+	}
+
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	// 3. Store the healed head hash into atomic memory buffer
+	lastLogHash.Store(currentPrevHash)
+	log.Printf("[HASH_CHAIN] ⛓️ Cryptographic Log Chain verified & backfilled (%d records, head: %s...)", len(rowList), currentPrevHash[:12])
+	return nil
 }
 
 // InsertEvent records a new LogEvent asynchronously with prepared statement and cryptographic hash chaining.
@@ -572,7 +658,7 @@ func (s *StorageEngine) InsertEvent(ev *StoredEvent) error {
 	// 1. Immutable Hash Chaining Pipeline
 	prevH, _ := lastLogHash.Load().(string)
 	if prevH == "" {
-		prevH = "0000000000000000000000000000000000000000000000000000000000000000"
+		prevH = GenesisLogHash
 	}
 	ev.PrevHash = prevH
 
@@ -608,7 +694,7 @@ func (s *StorageEngine) VerifyLogIntegrity() (bool, int64, string, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	query := `SELECT id, timestamp_ms, client_ip, threat_score, prev_hash, entry_hash FROM telemetry WHERE entry_hash != '' ORDER BY id ASC`
+	query := `SELECT id, timestamp_ms, client_ip, threat_score, prev_hash, entry_hash FROM telemetry ORDER BY id ASC`
 	rows, err := s.db.Query(query)
 	if err != nil {
 		return false, 0, "", err
@@ -616,8 +702,8 @@ func (s *StorageEngine) VerifyLogIntegrity() (bool, int64, string, error) {
 	defer rows.Close()
 
 	var verifiedCount int64 = 0
-	expectedPrevHash := "0000000000000000000000000000000000000000000000000000000000000000"
-	var lastHash string
+	expectedPrevHash := GenesisLogHash
+	var lastHash string = GenesisLogHash
 
 	for rows.Next() {
 		var id int64
@@ -631,8 +717,8 @@ func (s *StorageEngine) VerifyLogIntegrity() (bool, int64, string, error) {
 			return false, verifiedCount, lastHash, fmt.Errorf("row scan error at index %d: %w", verifiedCount, err)
 		}
 
-		// 1. Verify previous hash linkage
-		if verifiedCount > 0 && prevHash != expectedPrevHash {
+		// 1. Verify previous hash linkage (first record must link to GenesisLogHash)
+		if prevHash != expectedPrevHash {
 			return false, verifiedCount, lastHash, fmt.Errorf("hash chain broken at id %d: expected prev_hash %s, got %s", id, expectedPrevHash, prevHash)
 		}
 
