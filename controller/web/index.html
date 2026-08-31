@@ -1148,6 +1148,72 @@
 
   <!-- Core Dashboard, Routing & SOAR Execution Application Script -->
   <script>
+    // Authentication & API Key Management
+    function getStoredAPIKey() {
+      const urlParams = new URLSearchParams(window.location.search);
+      const urlToken = urlParams.get('token') || urlParams.get('api_key');
+      if (urlToken) {
+        localStorage.setItem('copsec_api_key', urlToken);
+        return urlToken;
+      }
+      return localStorage.getItem('copsec_api_key') || '';
+    }
+
+    function setStoredAPIKey(key) {
+      if (key) {
+        localStorage.setItem('copsec_api_key', key);
+      } else {
+        localStorage.removeItem('copsec_api_key');
+      }
+    }
+
+    // Intercept native fetch to attach X-API-Key header automatically
+    const _originalFetch = window.fetch;
+    window.fetch = function(resource, init = {}) {
+      const apiKey = getStoredAPIKey();
+      if (apiKey) {
+        init.headers = init.headers || {};
+        if (init.headers instanceof Headers) {
+          if (!init.headers.has('X-API-Key')) {
+            init.headers.set('X-API-Key', apiKey);
+          }
+        } else if (Array.isArray(init.headers)) {
+          const hasKey = init.headers.some(([k]) => k.toLowerCase() === 'x-api-key');
+          if (!hasKey) {
+            init.headers.push(['X-API-Key', apiKey]);
+          }
+        } else {
+          if (!init.headers['X-API-Key'] && !init.headers['x-api-key']) {
+            init.headers['X-API-Key'] = apiKey;
+          }
+        }
+      }
+      return _originalFetch(resource, init).then(res => {
+        if (res.status === 401) {
+          const currKey = getStoredAPIKey();
+          const promptMsg = currKey 
+            ? 'API Authentication Failed (401 Unauthorized). Please provide a valid CoPSeC API Key:' 
+            : 'CoPSeC SOC Control Plane is Protected. Please enter your API Key:';
+          const newKey = window.prompt(promptMsg, currKey);
+          if (newKey) {
+            setStoredAPIKey(newKey.trim());
+            // Retry request with new API key
+            init.headers = init.headers || {};
+            if (init.headers instanceof Headers) {
+              init.headers.set('X-API-Key', newKey.trim());
+            } else if (Array.isArray(init.headers)) {
+              init.headers = init.headers.filter(([k]) => k.toLowerCase() !== 'x-api-key');
+              init.headers.push(['X-API-Key', newKey.trim()]);
+            } else {
+              init.headers['X-API-Key'] = newKey.trim();
+            }
+            return _originalFetch(resource, init);
+          }
+        }
+        return res;
+      });
+    };
+
     // State
     let ws = null;
     let autoScroll = true;
@@ -1368,7 +1434,11 @@
     function connectWS() {
       const loc = window.location;
       const proto = loc.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${proto}//${loc.host}/ws/events`;
+      const apiKey = getStoredAPIKey();
+      let wsUrl = `${proto}//${loc.host}/ws/events`;
+      if (apiKey) {
+        wsUrl += `?token=${encodeURIComponent(apiKey)}`;
+      }
 
       ws = new WebSocket(wsUrl);
 

@@ -46,6 +46,7 @@ type WebSOCServer struct {
 	tarpitEngine   *tarpit.TarpitEngine
 	dnsSinkhole    *dns.DNSSinkholeEngine
 	fimHealing     *healing.FIMHealingEngine
+	allowExternalBind bool
 }
 
 // SystemConfigDTO represents the runtime configuration schema.
@@ -114,9 +115,41 @@ func NewWebSOCServer(
 	return ws
 }
 
+// SetAllowExternalBind configures whether the server is permitted to bind to 0.0.0.0 / non-loopback addresses.
+func (ws *WebSOCServer) SetAllowExternalBind(allow bool) {
+	ws.mu.Lock()
+	defer ws.mu.Unlock()
+	ws.allowExternalBind = allow
+}
+
 // Start runs the HTTP listener in the background.
 func (ws *WebSOCServer) Start() error {
+	ws.mu.Lock()
+	addr := strings.TrimSpace(ws.listenAddr)
+	if addr == "" {
+		addr = "127.0.0.1:8080"
+	} else if strings.HasPrefix(addr, ":") {
+		// Port-only address like ":8080" or ":0"
+		if !ws.allowExternalBind {
+			addr = "127.0.0.1" + addr
+		}
+	} else if strings.HasPrefix(addr, "0.0.0.0:") {
+		if !ws.allowExternalBind {
+			port := strings.TrimPrefix(addr, "0.0.0.0:")
+			addr = "127.0.0.1:" + port
+			log.Printf("[SECURITY] Overriding insecure 0.0.0.0 binding to 127.0.0.1:%s (pass --allow-external-bind to expose)", port)
+		}
+	}
+	ws.listenAddr = addr
+	ws.mu.Unlock()
+
+	// Ensure global API key is initialized
+	_ = InitAPIKey()
+
 	mux := http.NewServeMux()
+
+	// 0. Health and Liveness Probes
+	mux.HandleFunc("/health", ws.handleHealth)
 
 	// 1. WebSocket Endpoint
 	mux.Handle("/ws/events", ws.wsHub.Handler())
@@ -178,9 +211,12 @@ func (ws *WebSOCServer) Start() error {
 	// 3. Embedded Web SOC Static Files
 	mux.HandleFunc("/", ws.handleStaticFiles)
 
+	// Wrap entire mux with AuthMiddleware for zero-trust endpoint protection
+	authenticatedHandler := AuthMiddleware(mux)
+
 	ws.httpServer = &http.Server{
 		Addr:         ws.listenAddr,
-		Handler:      mux,
+		Handler:      authenticatedHandler,
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 15 * time.Second,
 	}
@@ -194,6 +230,16 @@ func (ws *WebSOCServer) Start() error {
 	}()
 
 	return nil
+}
+
+func (ws *WebSOCServer) handleHealth(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":    "healthy",
+		"timestamp": time.Now().Unix(),
+		"service":   "copsec-controller",
+	})
 }
 
 func (ws *WebSOCServer) handleStaticFiles(w http.ResponseWriter, r *http.Request) {

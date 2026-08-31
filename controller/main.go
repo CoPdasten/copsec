@@ -20,6 +20,7 @@ func main() {
 	grpcPortFlag := flag.Int("grpc-port", 8443, "gRPC listen port")
 	webAddrFlag := flag.String("web-addr", "", "Embedded Web SOC listen address (e.g. 0.0.0.0:8080)")
 	webPortFlag := flag.Int("web-port", 8080, "Embedded Web SOC listen port")
+	allowExternalBind := flag.Bool("allow-external-bind", false, "Allow Web SOC server to bind to external interfaces (0.0.0.0)")
 
 	rulesPath := flag.String("rules", "../config/rules.json", "Rules JSON path")
 	sigmaDir := flag.String("sigma-dir", "/etc/copsec/sigma", "SigmaHQ detection rules directory")
@@ -124,6 +125,9 @@ func main() {
 		sigmaEngine,
 		wsHub,
 	)
+	if *allowExternalBind {
+		webServer.SetAllowExternalBind(true)
+	}
 	if err := webServer.Start(); err != nil {
 		log.Printf("[WARN] Web SOC server initialization failed: %v", err)
 	}

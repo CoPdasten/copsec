@@ -1212,5 +1212,112 @@ func TestSDNRouterEdgeMitigation(t *testing.T) {
 	}
 }
 
+func TestAuthMiddlewareAndBindingSecurity(t *testing.T) {
+	testKey := "copsec_test_secret_api_key_32bytes_long"
+	SetActiveAPIKey(testKey)
+	defer SetActiveAPIKey("")
+
+	// Create dummy backend handler to test middleware
+	backendHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"ok"}`))
+	})
+	protected := AuthMiddleware(backendHandler)
+
+	// 1. Test Whitelisted Route: /
+	reqRoot := httptest.NewRequest("GET", "/", nil)
+	recRoot := httptest.NewRecorder()
+	protected.ServeHTTP(recRoot, reqRoot)
+	if recRoot.Code != http.StatusOK {
+		t.Errorf("Expected 200 OK for whitelisted route /, got %d", recRoot.Code)
+	}
+
+	// 2. Test Whitelisted Route: /health
+	reqHealth := httptest.NewRequest("GET", "/health", nil)
+	recHealth := httptest.NewRecorder()
+	protected.ServeHTTP(recHealth, reqHealth)
+	if recHealth.Code != http.StatusOK {
+		t.Errorf("Expected 200 OK for whitelisted route /health, got %d", recHealth.Code)
+	}
+
+	// 3. Test Whitelisted Route: /static/test.css
+	reqCSS := httptest.NewRequest("GET", "/static/test.css", nil)
+	recCSS := httptest.NewRecorder()
+	protected.ServeHTTP(recCSS, reqCSS)
+	if recCSS.Code != http.StatusOK {
+		t.Errorf("Expected 200 OK for static CSS, got %d", recCSS.Code)
+	}
+
+	// 4. Test Unauthenticated Access on /api/stats -> 401 Unauthorized
+	reqUnauth := httptest.NewRequest("GET", "/api/stats", nil)
+	recUnauth := httptest.NewRecorder()
+	protected.ServeHTTP(recUnauth, reqUnauth)
+	if recUnauth.Code != http.StatusUnauthorized {
+		t.Errorf("Expected 401 Unauthorized for /api/stats without token, got %d", recUnauth.Code)
+	}
+
+	// 5. Test Invalid Token -> 401 Unauthorized
+	reqInvalid := httptest.NewRequest("GET", "/api/stats", nil)
+	reqInvalid.Header.Set("X-API-Key", "wrong_key_12345")
+	recInvalid := httptest.NewRecorder()
+	protected.ServeHTTP(recInvalid, reqInvalid)
+	if recInvalid.Code != http.StatusUnauthorized {
+		t.Errorf("Expected 401 Unauthorized for invalid X-API-Key, got %d", recInvalid.Code)
+	}
+
+	// 6. Test Valid X-API-Key Header -> 200 OK
+	reqValidHeader := httptest.NewRequest("GET", "/api/stats", nil)
+	reqValidHeader.Header.Set("X-API-Key", testKey)
+	recValidHeader := httptest.NewRecorder()
+	protected.ServeHTTP(recValidHeader, reqValidHeader)
+	if recValidHeader.Code != http.StatusOK {
+		t.Errorf("Expected 200 OK with valid X-API-Key header, got %d", recValidHeader.Code)
+	}
+
+	// 7. Test Valid Authorization: Bearer <token> Header -> 200 OK
+	reqValidBearer := httptest.NewRequest("GET", "/api/stats", nil)
+	reqValidBearer.Header.Set("Authorization", "Bearer "+testKey)
+	recValidBearer := httptest.NewRecorder()
+	protected.ServeHTTP(recValidBearer, reqValidBearer)
+	if recValidBearer.Code != http.StatusOK {
+		t.Errorf("Expected 200 OK with valid Bearer token, got %d", recValidBearer.Code)
+	}
+
+	// 8. Test ?token= on /ws/events -> 200 OK
+	reqValidWSToken := httptest.NewRequest("GET", "/ws/events?token="+testKey, nil)
+	recValidWSToken := httptest.NewRecorder()
+	protected.ServeHTTP(recValidWSToken, reqValidWSToken)
+	if recValidWSToken.Code != http.StatusOK {
+		t.Errorf("Expected 200 OK with valid ?token= on /ws/events, got %d", recValidWSToken.Code)
+	}
+
+	// 9. Test ?token= on /api/stats -> Must FAIL (query token is strictly for /ws/*)
+	reqQueryOnAPI := httptest.NewRequest("GET", "/api/stats?token="+testKey, nil)
+	recQueryOnAPI := httptest.NewRecorder()
+	protected.ServeHTTP(recQueryOnAPI, reqQueryOnAPI)
+	if recQueryOnAPI.Code != http.StatusUnauthorized {
+		t.Errorf("Expected 401 Unauthorized for ?token= on /api/* (reserved strictly for /ws/*), got %d", recQueryOnAPI.Code)
+	}
+
+	// 10. Test Default Loopback Binding enforcement
+	server0 := NewWebSOCServer("0.0.0.0:8080", nil, nil, nil, nil, NewWSHub())
+	server0.allowExternalBind = false
+	_ = server0.Start()
+	if server0.httpServer.Addr != "127.0.0.1:8080" {
+		t.Errorf("Expected binding override to 127.0.0.1:8080, got %s", server0.httpServer.Addr)
+	}
+	_ = server0.httpServer.Close()
+
+	// 11. Test Allow External Bind Override
+	serverExt := NewWebSOCServer("0.0.0.0:8081", nil, nil, nil, nil, NewWSHub())
+	serverExt.SetAllowExternalBind(true)
+	_ = serverExt.Start()
+	if serverExt.httpServer.Addr != "0.0.0.0:8081" {
+		t.Errorf("Expected binding 0.0.0.0:8081 when allowExternalBind=true, got %s", serverExt.httpServer.Addr)
+	}
+	_ = serverExt.httpServer.Close()
+}
+
+
 
 

@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -164,17 +166,56 @@ func (h *WSHub) Broadcast(msgType string, payload interface{}) {
 	}
 }
 
-// Handler returns an HTTP handler for WebSocket upgrades.
-func (h *WSHub) Handler() http.Handler {
-	return websocket.Handler(func(ws *websocket.Conn) {
-		client := &WSClient{
-			hub:      h,
-			ws:       ws,
-			sendChan: make(chan []byte, 256),
-		}
-		h.register <- client
+// isAllowedOrigin validates incoming WebSocket Origin against local addresses and host.
+func isAllowedOrigin(config *websocket.Config, req *http.Request) bool {
+	originHeader := req.Header.Get("Origin")
+	if originHeader == "" {
+		// Non-browser client or same-origin request without Origin header
+		return true
+	}
 
-		go client.writePump()
-		client.readPump()
-	})
+	parsed, err := url.Parse(originHeader)
+	if err != nil {
+		return false
+	}
+
+	hostname := strings.ToLower(parsed.Hostname())
+	if hostname == "localhost" || hostname == "127.0.0.1" || hostname == "::1" {
+		return true
+	}
+
+	// Match host header of the incoming request
+	reqHost := req.Host
+	if strings.Contains(reqHost, ":") {
+		reqHost = strings.Split(reqHost, ":")[0]
+	}
+	if strings.EqualFold(hostname, reqHost) {
+		return true
+	}
+
+	return false
+}
+
+// Handler returns an HTTP handler for WebSocket upgrades with origin validation.
+func (h *WSHub) Handler() http.Handler {
+	wsServer := websocket.Server{
+		Handshake: func(config *websocket.Config, req *http.Request) error {
+			if !isAllowedOrigin(config, req) {
+				return websocket.ErrBadWebSocketOrigin
+			}
+			return nil
+		},
+		Handler: websocket.Handler(func(ws *websocket.Conn) {
+			client := &WSClient{
+				hub:      h,
+				ws:       ws,
+				sendChan: make(chan []byte, 256),
+			}
+			h.register <- client
+
+			go client.writePump()
+			client.readPump()
+		}),
+	}
+	return wsServer
 }
