@@ -22,12 +22,18 @@ func main() {
 	webPortFlag := flag.Int("web-port", 8080, "Embedded Web SOC listen port")
 	allowExternalBind := flag.Bool("allow-external-bind", false, "Allow Web SOC server to bind to external interfaces (0.0.0.0)")
 
+	standaloneFlag := flag.Bool("standalone", false, "Run in Standalone PC Mode (Zero-friction local single-machine mode)")
+	pcFlag := flag.Bool("pc", false, "Alias for --standalone mode")
+	modeFlag := flag.String("mode", "", "Operation mode ('standalone' or 'fleet')")
+
 	rulesPath := flag.String("rules", "../config/rules.json", "Rules JSON path")
 	sigmaDir := flag.String("sigma-dir", "/etc/copsec/sigma", "SigmaHQ detection rules directory")
 	dbPath := flag.String("db", "./data/copsec.db", "SQLite DB path")
 	autoBan := flag.Bool("auto-ban", true, "Enable autonomous SOAR auto-ban")
 	autoBanThreshold := flag.Int("auto-ban-threshold", 80, "Threat score threshold for auto-ban")
 	flag.Parse()
+
+	isStandalone := *standaloneFlag || *pcFlag || strings.EqualFold(strings.TrimSpace(*modeFlag), "standalone")
 
 	// Resolve effective addresses and ports
 	grpcAddr := fmt.Sprintf("0.0.0.0:%d", *grpcPortFlag)
@@ -36,11 +42,25 @@ func main() {
 	}
 
 	webAddr := fmt.Sprintf("0.0.0.0:%d", *webPortFlag)
-	if *webAddrFlag != "" {
+	if isStandalone && *webAddrFlag == "" && !*allowExternalBind {
+		webAddr = fmt.Sprintf("127.0.0.1:%d", *webPortFlag)
+	} else if *webAddrFlag != "" {
 		webAddr = *webAddrFlag
 	}
 
-	log.Println("[INFO] ⚡ CoPSeC Lean SIEM + SOAR + Incident Playbook Hub initializing...")
+	if isStandalone {
+		fmt.Printf(`
+=====================================================
+[+] CoPSeC running in STANDALONE PC MODE
+[+] Cockpit UI: http://%s
+[+] Local Interface Sniffing: Active
+[+] Ready for local threat simulation & audits
+=====================================================
+`, webAddr)
+		log.Println("[INFO] ⚡ Standalone PC Mode active: In-process local collection & loopback simulation safety enabled")
+	} else {
+		log.Println("[INFO] ⚡ CoPSeC Lean SIEM + SOAR + Incident Playbook Hub initializing...")
+	}
 
 	// 1. Embedded Timeseries Storage (WAL-mode SQLite)
 	finalDbPath := *dbPath
@@ -132,11 +152,23 @@ func main() {
 		log.Printf("[WARN] Web SOC server initialization failed: %v", err)
 	}
 
-	// 6. Start gRPC Ingestion Server in background (Hub-and-Spoke)
+	// 6. Start in-process Local Collector if Standalone PC Mode is enabled
+	if isStandalone {
+		standaloneCollector := NewStandaloneCollector(centralServer, "")
+		standaloneCollector.Start(ctx)
+		defer standaloneCollector.Stop()
+	}
+
+	// 7. Start gRPC Ingestion Server in background (Hub-and-Spoke)
 	go func() {
 		grpcServer, err := StartGRPCServer(grpcAddr, centralServer)
 		if err != nil {
-			log.Fatalf("[FATAL] gRPC server binding failed: %v", err)
+			if isStandalone {
+				log.Printf("[WARN] gRPC server binding note in Standalone PC Mode: %v", err)
+			} else {
+				log.Fatalf("[FATAL] gRPC server binding failed: %v", err)
+			}
+			return
 		}
 		defer grpcServer.GracefulStop()
 		<-ctx.Done()

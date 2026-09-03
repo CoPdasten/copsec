@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -243,8 +244,24 @@ func (ws *WebSOCServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 func (ws *WebSOCServer) handleStaticFiles(w http.ResponseWriter, r *http.Request) {
-	// Serve embedded UI for root or SPA fallback
-	if r.URL.Path == "/" || r.URL.Path == "/index.html" || !strings.Contains(r.URL.Path, ".") {
+	lowerPath := strings.ToLower(r.URL.Path)
+
+	// Explicitly guard against database file downloads
+	if strings.HasSuffix(lowerPath, ".db") ||
+		strings.HasSuffix(lowerPath, ".db-wal") ||
+		strings.HasSuffix(lowerPath, ".db-shm") ||
+		strings.HasSuffix(lowerPath, ".sqlite") ||
+		strings.HasSuffix(lowerPath, ".sqlite3") ||
+		strings.HasSuffix(lowerPath, ".sql") ||
+		strings.Contains(lowerPath, "copsec.db") {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"error":"forbidden: direct database access is blocked"}`))
+		return
+	}
+
+	// Serve embedded UI strictly for root or /index.html
+	if r.URL.Path == "/" || r.URL.Path == "/index.html" {
 		data, err := embeddedWebFS.ReadFile("web/index.html")
 		if err != nil {
 			http.Error(w, "Embedded dashboard file not found", http.StatusInternalServerError)
@@ -256,7 +273,7 @@ func (ws *WebSOCServer) handleStaticFiles(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Static asset loader fallback
+	// Static asset loader
 	cleanPath := strings.TrimPrefix(r.URL.Path, "/")
 	data, err := embeddedWebFS.ReadFile("web/" + cleanPath)
 	if err != nil {
@@ -568,31 +585,63 @@ func (ws *WebSOCServer) handleSOARBan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	cleanIP := strings.TrimSpace(req.IP)
+	if cleanIP == "" || net.ParseIP(cleanIP) == nil {
+		http.Error(w, `{"error":"invalid IP address format"}`, http.StatusBadRequest)
+		return
+	}
+
 	if ws.ttlManager == nil {
 		http.Error(w, "TTL ban manager not initialized", http.StatusInternalServerError)
 		return
 	}
 
-	record, err := ws.ttlManager.BanIP(req.IP, req.Reason, req.DurationSeconds, "")
+	record, err := ws.ttlManager.BanIP(cleanIP, req.Reason, req.DurationSeconds, "")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	if ws.storage != nil {
-		ws.storage.AddMitigatedIP(req.IP, 1*time.Hour)
-		containmentState := "BANNED (XDP)"
+		ws.storage.AddMitigatedIP(cleanIP, 1*time.Hour)
+		containmentState := "ISOLATED"
+		reason := req.Reason
+		if strings.TrimSpace(reason) == "" {
+			reason = "Manual SOAR Administrative Quarantine"
+		}
+
+		// Auto-generate high-fidelity incident alert on quarantine action
+		alert := Alert{
+			NodeID:           "CENTRAL-SOAR",
+			Source:           "SOAR_ENFORCEMENT",
+			ClientIP:         cleanIP,
+			RawLine:          fmt.Sprintf("Quarantine enforced on target IP: %s (Reason: %s)", cleanIP, reason),
+			RuleID:           "RULE-QUARANTINE-001",
+			MitreTechniqueID: "T1071",
+			ThreatScore:      100,
+			Severity:         models.SeverityCritical,
+			TriageStatus:     "ACTIVE",
+			ContainmentState: containmentState,
+			TimestampMs:      time.Now().UnixMilli(),
+		}
+
+		if err := ws.storage.SaveAlert(&alert); err != nil {
+			log.Printf("[WARN] Failed to auto-persist ban alert into storage: %v", err)
+		} else {
+			ws.broadcastAlert(&alert)
+		}
+
 		_, _ = ws.storage.db.Exec(
-			"UPDATE telemetry SET triage_status = 'MITIGATED', containment_state = ? WHERE client_ip = ? OR source_ip = ?",
-			containmentState, req.IP, req.IP,
+			"UPDATE telemetry SET triage_status = 'MITIGATED', containment_state = ? WHERE (client_ip = ? OR source_ip = ?) AND id != ?",
+			containmentState, cleanIP, cleanIP, alert.ID,
 		)
 		_, _ = ws.storage.db.Exec(
-			"UPDATE alerts SET triage_status = 'MITIGATED', containment_state = ? WHERE client_ip = ?",
-			containmentState, req.IP,
+			"UPDATE alerts SET triage_status = 'MITIGATED', containment_state = ? WHERE client_ip = ? AND id != ?",
+			containmentState, cleanIP, alert.ID,
 		)
 		_, _ = ws.storage.db.Exec(
-			"UPDATE events SET triage_status = 'MITIGATED', containment_state = ? WHERE client_ip = ?",
-			containmentState, req.IP,
+			"UPDATE events SET triage_status = 'MITIGATED', containment_state = ? WHERE client_ip = ? AND id != ?",
+			containmentState, cleanIP, alert.ID,
 		)
 	}
 
@@ -611,23 +660,29 @@ func (ws *WebSOCServer) handleSOARUnban(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	cleanIP := strings.TrimSpace(req.IP)
+	if cleanIP == "" || net.ParseIP(cleanIP) == nil {
+		http.Error(w, `{"error":"invalid IP address format"}`, http.StatusBadRequest)
+		return
+	}
+
 	if ws.ttlManager == nil {
 		http.Error(w, "TTL ban manager not initialized", http.StatusInternalServerError)
 		return
 	}
 
-	if err := ws.ttlManager.UnbanIP(req.IP); err != nil {
+	if err := ws.ttlManager.UnbanIP(cleanIP); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	if ws.storage != nil {
-		ws.storage.RemoveMitigatedIP(req.IP)
+		ws.storage.RemoveMitigatedIP(cleanIP)
 	}
 
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
-		"message": fmt.Sprintf("IP %s unbanned across all layers", req.IP),
+		"message": fmt.Sprintf("IP %s unbanned across all layers", cleanIP),
 	})
 }
 
@@ -1719,3 +1774,15 @@ func (ws *WebSOCServer) handleTrustEntities(w http.ResponseWriter, r *http.Reque
 		"entities":       entities,
 	})
 }
+
+// broadcastAlert immediately pushes the newly generated incident to connected WebSocket UI clients.
+func (ws *WebSOCServer) broadcastAlert(alert *StoredEvent) {
+	if ws == nil || ws.wsHub == nil || alert == nil {
+		return
+	}
+	ws.wsHub.Broadcast("ALERT_NEW", alert)
+	ws.wsHub.Broadcast("alert_new", alert)
+	ws.wsHub.Broadcast("alert", alert)
+	ws.wsHub.Broadcast("event", alert)
+}
+

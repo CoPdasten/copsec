@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -1317,6 +1318,190 @@ func TestAuthMiddlewareAndBindingSecurity(t *testing.T) {
 	}
 	_ = serverExt.httpServer.Close()
 }
+
+func TestAutoGenerateAlertOnBan(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test_ban_alert.db")
+	store, err := NewStorageEngine(dbPath)
+	if err != nil {
+		t.Fatalf("Failed to init storage: %v", err)
+	}
+	defer store.Close()
+
+	analyzer := NewRuleEngine("")
+	server := NewCentralServer(store, analyzer)
+	ttlMgr := NewTTLBanManager(store, server)
+	defer ttlMgr.Stop()
+	wsHub := NewWSHub()
+	webSoc := NewWebSOCServer(":0", server, store, ttlMgr, nil, wsHub)
+
+	// Send POST /api/quarantine/ban
+	targetIP := "198.51.100.42"
+	reason := "Standalone PC Security Simulation"
+	reqBody, _ := json.Marshal(map[string]interface{}{
+		"ip":               targetIP,
+		"duration_seconds": 3600,
+		"reason":           reason,
+	})
+
+	req := httptest.NewRequest("POST", "/api/quarantine/ban", bytes.NewBuffer(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	webSoc.handleSOARBan(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK from ban handler, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	// 1. Verify Active Bans record exists
+	bans, err := store.GetActiveBansDetailed()
+	if err != nil {
+		t.Fatalf("GetActiveBansDetailed failed: %v", err)
+	}
+	var foundBan bool
+	for _, b := range bans {
+		if b.IP == targetIP {
+			foundBan = true
+			break
+		}
+	}
+	if !foundBan {
+		t.Errorf("Expected target IP %s in active_bans table", targetIP)
+	}
+
+	// 2. Verify Alerts table contains high-fidelity auto-generated alert
+	var alertID int64
+	var alertIP, rawLine, ruleID, mitreID, triageStatus, containmentState string
+	var threatScore int
+	query := `SELECT id, client_ip, threat_score, triage_status, raw_line, rule_id, mitre_technique_id, containment_state FROM alerts WHERE client_ip = ? ORDER BY id DESC LIMIT 1`
+	err = store.db.QueryRow(query, targetIP).Scan(&alertID, &alertIP, &threatScore, &triageStatus, &rawLine, &ruleID, &mitreID, &containmentState)
+	if err != nil {
+		t.Fatalf("Failed to query alerts table for ban incident: %v", err)
+	}
+
+	if alertIP != targetIP {
+		t.Errorf("Expected client_ip %s, got %s", targetIP, alertIP)
+	}
+	if threatScore != 100 {
+		t.Errorf("Expected threat_score 100, got %d", threatScore)
+	}
+	if triageStatus != "ACTIVE" {
+		t.Errorf("Expected triage_status ACTIVE, got %s", triageStatus)
+	}
+	if containmentState != "ISOLATED" {
+		t.Errorf("Expected containment_state ISOLATED, got %s", containmentState)
+	}
+	if ruleID != "RULE-QUARANTINE-001" {
+		t.Errorf("Expected rule_id RULE-QUARANTINE-001, got %s", ruleID)
+	}
+	if mitreID != "T1071" {
+		t.Errorf("Expected mitre_technique_id T1071, got %s", mitreID)
+	}
+	if !strings.Contains(rawLine, targetIP) || !strings.Contains(rawLine, reason) {
+		t.Errorf("Expected raw_line to contain IP and reason, got: %s", rawLine)
+	}
+
+	// 3. Verify Cryptographic Log Chain Integrity
+	valid, verifiedCount, lastHash, err := store.VerifyLogIntegrity()
+	if err != nil || !valid {
+		t.Fatalf("VerifyLogIntegrity failed: valid=%v, count=%d, lastHash=%s, err=%v", valid, verifiedCount, lastHash, err)
+	}
+	if verifiedCount == 0 {
+		t.Errorf("Expected verifiedCount > 0 in cryptographic chain, got %d", verifiedCount)
+	}
+}
+
+func TestDirectDatabaseAccessForbidden(t *testing.T) {
+	testKey := "test-sec-key-123"
+	SetActiveAPIKey(testKey)
+
+	mux := http.NewServeMux()
+	server := NewWebSOCServer(":0", nil, nil, nil, nil, NewWSHub())
+	mux.HandleFunc("/", server.handleStaticFiles)
+	mux.HandleFunc("/api/events", server.handleEvents)
+
+	handler := AuthMiddleware(mux)
+
+	// Blocked database file extensions / paths
+	dbPaths := []string{
+		"/copsec.db",
+		"/data/copsec.db",
+		"/copsec.db-wal",
+		"/copsec.db-shm",
+		"/backup.sqlite",
+		"/dump.sqlite3",
+		"/schema.sql",
+	}
+
+	for _, p := range dbPaths {
+		// Test 1: Without credentials -> 403 Forbidden (Blocked immediately at gateway)
+		reqNoAuth := httptest.NewRequest("GET", p, nil)
+		recNoAuth := httptest.NewRecorder()
+		handler.ServeHTTP(recNoAuth, reqNoAuth)
+		if recNoAuth.Code != http.StatusForbidden {
+			t.Errorf("Expected 403 Forbidden for path %s without credentials, got %d", p, recNoAuth.Code)
+		}
+
+		// Test 2: Even with valid credentials -> 403 Forbidden (Strictly never served)
+		reqAuth := httptest.NewRequest("GET", p, nil)
+		reqAuth.Header.Set("X-API-Key", testKey)
+		recAuth := httptest.NewRecorder()
+		handler.ServeHTTP(recAuth, reqAuth)
+		if recAuth.Code != http.StatusForbidden {
+			t.Errorf("Expected 403 Forbidden for path %s with valid credentials, got %d", p, recAuth.Code)
+		}
+	}
+}
+
+func TestSQLInjectionProtection(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test_sqli.db")
+	store, err := NewStorageEngine(dbPath)
+	if err != nil {
+		t.Fatalf("Failed to init storage: %v", err)
+	}
+	defer store.Close()
+
+	// Seed database with legitimate test event
+	legitEvent := &StoredEvent{
+		NodeID:           "test-node",
+		Source:           "nginx",
+		ClientIP:         "192.0.2.1",
+		RawLine:          "GET /index.html 200",
+		StatusCode:       200,
+		ThreatScore:      10,
+		RuleID:           "benign_rule",
+		MitreTechniqueID: "T1000",
+	}
+	_ = store.InsertEvent(legitEvent)
+
+	// Common SQL Injection Payloads targeting parameters
+	sqliPayloads := []string{
+		"' OR 1=1 --",
+		"1' UNION SELECT 1,2,3,4,5,6,7,8,9,10,11,12,13,14 --",
+		"'; DROP TABLE events; --",
+		"1' AND (SELECT COUNT(*) FROM sqlite_master) > 0 --",
+		"admin'--",
+		"' OR 'a'='a",
+	}
+
+	for _, payload := range sqliPayloads {
+		// Test SearchEvents parameterization
+		events, err := store.SearchEvents(payload, 10)
+		if err != nil {
+			t.Errorf("SearchEvents failed or panicked on payload %q: %v", payload, err)
+		}
+		// Injected payload should not match unrelated records or return syntax errors
+		for _, ev := range events {
+			if !strings.Contains(ev.RawLine, payload) && !strings.Contains(ev.ClientIP, payload) {
+				t.Errorf("SQL Injection leak detected on payload %q: matched %v", payload, ev)
+			}
+		}
+	}
+}
+
+
 
 
 

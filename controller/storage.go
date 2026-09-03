@@ -19,6 +19,9 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+// Alert is an alias for StoredEvent representing a high-fidelity incident alert.
+type Alert = StoredEvent
+
 // StoredEvent represents a database security incident record.
 type StoredEvent struct {
 	ID               int64  `json:"id"`
@@ -36,6 +39,7 @@ type StoredEvent struct {
 	AnalystNotes     string `json:"analyst_notes,omitempty"`
 	PlaybookProgress string `json:"playbook_progress,omitempty"`
 	TriageStatus     string `json:"triage_status,omitempty"`
+	ContainmentState string `json:"containment_state,omitempty"`
 	CountryCode      string `json:"country_code,omitempty"`
 	CountryName      string `json:"country_name,omitempty"`
 	City             string `json:"city,omitempty"`
@@ -662,10 +666,15 @@ func (s *StorageEngine) InsertEvent(ev *StoredEvent) error {
 	}
 	ev.PrevHash = prevH
 
+	containmentState := ev.ContainmentState
+	if containmentState == "" {
+		containmentState = "ACTIVE"
+	}
+
 	// Insert record to events table
-	query := `INSERT INTO events (node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis, analyst_notes, playbook_progress, triage_status, prev_hash, entry_hash)
-	          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	res, err := s.db.Exec(query, ev.NodeID, ev.Source, ev.RawLine, ev.ClientIP, ev.StatusCode, ev.TimestampMs, ev.RuleID, ev.MitreTechniqueID, ev.ThreatScore, ev.AIAnalysis, ev.AnalystNotes, ev.PlaybookProgress, ev.TriageStatus, ev.PrevHash, "")
+	query := `INSERT INTO events (node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis, analyst_notes, playbook_progress, triage_status, containment_state, prev_hash, entry_hash)
+	          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	res, err := s.db.Exec(query, ev.NodeID, ev.Source, ev.RawLine, ev.ClientIP, ev.StatusCode, ev.TimestampMs, ev.RuleID, ev.MitreTechniqueID, ev.ThreatScore, ev.AIAnalysis, ev.AnalystNotes, ev.PlaybookProgress, ev.TriageStatus, containmentState, ev.PrevHash, "")
 	if err != nil {
 		return err
 	}
@@ -680,7 +689,7 @@ func (s *StorageEngine) InsertEvent(ev *StoredEvent) error {
 	_, _ = s.db.Exec(`UPDATE events SET entry_hash = ? WHERE id = ?`, entryH, id)
 	_, _ = s.db.Exec(`INSERT INTO telemetry (id, node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis, analyst_notes, playbook_progress, triage_status, containment_state, prev_hash, entry_hash)
 	                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		ev.ID, ev.NodeID, ev.Source, ev.RawLine, ev.ClientIP, ev.StatusCode, ev.TimestampMs, ev.RuleID, ev.MitreTechniqueID, ev.ThreatScore, ev.AIAnalysis, ev.AnalystNotes, ev.PlaybookProgress, ev.TriageStatus, "ACTIVE", ev.PrevHash, entryH)
+		ev.ID, ev.NodeID, ev.Source, ev.RawLine, ev.ClientIP, ev.StatusCode, ev.TimestampMs, ev.RuleID, ev.MitreTechniqueID, ev.ThreatScore, ev.AIAnalysis, ev.AnalystNotes, ev.PlaybookProgress, ev.TriageStatus, containmentState, ev.PrevHash, entryH)
 
 	// Persist last computed hash atomically into memory buffer
 	lastLogHash.Store(entryH)
@@ -694,38 +703,32 @@ func (s *StorageEngine) VerifyLogIntegrity() (bool, int64, string, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	query := `SELECT id, timestamp_ms, client_ip, threat_score, prev_hash, entry_hash FROM telemetry ORDER BY id ASC`
-	rows, err := s.db.Query(query)
+	rows, err := s.db.Query(`SELECT id, timestamp_ms, client_ip, threat_score, prev_hash, entry_hash FROM telemetry ORDER BY id ASC`)
 	if err != nil {
 		return false, 0, "", err
 	}
 	defer rows.Close()
 
-	var verifiedCount int64 = 0
 	expectedPrevHash := GenesisLogHash
+	var verifiedCount int64 = 0
 	var lastHash string = GenesisLogHash
 
 	for rows.Next() {
-		var id int64
-		var timestampMs int64
-		var clientIP string
+		var id, timestampMs int64
+		var clientIP, prevHash, entryHash string
 		var threatScore int
-		var prevHash string
-		var entryHash string
 
 		if err := rows.Scan(&id, &timestampMs, &clientIP, &threatScore, &prevHash, &entryHash); err != nil {
-			return false, verifiedCount, lastHash, fmt.Errorf("row scan error at index %d: %w", verifiedCount, err)
+			return false, verifiedCount, lastHash, err
 		}
 
-		// 1. Verify previous hash linkage (first record must link to GenesisLogHash)
 		if prevHash != expectedPrevHash {
-			return false, verifiedCount, lastHash, fmt.Errorf("hash chain broken at id %d: expected prev_hash %s, got %s", id, expectedPrevHash, prevHash)
+			return false, verifiedCount, lastHash, fmt.Errorf("cryptographic chain broken at record ID %d: expected prev_hash %s, found %s", id, expectedPrevHash, prevHash)
 		}
 
-		// 2. Recalculate and verify self entry hash
-		recalculated := CalculateLogHash(id, timestampMs, clientIP, threatScore, prevHash)
-		if recalculated != entryHash {
-			return false, verifiedCount, lastHash, fmt.Errorf("integrity violation at id %d: expected entry_hash %s, got %s", id, recalculated, entryHash)
+		calculatedHash := CalculateLogHash(id, timestampMs, clientIP, threatScore, prevHash)
+		if calculatedHash != entryHash {
+			return false, verifiedCount, lastHash, fmt.Errorf("cryptographic hash mismatch at record ID %d: expected %s, calculated %s", id, entryHash, calculatedHash)
 		}
 
 		expectedPrevHash = entryHash
@@ -744,16 +747,31 @@ func (s *StorageEngine) InsertAlert(ev *StoredEvent) error {
 	if ev.TriageStatus == "" {
 		ev.TriageStatus = "ACTIVE"
 	}
+	containmentState := ev.ContainmentState
+	if containmentState == "" {
+		containmentState = "ACTIVE"
+	}
 
-	query := `INSERT INTO alerts (node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis, analyst_notes, playbook_progress, triage_status)
-	          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	res, err := s.db.Exec(query, ev.NodeID, ev.Source, ev.RawLine, ev.ClientIP, ev.StatusCode, ev.TimestampMs, ev.RuleID, ev.MitreTechniqueID, ev.ThreatScore, ev.AIAnalysis, ev.AnalystNotes, ev.PlaybookProgress, ev.TriageStatus)
+	query := `INSERT INTO alerts (node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis, analyst_notes, playbook_progress, triage_status, containment_state)
+	          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	res, err := s.db.Exec(query, ev.NodeID, ev.Source, ev.RawLine, ev.ClientIP, ev.StatusCode, ev.TimestampMs, ev.RuleID, ev.MitreTechniqueID, ev.ThreatScore, ev.AIAnalysis, ev.AnalystNotes, ev.PlaybookProgress, ev.TriageStatus, containmentState)
 	if err != nil {
 		return err
 	}
 	id, _ := res.LastInsertId()
 	ev.ID = id
 	return nil
+}
+
+// SaveAlert saves an alert with cryptographic hash chaining across events and telemetry, then persists into alerts.
+func (s *StorageEngine) SaveAlert(alert *StoredEvent) error {
+	if alert == nil {
+		return fmt.Errorf("alert is nil")
+	}
+	if err := s.InsertEvent(alert); err != nil {
+		return err
+	}
+	return s.InsertAlert(alert)
 }
 
 // SetAlertStatus atomically transitions an alert's triage status (ACTIVE, RESOLVED, MITIGATED, FALSE_POSITIVE) in SQLite.

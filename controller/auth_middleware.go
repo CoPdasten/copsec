@@ -136,10 +136,24 @@ func AuthMiddleware(next http.Handler) http.Handler {
 	activeKey := GetActiveAPIKey()
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		path := r.URL.Path
+		path := strings.ToLower(r.URL.Path)
+
+		// 1. Explicitly Block Direct SQLite Database and SQL Dump Files (.db, .db-wal, .db-shm, .sqlite, .sql)
+		if strings.HasSuffix(path, ".db") ||
+			strings.HasSuffix(path, ".db-wal") ||
+			strings.HasSuffix(path, ".db-shm") ||
+			strings.HasSuffix(path, ".sqlite") ||
+			strings.HasSuffix(path, ".sqlite3") ||
+			strings.HasSuffix(path, ".sql") ||
+			strings.Contains(path, "copsec.db") {
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"error":"forbidden: direct database access is blocked"}`))
+			return
+		}
 
 		// Route whitelisting
-		if isWhitelistedRoute(path) {
+		if isWhitelistedRoute(r.URL.Path) {
 			next.ServeHTTP(w, r)
 			return
 		}

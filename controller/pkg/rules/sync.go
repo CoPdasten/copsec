@@ -228,10 +228,17 @@ func (s *Syncer) ProcessTarballStream(r io.Reader) (*SyncStatus, error) {
 			continue
 		}
 
-		// Persist YAML file to storage directory
-		destSubDir := filepath.Join(s.storageDir, filepath.Dir(fileName))
+		// Persist YAML file to storage directory with strict Zip-Slip / Path-Traversal protection
+		cleanFileName := filepath.Clean(filepath.ToSlash(fileName))
+		if strings.Contains(cleanFileName, "..") || strings.HasPrefix(cleanFileName, "/") || strings.HasPrefix(cleanFileName, "\\") {
+			continue
+		}
+		targetPath := filepath.Clean(filepath.Join(s.storageDir, cleanFileName))
+		if !strings.HasPrefix(targetPath, filepath.Clean(s.storageDir)+string(filepath.Separator)) {
+			continue
+		}
+		destSubDir := filepath.Dir(targetPath)
 		_ = os.MkdirAll(destSubDir, 0750)
-		targetPath := filepath.Join(destSubDir, filepath.Base(fileName))
 		_ = os.WriteFile(targetPath, content, 0640)
 		rule.FilePath = targetPath
 

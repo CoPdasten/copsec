@@ -20,6 +20,8 @@ offsets.json
 # Binary çıktıları
 copsec-controller
 copsec-collector
+copsec-standalone
+controller/copsec-standalone
 
 # Hassas ortam/token dosyaları
 .env
