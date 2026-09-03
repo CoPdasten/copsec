@@ -99,13 +99,21 @@ CoPSeC partitions responsibilities between high-speed kernel edge sensors (**Col
 * **Tamper-Proof Audit Trails:** Any modification, truncation, or insertion breaks the chain integrity, providing non-repudiation for incident investigations.
 * **Verification Endpoint:** Instant verification of the entire log chain via `/api/audit/verify-integrity`.
 
-### 5. Global Fleet Synchronization
+### 5. Global Fleet Synchronization & Standalone Local/PC Mode
 * **Atomic Quarantine Dispatch:** When a threat is neutralized or banned on one node or by the central SOAR engine, an atomic quarantine directive is pushed over mTLS/WebSocket to every registered edge collector.
 * **Kernel Map Synchronization:** Edge collectors immediately update local in-kernel BPF hash maps without daemon restart or socket drops.
+* **Standalone "PC Mode" (`--mode=standalone` / `--standalone`):** Run full CoPSeC capabilities on a single workstation, laptop, or test VM without distributed collectors or complex network setups. Automatically launches built-in local log watchers, eBPF probes, and threat mitigations in one self-contained process.
 
-### 6. Ergonomic SOC Cockpit
+### 6. Built-in SigmaHQ Sync, DNS Sinkhole & YARA In-Memory Inspection
+* **SigmaHQ Rules Engine:** Automated live streaming and parsing of official SigmaHQ detection rules with tarball stream decompressors and directory filtering.
+* **DNS Sinkhole & DGA Defense:** Intercepts rogue domain lookups, fast-flux DNS exfiltration, and C2 beacons with automated threat scoring and containment.
+* **YARA In-Memory Process Scanner:** Live memory buffer inspection against Cobalt Strike stagers, web shell injectors, and raw shellcode execution.
+
+### 7. SOC Cockpit & Hardened Application Security
+* **Direct Database File Download Protection:** Router-level rejection of direct SQLite and database dump exposures (`.db`, `.db-wal`, `.db-shm`, `.sqlite`, `.sql`).
+* **Timing-Safe Authentication:** API key token validation powered by constant-time comparisons (`crypto/subtle.ConstantTimeCompare`).
+* **Instant Incident Chaining on Quarantine:** SOAR manual or autonomous ban/unban triggers automatically persist, cryptographically chain, and broadcast high-severity alerts to the SOC Cockpit.
 * **High-Contrast Monochrome Aesthetic:** Designed for high visual clarity and reduced fatigue during extended incident response rotations.
-* **Zero-Wait Auto-Advance Triage:** Reviewing an alert automatically presents the next actionable item in the queue.
 * **Keyboard Hotkey Control:** Full operational coverage via keyboard shortcuts:
   * `[Space]` — Freeze / Resume live telemetry stream.
   * `[B]` — Enforce global kernel ban on selected entity.
@@ -123,22 +131,34 @@ CoPSeC partitions responsibilities between high-speed kernel edge sensors (**Col
 
 ---
 
-### Build & Run Controller
+### Standalone PC Mode (Single Machine / Workstation)
+
+Run Controller and local edge telemetry monitoring in a single process:
 
 ```bash
 cd controller
-go build -ldflags="-s -w" -o copsec-controller .
-sudo ./copsec-controller
+go build -ldflags="-s -w" -o copsec-standalone .
+sudo ./copsec-standalone --mode=standalone --auth-key="YOUR_STRONG_API_KEY"
 ```
 
 ---
 
-### Build & Run Collector
+### Distributed Architecture: Build & Run Controller
+
+```bash
+cd controller
+go build -ldflags="-s -w" -o copsec-controller .
+sudo ./copsec-controller --port=8080 --auth-key="YOUR_STRONG_API_KEY"
+```
+
+---
+
+### Distributed Architecture: Build & Run Collector
 
 ```bash
 cd collector
 go build -ldflags="-s -w" -o copsec-collector .
-sudo ./copsec-collector --controller-url ws://localhost:8080/ws/collector
+sudo ./copsec-collector --controller-url ws://localhost:8080/ws/collector --api-key="YOUR_STRONG_API_KEY"
 ```
 
 ---
