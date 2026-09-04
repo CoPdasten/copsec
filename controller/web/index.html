@@ -845,7 +845,7 @@
         <div class="toolbar-left">
           <div style="display: flex; gap: 4px; margin-right: 8px;">
             <button id="btnAlertsActiveTab" class="btn btn-accent" style="font-weight: 700;" onclick="switchAlertsView('ACTIVE')">[ ⦿ ACTIVE ALERTS (<span id="alertsActiveCount">0</span>) ]</button>
-            <button id="btnAlertsArchiveTab" class="btn" style="color: var(--text-muted);" onclick="switchAlertsView('RESOLVED')">[ ◷ RESOLVED ARCHIVE ]</button>
+            <button id="btnAlertsArchiveTab" class="btn" style="color: var(--text-muted);" onclick="switchAlertsView('RESOLVED')">[ ◷ RESOLVED / ARCHIVE (<span id="alertsArchiveCount">0</span>) ]</button>
           </div>
           <input type="text" id="alertsFilter" class="input-box" placeholder="Filter alerts by IP, rule, or technique..." style="width: 240px;" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" oninput="applyAlertsFilter()">
           <select id="alertsSeverityFilter" class="input-box" onchange="applyAlertsFilter()">
@@ -1425,6 +1425,7 @@
       const pane = document.getElementById(`tab-${tabId}`);
       if (pane) pane.classList.add('active');
 
+      if (tabId === 'telemetry') fetchInitialTelemetry();
       if (tabId === 'alerts') fetchAlerts();
       if (tabId === 'rules') fetchRules();
       if (tabId === 'settings') fetchSettings();
@@ -1474,6 +1475,11 @@
         document.getElementById('statTotal').textContent = payload.total_events || 0;
         document.getElementById('statNodes').textContent = nodesCount;
         document.getElementById('statBans').textContent = activeBans;
+
+        if (payload.archive_alerts !== undefined) {
+          const archCount = document.getElementById('alertsArchiveCount');
+          if (archCount) archCount.textContent = payload.archive_alerts;
+        }
 
         // Update Fleet Status Dashboard Card
         const dNodes = document.getElementById('dashFleetNodesCount');
@@ -1777,6 +1783,35 @@
       document.getElementById('badgeTelemetry').textContent = '0';
     }
 
+    async function fetchInitialTelemetry() {
+      try {
+        const res = await fetch('/api/telemetry?limit=200');
+        if (!res.ok) return;
+        const events = await res.json();
+        if (!Array.isArray(events) || events.length === 0) return;
+
+        const tbody = document.getElementById('telemetryTableBody');
+        if (!tbody) return;
+
+        // Populate in-memory events and render into table if currently empty
+        if (telemetryEvents.length === 0) {
+          const fragment = document.createDocumentFragment();
+          events.forEach(raw => {
+            const ev = normalizeEvent(raw);
+            telemetryEvents.push(ev);
+            fragment.appendChild(createTelemetryRowElement(ev));
+            updateDashboardAggregates(ev);
+          });
+          tbody.appendChild(fragment);
+
+          const badge = document.getElementById('badgeTelemetry');
+          if (badge) badge.textContent = telemetryEvents.length;
+        }
+      } catch (e) {
+        console.error('Failed to fetch initial telemetry:', e);
+      }
+    }
+
     function applyTelemetryFilter() {
       const q = document.getElementById('telemetryFilter').value.toLowerCase();
       const src = document.getElementById('filterSource').value.toLowerCase();
@@ -1855,6 +1890,9 @@
           if (badge) badge.textContent = alerts.length;
           const activeCount = document.getElementById('alertsActiveCount');
           if (activeCount) activeCount.textContent = alerts.length;
+        } else if (currentAlertsView === 'RESOLVED') {
+          const archCount = document.getElementById('alertsArchiveCount');
+          if (archCount) archCount.textContent = alerts.length;
         }
         renderAlerts(alerts);
 
@@ -1937,7 +1975,9 @@
         const ruleName = a.rule_matched || a.rule_id || 'Security Alert';
 
         let containmentTag = getContainmentBadge(a.containment_state);
-        if (a.triage_status === 'MITIGATED') {
+        if (a.triage_status === 'AUTO_MITIGATED') {
+          containmentTag = `<span class="badge badge-xdp" title="Automatically mitigated and quarantined by SOAR Engine">[AUTO_MITIGATED]</span>`;
+        } else if (a.triage_status === 'MITIGATED') {
           containmentTag = `<span class="badge" style="border: 1px solid var(--border-accent); color: #d4d4d8;">[MITIGATED]</span>`;
         } else if (a.triage_status === 'RESOLVED') {
           containmentTag = `<span class="badge" style="border: 1px solid var(--border); color: #71717a;">[RESOLVED]</span>`;
@@ -3393,6 +3433,7 @@ ${notes}
       connectWS();
       checkIPInfoStatus();
       fetchSOARAutoPilotStatus();
+      fetchInitialTelemetry();
       fetchAlerts();
       fetchRules();
       fetchQuarantineBans();

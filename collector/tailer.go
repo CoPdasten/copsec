@@ -17,6 +17,7 @@ import (
 	"unsafe"
 
 	copsecproto "github.com/copsec/collector/proto"
+	"github.com/copsec/collector/pkg/snort"
 	"golang.org/x/sys/unix"
 )
 
@@ -584,6 +585,69 @@ func parseLogLine(sourceName, raw string) *copsecproto.LogEvent {
 			Source:      "suricata",
 			RawLine:     raw,
 			ClientIp:    extractIPFromLine(raw, "suricata"),
+			TimestampMs: nowMs,
+		}
+
+	case srcLower == "snort" || strings.Contains(srcLower, "snort") || strings.Contains(srcLower, "alert_json"):
+		if ev, ok := snort.ParseSnortAlert([]byte(raw)); ok {
+			threatScore := int32(50)
+			ruleID := "snort_alert"
+			mitreID := "T1190"
+
+			if ev.Rule != "" {
+				ruleID = ev.Rule
+			} else if ev.Msg != "" {
+				ruleID = ev.Msg
+			}
+
+			// ML and Priority Scoring
+			if ev.Priority == 1 {
+				threatScore = 85
+			} else if ev.Priority == 2 {
+				threatScore = 65
+			}
+
+			if ev.ML != nil && ev.ML.AnomalyScore > 0 {
+				threatScore = int32(ev.ML.AnomalyScore * 100)
+				if threatScore > 99 {
+					threatScore = 99
+				}
+				ruleID = fmt.Sprintf("snort_ml_%s", ev.ML.ModelID)
+				mitreID = "T1059"
+			}
+
+			// Keyword-based MITRE mapping
+			msgLower := strings.ToLower(ev.Msg)
+			if strings.Contains(msgLower, "shellcode") || strings.Contains(msgLower, "exploit") {
+				mitreID = "T1059"
+			} else if strings.Contains(msgLower, "brute") || strings.Contains(msgLower, "login") || strings.Contains(msgLower, "ssh") {
+				mitreID = "T1110"
+			} else if strings.Contains(msgLower, "sqli") || strings.Contains(msgLower, "injection") {
+				mitreID = "T1190"
+			} else if strings.Contains(msgLower, "scan") {
+				mitreID = "T1046"
+			}
+
+			if isProtectedIP(ev.SrcAddr) {
+				threatScore = 0
+				mitreID = ""
+			}
+
+			return &copsecproto.LogEvent{
+				Source:           "snort",
+				RawLine:          raw,
+				ClientIp:         ev.SrcAddr,
+				ThreatScore:      threatScore,
+				RuleId:           ruleID,
+				MitreTechniqueId: mitreID,
+				TimestampMs:      nowMs,
+			}
+		}
+
+		return &copsecproto.LogEvent{
+			Source:      "snort",
+			RawLine:     raw,
+			ClientIp:    extractIPFromLine(raw, "snort"),
 			TimestampMs: nowMs,
 		}
 

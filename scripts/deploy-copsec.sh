@@ -140,17 +140,18 @@ case "$PKG_MANAGER" in
     apt-get update -qq
     apt-get install -y -qq iptables conntrack iproute2 ipset curl jq openssl tar gzip sqlite3 nginx || true
     apt-get install -y -qq suricata || true
+    apt-get install -y -qq snort snort-rules-default || apt-get install -y -qq snort3 || true
     ;;
   dnf|yum)
     $PKG_MANAGER install -y -q iptables conntrack-tools iproute ipset curl jq openssl tar gzip sqlite nginx || true
     $PKG_MANAGER install -y -q epel-release || true
-    $PKG_MANAGER install -y -q suricata || true
+    $PKG_MANAGER install -y -q suricata snort || true
     ;;
   pacman)
-    pacman -Sy --noconfirm iptables conntrack-tools iproute2 ipset curl jq openssl tar gzip sqlite nginx suricata || true
+    pacman -Sy --noconfirm iptables conntrack-tools iproute2 ipset curl jq openssl tar gzip sqlite nginx suricata snort || true
     ;;
   apk)
-    apk add --no-cache iptables conntrack-tools iproute2 ipset curl jq openssl tar gzip sqlite nginx suricata || true
+    apk add --no-cache iptables conntrack-tools iproute2 ipset curl jq openssl tar gzip sqlite nginx suricata snort || true
     ;;
   *)
     echo -e "${CLR_YELLOW}[WARN] Manual dependency validation required for custom package manager.${CLR_RESET}"
@@ -225,6 +226,24 @@ elif [ -f "/var/log/messages" ]; then
 else
   touch /var/log/copsec/dummy_sys.log
   DETECTED_SYSLOG="/var/log/copsec/dummy_sys.log"
+fi
+
+# Suricata EVE JSON
+if [ -f "/var/log/suricata/eve.json" ]; then
+  DETECTED_SURICATA="/var/log/suricata/eve.json"
+else
+  touch /var/log/copsec/dummy_suricata.json
+  DETECTED_SURICATA="/var/log/copsec/dummy_suricata.json"
+fi
+
+# Snort Alert JSON / Snort-ML
+if [ -f "/var/log/snort/alert_json.txt" ]; then
+  DETECTED_SNORT="/var/log/snort/alert_json.txt"
+elif [ -f "/var/log/snort/snort.alert" ]; then
+  DETECTED_SNORT="/var/log/snort/snort.alert"
+else
+  touch /var/log/copsec/dummy_snort.txt
+  DETECTED_SNORT="/var/log/copsec/dummy_snort.txt"
 fi
 
 # 8. Enroll / Load Node Identity
@@ -325,7 +344,9 @@ ExecStart=/usr/local/bin/copsec-collector \\
   -whitelist /etc/copsec/whitelist.json \\
   -nginx-log ${DETECTED_NGINX} \\
   -auth-log ${DETECTED_AUTH} \\
-  -syslog ${DETECTED_SYSLOG}
+  -syslog ${DETECTED_SYSLOG} \\
+  -suricata-log ${DETECTED_SURICATA} \\
+  -snort-log ${DETECTED_SNORT}
 Restart=always
 RestartSec=3s
 LimitNOFILE=1048576

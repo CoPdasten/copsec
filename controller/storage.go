@@ -848,7 +848,7 @@ func (s *StorageEngine) GetActiveAlerts(limit int) ([]*StoredEvent, error) {
 	query := `SELECT id, node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis, analyst_notes, playbook_progress, triage_status
 	          FROM alerts
 	          WHERE threat_score >= 40 
-	            AND (triage_status = 'ACTIVE' OR triage_status = '' OR triage_status IS NULL)
+	            AND (triage_status IN ('ACTIVE', 'AUTO_MITIGATED') OR triage_status = '' OR triage_status IS NULL)
 	            AND rule_id != 'sudo_execution'
 	            AND NOT (client_ip IN ('127.0.0.1', '::1', 'localhost', 'local', '-') AND threat_score < 70 AND rule_id NOT LIKE 'sigma%')
 	          ORDER BY timestamp_ms DESC LIMIT ?`
@@ -872,12 +872,12 @@ func (s *StorageEngine) GetActiveAlerts(limit int) ([]*StoredEvent, error) {
 	}
 	alerts = filtered
 
-	// Fallback to events table with threat_score >= 40 and ACTIVE status if alerts table is empty
+	// Fallback to events table with threat_score >= 40 and ACTIVE/AUTO_MITIGATED status if alerts table is empty
 	if len(alerts) == 0 {
 		fallbackQuery := `SELECT id, node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis, analyst_notes, playbook_progress, triage_status
 		                  FROM events
 		                  WHERE threat_score >= 40 
-		                    AND (triage_status = 'ACTIVE' OR triage_status = '' OR triage_status IS NULL)
+		                    AND (triage_status IN ('ACTIVE', 'AUTO_MITIGATED') OR triage_status = '' OR triage_status IS NULL)
 		                    AND rule_id != 'sudo_execution'
 		                    AND NOT (client_ip IN ('127.0.0.1', '::1', 'localhost', 'local', '-') AND threat_score < 70 AND rule_id NOT LIKE 'sigma%')
 		                  ORDER BY timestamp_ms DESC LIMIT ?`
@@ -909,7 +909,7 @@ func (s *StorageEngine) GetResolvedAlerts(limit int) ([]*StoredEvent, error) {
 
 	query := `SELECT id, node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis, analyst_notes, playbook_progress, triage_status
 	          FROM alerts
-	          WHERE triage_status IN ('RESOLVED', 'MITIGATED', 'FALSE_POSITIVE')
+	          WHERE triage_status IN ('RESOLVED', 'MITIGATED', 'AUTO_MITIGATED', 'FALSE_POSITIVE')
 	          ORDER BY timestamp_ms DESC LIMIT ?`
 	rows, err := s.db.Query(query, limit)
 	if err != nil {
@@ -925,7 +925,7 @@ func (s *StorageEngine) GetResolvedAlerts(limit int) ([]*StoredEvent, error) {
 	if len(alerts) == 0 {
 		fallbackQuery := `SELECT id, node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis, analyst_notes, playbook_progress, triage_status
 		                  FROM events
-		                  WHERE triage_status IN ('RESOLVED', 'MITIGATED', 'FALSE_POSITIVE')
+		                  WHERE triage_status IN ('RESOLVED', 'MITIGATED', 'AUTO_MITIGATED', 'FALSE_POSITIVE')
 		                  ORDER BY timestamp_ms DESC LIMIT ?`
 		fbRows, fbErr := s.db.Query(fallbackQuery, limit)
 		if fbErr == nil {
@@ -977,6 +977,16 @@ func (s *StorageEngine) ClearAllActiveAlerts() error {
 // ClearAllAlerts purges or archives all active alerts.
 func (s *StorageEngine) ClearAllAlerts() error {
 	return s.ClearAllActiveAlerts()
+}
+
+// GetAlertStats returns current active and archived alert counts.
+func (s *StorageEngine) GetAlertStats() (activeCount int, archiveCount int, err error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM alerts WHERE threat_score >= 40 AND (triage_status IN ('ACTIVE', 'AUTO_MITIGATED') OR triage_status = '' OR triage_status IS NULL)`).Scan(&activeCount)
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM alerts WHERE triage_status IN ('RESOLVED', 'MITIGATED', 'FALSE_POSITIVE')`).Scan(&archiveCount)
+	return activeCount, archiveCount, nil
 }
 
 // UpdateEventAI updates the AI analysis field for a stored incident.

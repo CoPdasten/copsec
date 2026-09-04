@@ -486,20 +486,25 @@ func (ws *WebSOCServer) handleStats(w http.ResponseWriter, r *http.Request) {
 
 	var mitreStats []MITREStat
 	var topAttackers []TopAttackerRecord
+	activeAlertsCount := 0
+	archiveAlertsCount := 0
 	if ws.storage != nil {
 		mitreStats, _ = ws.storage.GetMITREStats()
 		topAttackers, _ = ws.storage.GetTopAttackers(10)
+		activeAlertsCount, archiveAlertsCount, _ = ws.storage.GetAlertStats()
 	}
 
 	data := map[string]interface{}{
-		"eps":           eps,
-		"total_events":  total,
-		"nodes_count":   nodesCount,
-		"active_bans":   activeBansCount,
-		"mitre_stats":   mitreStats,
-		"top_attackers": topAttackers,
-		"geo_stats":     geoip.GetDefaultEngine().GetAttackOriginDensity(8),
-		"timestamp":     time.Now().UnixMilli(),
+		"eps":            eps,
+		"total_events":   total,
+		"nodes_count":    nodesCount,
+		"active_bans":    activeBansCount,
+		"active_alerts":  activeAlertsCount,
+		"archive_alerts": archiveAlertsCount,
+		"mitre_stats":    mitreStats,
+		"top_attackers":  topAttackers,
+		"geo_stats":      geoip.GetDefaultEngine().GetAttackOriginDensity(8),
+		"timestamp":      time.Now().UnixMilli(),
 	}
 
 	json.NewEncoder(w).Encode(data)
@@ -1384,14 +1389,14 @@ func (ws *WebSOCServer) handleAlerts(w http.ResponseWriter, r *http.Request) {
 		isHostLocal := scope == sigma.ScopeHostLocal || ev.ClientIP == "127.0.0.1" || ev.ClientIP == "local" || isProtectedIP(ev.ClientIP)
 
 		containment := "UNMITIGATED"
-		if ev.TriageStatus == "MITIGATED" {
+		if ev.TriageStatus == "AUTO_MITIGATED" || activeBansMap[ev.ClientIP] {
+			containment = "BANNED (XDP)"
+		} else if ev.TriageStatus == "MITIGATED" {
 			containment = "MITIGATED"
 		} else if ev.TriageStatus == "RESOLVED" {
 			containment = "RESOLVED"
 		} else if isHostLocal {
 			containment = "HOST CONTAINED"
-		} else if activeBansMap[ev.ClientIP] {
-			containment = "BANNED (XDP)"
 		}
 
 		diffSec := (nowMs - ev.TimestampMs) / 1000

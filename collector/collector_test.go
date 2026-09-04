@@ -347,6 +347,13 @@ func TestSuricataAndAuthParsers(t *testing.T) {
 	if dispatched.ThreatScore != 85 || dispatched.ClientIp != "198.51.100.222" {
 		t.Errorf("ParseLogSourceLine dispatcher failed for suricata: %+v", dispatched)
 	}
+
+	// 6. Snort-ML Log Line test
+	snortMLLine := `{"timestamp":"09/04-12:00:00.123456","proto":"TCP","src_addr":"198.51.100.77","src_port":54321,"dst_addr":"10.0.0.5","dst_port":22,"msg":"INDICATOR-SHELLCODE ML Anomaly","rule":"1:2000001:1","priority":1,"ml":{"model_id":"snort-xgb","ml_anomaly_score":0.95,"confidence":0.98}}`
+	snortEv := ParseLogSourceLine("snort", snortMLLine, time.Now().UnixMilli())
+	if snortEv.Source != "snort" || snortEv.ClientIp != "198.51.100.77" || snortEv.ThreatScore != 95 || snortEv.MitreTechniqueId != "T1059" {
+		t.Errorf("Unexpected snort ML event parsed: %+v", snortEv)
+	}
 }
 
 func TestShadowHoneypotRedirection(t *testing.T) {

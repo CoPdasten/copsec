@@ -131,6 +131,25 @@ CoPSeC partitions responsibilities between high-speed kernel edge sensors (**Col
 
 ---
 
+### Automated One-Line Fleet Deployment (Recommended)
+
+#### 1. Controller Server Setup
+Deploy central controller with Web SOC, gRPC fleet mesh, and SQLite database:
+```bash
+sudo ./install.sh --mode controller --port 8080 --api-key "YOUR_STRONG_API_KEY"
+```
+
+#### 2. Edge / Node Installation
+Quickly attach any Linux VDS / physical server (Debian, Ubuntu, Pardus, RHEL, CentOS, Arch) to the fleet mesh. Automatically installs dependencies (Suricata, Snort-ML, rsyslog, iptables, eBPF tools), auto-detects primary network interfaces, and hooks system logs:
+```bash
+curl -sSL http://<CONTROLLER_IP>:8080/install-agent.sh | sudo bash -s -- \
+  --controller <CONTROLLER_IP>:8443 \
+  --api-key "YOUR_STRONG_API_KEY" \
+  --group "PARDUS_EDGE"
+```
+
+---
+
 ### Standalone PC Mode (Single Machine / Workstation)
 
 Run Controller and local edge telemetry monitoring in a single process:
@@ -158,7 +177,12 @@ sudo ./copsec-controller --port=8080 --auth-key="YOUR_STRONG_API_KEY"
 ```bash
 cd collector
 go build -ldflags="-s -w" -o copsec-collector .
-sudo ./copsec-collector --controller-url ws://localhost:8080/ws/collector --api-key="YOUR_STRONG_API_KEY"
+sudo ./copsec-collector \
+  -controller <CONTROLLER_IP>:8443 \
+  -node-identity /etc/copsec/node.json \
+  -auth-log /var/log/auth.log \
+  -syslog /var/log/syslog \
+  -suricata-log /var/log/suricata/eve.json
 ```
 
 ---
