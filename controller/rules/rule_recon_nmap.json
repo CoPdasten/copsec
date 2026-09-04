@@ -1,0 +1,17 @@
+{
+  "id": "RULE-RECON-NMAP-001",
+  "name": "Nmap Scripting Engine & Port Sweep Probe",
+  "description": "Detects Nmap NSE scanning, reconnaissance probes, and banner sweeps",
+  "severity": "HIGH",
+  "threat_score": 85,
+  "mitre_technique_id": "T1046",
+  "enabled": true,
+  "target_field": "headers",
+  "match_type": "regex",
+  "pattern": "(?i)(nmap\\s+nse|nmap\\s+scripting\\s+engine|nmap\\s+probe|nmap\\s+vulnscan)",
+  "entropy_threshold": 0,
+  "window_seconds": 10,
+  "hit_threshold": 3,
+  "action": "BAN",
+  "ban_duration_sec": 86400
+}

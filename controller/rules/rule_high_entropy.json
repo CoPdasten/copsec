@@ -1,0 +1,17 @@
+{
+  "id": "RULE-ENTROPY-001",
+  "name": "High Shannon Entropy Payload Obfuscation",
+  "description": "Detects encrypted or packed shellcode, Base64 stagers, and XOR payloads with entropy \u003e 5.2",
+  "severity": "HIGH",
+  "threat_score": 70,
+  "mitre_technique_id": "T1027",
+  "enabled": true,
+  "target_field": "raw_payload",
+  "match_type": "shannon_entropy_gt",
+  "pattern": "",
+  "entropy_threshold": 5.2,
+  "window_seconds": 120,
+  "hit_threshold": 1,
+  "action": "ALERT_ONLY",
+  "ban_duration_sec": 0
+}

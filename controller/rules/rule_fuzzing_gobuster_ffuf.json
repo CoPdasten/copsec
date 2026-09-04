@@ -1,0 +1,17 @@
+{
+  "id": "RULE-FUZZ-GOBUSTER-001",
+  "name": "Endpoint & Directory Brute-Forcers (Gobuster / FFUF / Nikto / SQLmap)",
+  "description": "Detects high-frequency aggressive directory brute-forcing, SQLmap scans, and fuzzer user agents",
+  "severity": "CRITICAL",
+  "threat_score": 90,
+  "mitre_technique_id": "T1595.002",
+  "enabled": true,
+  "target_field": "user_agent",
+  "match_type": "regex",
+  "pattern": "(?i)(gobuster|dirbuster|ffuf|wfuzz|nikto|sqlmap)",
+  "entropy_threshold": 0,
+  "window_seconds": 15,
+  "hit_threshold": 5,
+  "action": "BAN",
+  "ban_duration_sec": 86400
+}

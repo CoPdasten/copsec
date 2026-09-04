@@ -8,7 +8,9 @@ import (
 	"log"
 	"net"
 	"os"
+	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -35,19 +37,35 @@ func NewStandaloneCollector(server *CentralServer, iface string) *StandaloneColl
 		iface = detectStandaloneInterface()
 	}
 
-	return &StandaloneCollector{
-		server:        server,
-		interfaceName: iface,
-		sources: []string{
+	sources := []string{
+		filepath.Join(".", "logs", "eve.json"),
+		filepath.Join(".", "logs", "access.log"),
+		filepath.Join(".", "logs", "auth.log"),
+	}
+	if runtime.GOOS == "windows" {
+		progData := os.Getenv("ProgramData")
+		if progData == "" {
+			progData = `C:\ProgramData`
+		}
+		sources = append(sources,
+			filepath.Join(progData, "copsec", "logs", "eve.json"),
+			filepath.Join(progData, "copsec", "logs", "access.log"),
+			filepath.Join(progData, "copsec", "logs", "auth.log"),
+		)
+	} else {
+		sources = append(sources,
 			"/var/log/suricata/eve.json",
 			"/var/log/nginx/access.log",
 			"/var/log/auth.log",
 			"/var/log/syslog",
-			"./logs/eve.json",
-			"./logs/access.log",
-			"./logs/auth.log",
-		},
-		stopChan: make(chan struct{}),
+		)
+	}
+
+	return &StandaloneCollector{
+		server:        server,
+		interfaceName: iface,
+		sources:       sources,
+		stopChan:      make(chan struct{}),
 	}
 }
 
@@ -56,7 +74,7 @@ func detectStandaloneInterface() string {
 	if err == nil {
 		for _, iface := range ifaces {
 			if iface.Flags&net.FlagUp != 0 && iface.Flags&net.FlagLoopback == 0 {
-				if strings.HasPrefix(iface.Name, "eth") || strings.HasPrefix(iface.Name, "en") || strings.HasPrefix(iface.Name, "wl") {
+				if strings.HasPrefix(iface.Name, "eth") || strings.HasPrefix(iface.Name, "en") || strings.HasPrefix(iface.Name, "wl") || strings.Contains(strings.ToLower(iface.Name), "ethernet") || strings.Contains(strings.ToLower(iface.Name), "wi-fi") {
 					return iface.Name
 				}
 			}
@@ -67,7 +85,7 @@ func detectStandaloneInterface() string {
 
 // Start launches the in-process collector background workers.
 func (sc *StandaloneCollector) Start(ctx context.Context) {
-	log.Printf("[STANDALONE] 🛡️ Starting In-Process Local Collector (Interface: %s)", sc.interfaceName)
+	log.Printf("[STANDALONE] 🛡️ Starting In-Process Local Collector (Platform: %s, Interface: %s)", runtime.GOOS, sc.interfaceName)
 
 	// 1. File Tailers for available local logs
 	for _, path := range sc.sources {
@@ -77,7 +95,13 @@ func (sc *StandaloneCollector) Start(ctx context.Context) {
 		}
 	}
 
-	// 2. Native Local Packet / HTTP Sniffer Loop (Fallback if Suricata eve.json absent)
+	// 2. Local Packet / HTTP Sniffer Loop
+	// On Windows, bypass raw AF_PACKET/XDP socket binding gracefully
+	if runtime.GOOS == "windows" {
+		log.Printf("[STANDALONE] Windows host detected: Bypassing raw AF_PACKET/XDP sockets. Operating in native L7 HTTP/Reverse-Proxy & API SOAR mode.")
+		return
+	}
+
 	suricataPath := "/var/log/suricata/eve.json"
 	if _, err := os.Stat(suricataPath); os.IsNotExist(err) {
 		log.Printf("[STANDALONE] Suricata socket/log (%s) not found. Activating native Go packet capture & traffic sniffer fallback on %s", suricataPath, sc.interfaceName)

@@ -1,0 +1,51 @@
+syntax = "proto3";
+
+package copsec.fleet;
+
+option go_package = "github.com/copsec/collector/proto/fleet;fleetproto";
+
+service FleetService {
+  rpc ConnectFleet (stream AgentMessage) returns (stream ControllerCommand);
+  rpc StreamTelemetry (stream TelemetryBatch) returns (StreamAck);
+}
+
+message AgentMessage {
+  string node_id = 1;
+  string hostname = 2;
+  string ip_address = 3;
+  int64 timestamp_ms = 4;
+  AgentHealth health = 5;
+}
+
+message AgentHealth {
+  double cpu_usage = 1;
+  double memory_usage = 2;
+  int32 active_bans = 3;
+  int64 uptime_sec = 4;
+}
+
+message ControllerCommand {
+  string command_id = 1;
+  enum Type {
+    COMMAND_HEARTBEAT_ACK = 0;
+    COMMAND_ENFORCE_BAN = 1;
+    COMMAND_REVOKE_BAN = 2;
+    COMMAND_SYNC_WHITELIST = 3;
+  }
+  Type type = 2;
+  string target_ip = 3;
+  string reason = 4;
+  int64 duration_sec = 5;
+  int64 timestamp_ms = 6;
+}
+
+message TelemetryBatch {
+  string node_id = 1;
+  repeated bytes raw_events = 2;
+  int64 batch_id = 3;
+}
+
+message StreamAck {
+  int64 batch_id = 1;
+  bool success = 2;
+}

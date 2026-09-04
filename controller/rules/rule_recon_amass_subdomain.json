@@ -1,0 +1,17 @@
+{
+  "id": "RULE-RECON-AMASS-001",
+  "name": "OWASP Amass Subdomain Scraping & DNS Fuzzing",
+  "description": "Detects automated reconnaissance headers and high-frequency non-existent vhost sweeps from OWASP Amass",
+  "severity": "MEDIUM",
+  "threat_score": 75,
+  "mitre_technique_id": "T1595.002",
+  "enabled": true,
+  "target_field": "headers",
+  "match_type": "regex",
+  "pattern": "(?i)(owasp\\s+amass|x-amass-sweep|amass-enum|amass/v\\d+)",
+  "entropy_threshold": 0,
+  "window_seconds": 60,
+  "hit_threshold": 30,
+  "action": "BAN",
+  "ban_duration_sec": 86400
+}

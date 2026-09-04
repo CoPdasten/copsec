@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/copsec/controller/pkg/detection"
 	"github.com/copsec/controller/pkg/dns"
 	"github.com/copsec/controller/pkg/ebpf"
 	"github.com/copsec/controller/pkg/geoip"
@@ -25,6 +26,7 @@ import (
 	"github.com/copsec/controller/pkg/soar"
 	"github.com/copsec/controller/pkg/tarpit"
 	"github.com/copsec/controller/pkg/threat"
+	"github.com/copsec/controller/pkg/whitelist"
 	"github.com/copsec/controller/pkg/yara"
 )
 
@@ -187,6 +189,7 @@ func (ws *WebSOCServer) Start() error {
 	mux.HandleFunc("/api/rules", ws.handleRulesList)
 	mux.HandleFunc("/api/rules/sync", ws.handleRulesSync)
 	mux.HandleFunc("/api/rules/toggle", ws.handleRulesToggle)
+	mux.HandleFunc("/api/rules/reload", ws.handleRulesReload)
 	mux.HandleFunc("/api/nodes", ws.handleNodes)
 	mux.HandleFunc("/api/whitelist", ws.handleWhitelist)
 	mux.HandleFunc("/api/geoip/stats", ws.handleGeoIPStats)
@@ -591,6 +594,16 @@ func (ws *WebSOCServer) handleSOARBan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Guardrail: Fast reject if target IP is protected by active whitelist rule
+	if wlEngine := whitelist.GetDefaultEngine(); wlEngine != nil && wlEngine.IsWhitelisted(cleanIP) {
+		log.Printf("[AUDIT] Quarantine bypass triggered for whitelisted target: %s", cleanIP)
+		w.WriteHeader(http.StatusConflict)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"error": "action rejected: target IP is protected by active whitelist rule",
+		})
+		return
+	}
+
 	if ws.ttlManager == nil {
 		http.Error(w, "TTL ban manager not initialized", http.StatusInternalServerError)
 		return
@@ -598,6 +611,14 @@ func (ws *WebSOCServer) handleSOARBan(w http.ResponseWriter, r *http.Request) {
 
 	record, err := ws.ttlManager.BanIP(cleanIP, req.Reason, req.DurationSeconds, "")
 	if err != nil {
+		if strings.Contains(err.Error(), "protected") || (whitelist.GetDefaultEngine() != nil && whitelist.GetDefaultEngine().IsWhitelisted(cleanIP)) {
+			log.Printf("[AUDIT] Quarantine bypass triggered for whitelisted target: %s", cleanIP)
+			w.WriteHeader(http.StatusConflict)
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"error": "action rejected: target IP is protected by active whitelist rule",
+			})
+			return
+		}
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -848,8 +869,39 @@ func (ws *WebSOCServer) handleRulesList(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
+	// Merge dynamic detection rules from pkg/detection
+	detRules := detection.GetDefaultRegistry().ListRules()
+	for _, dr := range detRules {
+		if !seen[dr.ID] {
+			seen[dr.ID] = true
+			dtos = append(dtos, RuleResponseDTO{
+				ID:          dr.ID,
+				Title:       dr.Name,
+				Description: dr.Description,
+				Level:       strings.ToLower(dr.Severity),
+				ThreatScore: dr.ThreatScore,
+				Severity:    models.CalculateSeverity(dr.ThreatScore),
+				MitreID:     dr.MitreTechniqueID,
+				MitreTactic: "Execution",
+				Origin:      "[DYNAMIC_JSON]",
+				Scope:       "network",
+				Enabled:     dr.Enabled,
+				Tags:        []string{string(dr.Action), dr.MatchType},
+			})
+		}
+	}
+
 	if dtos == nil {
 		dtos = []RuleResponseDTO{}
+	}
+
+	// Provide both root array for UI and extended object containing dynamic rules with metrics
+	if r.URL.Query().Get("format") == "extended" || r.URL.Query().Get("metrics") == "true" {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"rules":         dtos,
+			"dynamic_rules": detRules,
+		})
+		return
 	}
 
 	json.NewEncoder(w).Encode(dtos)
@@ -874,11 +926,38 @@ func (ws *WebSOCServer) handleRulesToggle(w http.ResponseWriter, r *http.Request
 	updated := matcher.SetRuleEnabled(req.RuleID, req.Enabled)
 	sigma.GetBuiltinTracker().SetRuleEnabled(req.RuleID, req.Enabled)
 
+	// Also toggle in dynamic detection rule registry
+	detUpdated := detection.GetDefaultRegistry().ToggleRule(req.RuleID, req.Enabled)
+	if detUpdated {
+		updated = true
+	}
+
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
 		"rule_id": req.RuleID,
 		"enabled": req.Enabled,
 		"found":   updated,
+	})
+}
+
+func (ws *WebSOCServer) handleRulesReload(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	active, disabled, err := detection.GetDefaultRegistry().ReloadRules()
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"failed to reload detection rules: %v"}`, err), http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":        true,
+		"active_rules":   active,
+		"disabled_rules": disabled,
+		"message":        fmt.Sprintf("Loaded %d active detection rules (%d disabled) from rules directory.", active, disabled),
 	})
 }
 
@@ -959,35 +1038,153 @@ func (ws *WebSOCServer) handleNodes(w http.ResponseWriter, r *http.Request) {
 
 func (ws *WebSOCServer) handleWhitelist(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	if r.Method == http.MethodPost {
-		var req struct {
-			CIDR string `json:"cidr"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		if ws.server != nil && ws.server.threatEngine != nil && req.CIDR != "" {
-			_ = ws.server.threatEngine.AddWhitelistCIDR(req.CIDR)
-		}
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"success": true,
-			"cidr":    req.CIDR,
-		})
-		return
-	}
+	wlEngine := whitelist.GetDefaultEngine()
 
-	// GET: Return default protected resolvers & subnets
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"resolvers": []string{
+	switch r.Method {
+	case http.MethodGet:
+		// Return all active whitelist entries as JSON
+		entries := []whitelist.Entry{}
+		if wlEngine != nil {
+			entries = wlEngine.ListEntries()
+		}
+
+		// Also provide resolvers & subnets fields for backward-compatibility with UI settings badges
+		resolvers := []string{
 			"1.1.1.1", "1.0.0.1", "8.8.8.8", "8.8.4.4", "9.9.9.9",
 			"208.67.222.222", "213.186.33.99", "213.186.33.100", "2001:41d0:3:163::1",
-		},
-		"subnets": []string{
-			"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
-			"127.0.0.0/8", "::1/128", "100.64.0.0/10", "fd7a:115c:a1e0::/48",
-		},
-	})
+		}
+		var subnets []string
+		for _, e := range entries {
+			subnets = append(subnets, e.CIDROrIP)
+		}
+
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success":   true,
+			"entries":   entries,
+			"resolvers": resolvers,
+			"subnets":   subnets,
+		})
+		return
+
+	case http.MethodPost:
+		// Add a new entry
+		var req struct {
+			CIDROrIP    string `json:"cidr_or_ip"`
+			CIDR        string `json:"cidr"` // UI compatibility
+			Description string `json:"description"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, `{"error":"invalid JSON body"}`, http.StatusBadRequest)
+			return
+		}
+
+		target := strings.TrimSpace(req.CIDROrIP)
+		if target == "" {
+			target = strings.TrimSpace(req.CIDR)
+		}
+		if target == "" {
+			http.Error(w, `{"error":"missing cidr_or_ip"}`, http.StatusBadRequest)
+			return
+		}
+
+		// Validation: Use net.ParseCIDR and fallback to net.ParseIP. Reject invalid syntax with 400 Bad Request.
+		_, _, errCIDR := net.ParseCIDR(target)
+		parsedIP := net.ParseIP(target)
+		if errCIDR != nil && parsedIP == nil {
+			http.Error(w, fmt.Sprintf(`{"error":"invalid CIDR or IP syntax: %s"}`, target), http.StatusBadRequest)
+			return
+		}
+
+		desc := req.Description
+		if desc == "" {
+			desc = "Administrative Whitelist Rule"
+		}
+
+		var created *whitelist.Entry
+		if wlEngine != nil {
+			var err error
+			created, err = wlEngine.AddEntry(target, desc, "OPERATOR")
+			if err != nil {
+				http.Error(w, fmt.Sprintf(`{"error":"failed to add whitelist entry: %v"}`, err), http.StatusInternalServerError)
+				return
+			}
+		}
+
+		// Also register with scoring threatEngine for consistency
+		if ws.server != nil && ws.server.threatEngine != nil {
+			_ = ws.server.threatEngine.AddWhitelistCIDR(target)
+		}
+
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"entry":   created,
+			"cidr":    target,
+		})
+		return
+
+	case http.MethodDelete:
+		// Remove an entry by IP/CIDR or ID. Prevent deletion of 127.0.0.1 and ::1.
+		var req struct {
+			ID       int64  `json:"id"`
+			CIDROrIP string `json:"cidr_or_ip"`
+			CIDR     string `json:"cidr"`
+		}
+		// Try parsing from body if available
+		_ = json.NewDecoder(r.Body).Decode(&req)
+
+		// Also check query parameters
+		if req.ID == 0 {
+			if idParam := r.URL.Query().Get("id"); idParam != "" {
+				if parsedID, err := strconv.ParseInt(idParam, 10, 64); err == nil {
+					req.ID = parsedID
+				}
+			}
+		}
+		if req.CIDROrIP == "" {
+			req.CIDROrIP = r.URL.Query().Get("cidr_or_ip")
+			if req.CIDROrIP == "" {
+				req.CIDROrIP = r.URL.Query().Get("cidr")
+				if req.CIDROrIP == "" {
+					req.CIDROrIP = req.CIDR
+				}
+			}
+		}
+
+		target := strings.TrimSpace(req.CIDROrIP)
+		if req.ID == 0 && target == "" {
+			http.Error(w, `{"error":"must specify id or cidr_or_ip to delete"}`, http.StatusBadRequest)
+			return
+		}
+
+		// Prevent deletion of 127.0.0.1 and ::1
+		if target == "127.0.0.1" || target == "127.0.0.1/32" || target == "::1" || target == "::1/128" {
+			http.Error(w, `{"error":"deletion rejected: loopback IP/CIDR is a non-removable system safeguard"}`, http.StatusForbidden)
+			return
+		}
+
+		if wlEngine != nil {
+			if err := wlEngine.DeleteEntry(req.ID, target); err != nil {
+				if strings.Contains(err.Error(), "safeguard") || strings.Contains(err.Error(), "loopback") {
+					http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err.Error()), http.StatusForbidden)
+					return
+				}
+				http.Error(w, fmt.Sprintf(`{"error":"failed to delete entry: %v"}`, err), http.StatusInternalServerError)
+				return
+			}
+		}
+
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"deleted": true,
+			"id":      req.ID,
+			"target":  target,
+		})
+		return
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
 }
 
 func (ws *WebSOCServer) handleGeoIPStats(w http.ResponseWriter, r *http.Request) {

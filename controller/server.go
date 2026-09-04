@@ -13,6 +13,7 @@ import (
 	"time"
 
 	copsecproto "github.com/copsec/collector/proto"
+	"github.com/copsec/controller/pkg/detection"
 	"github.com/copsec/controller/pkg/geoip"
 	"github.com/copsec/controller/pkg/ipinfo"
 	"github.com/copsec/controller/pkg/ml"
@@ -59,6 +60,7 @@ type CentralServer struct {
 	soarEngine   *AutonomousSOAREngine
 	threatIntel  *ThreatIntelEngine
 	nodes        map[string]*NodeSession
+	fleetManager *FleetManager
 	eventSubChan chan *StoredEvent
 
 	// Autonomous Auto-Ban Tracker
@@ -144,6 +146,20 @@ func (s *CentralServer) SetWSHub(hub *WSHub) {
 	if s.soarEngine != nil {
 		s.soarEngine.SetDependencies(s.storage, s, s.ttlManager, hub, s.threatIntel)
 	}
+}
+
+// SetFleetManager attaches the multi-node FleetManager broadcast hub.
+func (s *CentralServer) SetFleetManager(fm *FleetManager) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.fleetManager = fm
+}
+
+// GetFleetManager returns the attached FleetManager instance.
+func (s *CentralServer) GetFleetManager() *FleetManager {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.fleetManager
 }
 
 // SetSOAREngine attaches or overrides the AutonomousSOAREngine instance.
@@ -333,7 +349,29 @@ func (s *CentralServer) processEvent(nodeID string, event *copsecproto.LogEvent)
 		"message":     event.RawLine,
 	}
 
-	// 1. In-Memory SigmaHQ Detection Engine (pkg/rules/matcher.go)
+	// 1. Dynamic Hot-Reloadable Detection Rules Engine (pkg/detection)
+	var dynamicAction detection.RuleAction
+	var dynamicBanDuration int
+	detectionResults := detection.GetDefaultRegistry().EvaluateEvent(fields)
+	for _, res := range detectionResults {
+		if res.ThresholdMet {
+			if ruleID == "" {
+				ruleID = res.Rule.ID
+			}
+			if mitreID == "" {
+				mitreID = res.Rule.MitreTechniqueID
+			}
+			if threatScore < res.Rule.ThreatScore {
+				threatScore = res.Rule.ThreatScore
+			}
+			if res.Rule.Action == detection.ActionBan {
+				dynamicAction = detection.ActionBan
+				dynamicBanDuration = res.Rule.BanDurationSec
+			}
+		}
+	}
+
+	// 1b. In-Memory SigmaHQ Detection Engine (pkg/rules/matcher.go)
 	if matchedSigmaRule, matched := rules.GetDefaultMatcher().Evaluate(event.RawLine, fields); matched {
 		if ruleID == "" {
 			ruleID = matchedSigmaRule.ID
@@ -346,7 +384,7 @@ func (s *CentralServer) processEvent(nodeID string, event *copsecproto.LogEvent)
 		}
 	}
 
-	// 1b. SigmaEngine (controller/sigma_engine.go) fallback
+	// 1c. SigmaEngine (controller/sigma_engine.go) fallback
 	s.mu.RLock()
 	sigmaEng := s.sigmaEngine
 	s.mu.RUnlock()
@@ -579,7 +617,20 @@ func (s *CentralServer) processEvent(nodeID string, event *copsecproto.LogEvent)
 
 	// Check Autonomous Auto-Ban Policy & Dynamic TTL Management (only if not already mitigated)
 	if !isMitigated {
-		s.checkAutonomousBanPolicy(stored)
+		// Explicit ActionBan from dynamic detection rule
+		if dynamicAction == detection.ActionBan && stored.ClientIP != "" && !isProtectedIP(stored.ClientIP) {
+			banDuration := int64(dynamicBanDuration)
+			if banDuration <= 0 {
+				banDuration = 86400
+			}
+			if s.ttlManager != nil {
+				_, _ = s.ttlManager.BanIP(stored.ClientIP, fmt.Sprintf("Dynamic Detection Rule Triggered: %s", stored.RuleID), banDuration, TierAutoBanSOAR)
+				isMitigated = true
+				stored.TriageStatus = "AUTO_MITIGATED"
+			}
+		} else {
+			s.checkAutonomousBanPolicy(stored)
+		}
 	}
 
 	if hub != nil {
@@ -847,6 +898,15 @@ func (s *CentralServer) BroadcastSOARCommandWithReason(actionType, targetIP, rea
 		_ = s.storage.RecordSOARAction(actionType, targetIP, dispatched)
 	}
 
+	// Also broadcast across multi-node Fleet Mesh (gRPC streaming)
+	if s.fleetManager != nil {
+		if actionType == "BAN_IP" {
+			s.fleetManager.BroadcastBan(targetIP, reason, durationSec)
+		} else if actionType == "UNBAN_IP" || actionType == "WHITELIST_IP" {
+			s.fleetManager.BroadcastRevokeBan(targetIP)
+		}
+	}
+
 	log.Printf("[SOAR_BROADCAST] Dispatched %s for IP %s to %d nodes (Reason: %s)", actionType, targetIP, dispatched, reason)
 	return dispatched
 }
@@ -895,6 +955,9 @@ func StartGRPCServer(addr string, server *CentralServer) (*grpc.Server, error) {
 
 	grpcServer := grpc.NewServer(keepaliveParams, enforcementPolicy)
 	copsecproto.RegisterCopsecStreamServiceServer(grpcServer, server)
+	if server.fleetManager != nil {
+		server.fleetManager.RegisterService(grpcServer)
+	}
 
 	go func() {
 		log.Printf("[INFO] Controller gRPC Server listening on %s", addr)

@@ -8,7 +8,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 )
 
@@ -165,7 +164,9 @@ func (ig *IntegrityGuard) InspectKernelModuleLoad(callerPID int, moduleName stri
 // terminateAndQuarantine kills the rogue process immediately and moves its binary to quarantine.
 func (ig *IntegrityGuard) terminateAndQuarantine(pid int, binPath string) {
 	if pid > 1 {
-		_ = syscall.Kill(pid, syscall.SIGKILL)
+		if proc, err := os.FindProcess(pid); err == nil {
+			_ = proc.Kill()
+		}
 		atomic.AddUint64(&ig.processesTerminated, 1)
 		log.Printf("[EBPF_INTEGRITY] ⚡ Terminated rogue PID %d via SIGKILL (Process Injection / Rootkit Guard)", pid)
 	}

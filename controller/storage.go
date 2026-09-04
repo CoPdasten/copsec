@@ -16,6 +16,7 @@ import (
 
 	"github.com/copsec/controller/pkg/geoip"
 	"github.com/copsec/controller/pkg/models"
+	"github.com/copsec/controller/pkg/whitelist"
 	_ "modernc.org/sqlite"
 )
 
@@ -435,6 +436,14 @@ func (s *StorageEngine) initSchema() error {
 		payload_summary TEXT DEFAULT '',
 		timestamp_ms INTEGER NOT NULL,
 		auto_banned INTEGER DEFAULT 1
+	);
+
+	CREATE TABLE IF NOT EXISTS whitelist (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		cidr_or_ip TEXT UNIQUE NOT NULL,
+		description TEXT DEFAULT '',
+		added_by TEXT DEFAULT 'SYSTEM',
+		created_at_ms INTEGER NOT NULL
 	);
 	`
 	if _, err := s.db.Exec(baseTables); err != nil {
@@ -1060,6 +1069,30 @@ func (s *StorageEngine) GetRegisteredNodes() ([]NodeRegistryRecord, error) {
 	return list, nil
 }
 
+// MarkStaleNodesOffline sets status to OFFLINE for nodes with no heartbeat for more than staleDuration.
+func (s *StorageEngine) MarkStaleNodesOffline(staleDuration time.Duration) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	cutoffMs := time.Now().Add(-staleDuration).UnixMilli()
+	query := `UPDATE node_registry SET status = 'OFFLINE' WHERE last_seen_ms < ? AND status != 'OFFLINE'`
+	res, err := s.db.Exec(query, cutoffMs)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// UpdateNodeStatus updates the status string of a specific node.
+func (s *StorageEngine) UpdateNodeStatus(nodeID, status string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	query := `UPDATE node_registry SET status = ? WHERE node_id = ?`
+	_, err := s.db.Exec(query, status, nodeID)
+	return err
+}
+
 // RecordBan saves a banned IP in the jail (backward compatible).
 func (s *StorageEngine) RecordBan(ip, reason string, durationSeconds int64) error {
 	nowMs := time.Now().UnixMilli()
@@ -1489,6 +1522,56 @@ func (s *StorageEngine) GetTopAttackers(limit int) ([]TopAttackerRecord, error) 
 		}
 	}
 	return list, nil
+}
+
+// GetAllWhitelistEntries retrieves all active whitelist rules from SQLite.
+func (s *StorageEngine) GetAllWhitelistEntries() ([]whitelist.Entry, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rows, err := s.db.Query(`SELECT id, cidr_or_ip, description, added_by, created_at_ms FROM whitelist ORDER BY id ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var entries []whitelist.Entry
+	for rows.Next() {
+		var e whitelist.Entry
+		if err := rows.Scan(&e.ID, &e.CIDROrIP, &e.Description, &e.AddedBy, &e.CreatedAtMs); err == nil {
+			entries = append(entries, e)
+		}
+	}
+	return entries, nil
+}
+
+// AddWhitelistEntry inserts or ignores a whitelist rule in SQLite.
+func (s *StorageEngine) AddWhitelistEntry(cidrOrIP, description, addedBy string, createdAtMs int64) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	res, err := s.db.Exec(`INSERT INTO whitelist (cidr_or_ip, description, added_by, created_at_ms)
+	                      VALUES (?, ?, ?, ?)
+	                      ON CONFLICT(cidr_or_ip) DO UPDATE SET description=excluded.description`,
+		cidrOrIP, description, addedBy, createdAtMs)
+	if err != nil {
+		return 0, err
+	}
+	id, _ := res.LastInsertId()
+	return id, nil
+}
+
+// DeleteWhitelistEntry deletes a whitelist record by ID or CIDR/IP.
+func (s *StorageEngine) DeleteWhitelistEntry(id int64, cidrOrIP string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if id > 0 {
+		_, err := s.db.Exec(`DELETE FROM whitelist WHERE id = ?`, id)
+		return err
+	}
+	_, err := s.db.Exec(`DELETE FROM whitelist WHERE cidr_or_ip = ?`, cidrOrIP)
+	return err
 }
 
 // Close terminates database connections.

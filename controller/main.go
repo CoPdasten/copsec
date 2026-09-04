@@ -8,11 +8,13 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/copsec/controller/pkg/ipinfo"
+	"github.com/copsec/controller/pkg/whitelist"
 )
 
 func main() {
@@ -35,15 +37,32 @@ func main() {
 
 	isStandalone := *standaloneFlag || *pcFlag || strings.EqualFold(strings.TrimSpace(*modeFlag), "standalone")
 
+	// Support COPSEC_PORT environment override if not explicitly specified via CLI flag
+	effectiveWebPort := *webPortFlag
+	isWebPortPassed := false
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == "web-port" {
+			isWebPortPassed = true
+		}
+	})
+	if !isWebPortPassed {
+		if envPort := strings.TrimSpace(os.Getenv("COPSEC_PORT")); envPort != "" {
+			var p int
+			if _, err := fmt.Sscanf(envPort, "%d", &p); err == nil && p > 0 && p <= 65535 {
+				effectiveWebPort = p
+			}
+		}
+	}
+
 	// Resolve effective addresses and ports
 	grpcAddr := fmt.Sprintf("0.0.0.0:%d", *grpcPortFlag)
 	if *grpcAddrFlag != "" {
 		grpcAddr = *grpcAddrFlag
 	}
 
-	webAddr := fmt.Sprintf("0.0.0.0:%d", *webPortFlag)
+	webAddr := fmt.Sprintf("0.0.0.0:%d", effectiveWebPort)
 	if isStandalone && *webAddrFlag == "" && !*allowExternalBind {
-		webAddr = fmt.Sprintf("127.0.0.1:%d", *webPortFlag)
+		webAddr = fmt.Sprintf("127.0.0.1:%d", effectiveWebPort)
 	} else if *webAddrFlag != "" {
 		webAddr = *webAddrFlag
 	}
@@ -64,14 +83,35 @@ func main() {
 
 	// 1. Embedded Timeseries Storage (WAL-mode SQLite)
 	finalDbPath := *dbPath
+	isDbPassed := false
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == "db" {
+			isDbPassed = true
+		}
+	})
+	if !isDbPassed {
+		if envDataDir := strings.TrimSpace(os.Getenv("COPSEC_DATA_DIR")); envDataDir != "" {
+			finalDbPath = filepath.Join(envDataDir, "copsec.db")
+		} else if runtime.GOOS == "windows" {
+			progData := os.Getenv("ProgramData")
+			if progData == "" {
+				progData = `C:\ProgramData`
+			}
+			finalDbPath = filepath.Join(progData, "copsec", "data", "copsec.db")
+		}
+	}
 	if err := os.MkdirAll(filepath.Dir(finalDbPath), 0750); err != nil {
-		finalDbPath = "./copsec.db"
+		finalDbPath = filepath.Join(".", "data", "copsec.db")
+		_ = os.MkdirAll(filepath.Dir(finalDbPath), 0750)
 	}
 	storage, err := NewStorageEngine(finalDbPath)
 	if err != nil {
 		log.Fatalf("[FATAL] Storage engine initialization failed: %v", err)
 	}
 	defer storage.Close()
+
+	// Initialize Whitelist Engine with SQLite persistence & auto-seed guards
+	whitelist.GetDefaultEngine().SetStorage(storage)
 
 	// Bootstrap IPinfo token from persistent SQLite configuration
 	if token, err := storage.GetConfig("ipinfo_token"); err == nil && strings.TrimSpace(token) != "" {
@@ -87,19 +127,51 @@ func main() {
 	// 2. Rule Engine & SigmaHQ Detection-as-Code Engine
 	finalRulesPath := *rulesPath
 	if _, err := os.Stat(finalRulesPath); os.IsNotExist(err) {
-		fallback := "/etc/copsec/rules.json"
-		if _, err := os.Stat(fallback); err == nil {
-			finalRulesPath = fallback
+		fallbacks := []string{
+			filepath.Join("..", "config", "rules.json"),
+			filepath.Join(".", "config", "rules.json"),
+			filepath.Join(".", "rules.json"),
+		}
+		if runtime.GOOS == "windows" {
+			progData := os.Getenv("ProgramData")
+			if progData == "" {
+				progData = `C:\ProgramData`
+			}
+			fallbacks = append(fallbacks, filepath.Join(progData, "copsec", "rules.json"))
+		} else {
+			fallbacks = append(fallbacks, "/etc/copsec/rules.json")
+		}
+		for _, fb := range fallbacks {
+			if _, err := os.Stat(fb); err == nil {
+				finalRulesPath = fb
+				break
+			}
 		}
 	}
 	analyzer := NewRuleEngine(finalRulesPath)
 
 	finalSigmaDir := *sigmaDir
 	if _, err := os.Stat(finalSigmaDir); os.IsNotExist(err) {
-		fallback := "./sigma"
-		if _, err := os.Stat(fallback); err == nil {
-			finalSigmaDir = fallback
+		fallbacks := []string{
+			filepath.Join(".", "sigma"),
+			filepath.Join("..", "sigma"),
+		}
+		if runtime.GOOS == "windows" {
+			progData := os.Getenv("ProgramData")
+			if progData == "" {
+				progData = `C:\ProgramData`
+			}
+			fallbacks = append(fallbacks, filepath.Join(progData, "copsec", "sigma"))
 		} else {
+			fallbacks = append(fallbacks, "/etc/copsec/sigma")
+		}
+		for _, fb := range fallbacks {
+			if _, err := os.Stat(fb); err == nil {
+				finalSigmaDir = fb
+				break
+			}
+		}
+		if _, err := os.Stat(finalSigmaDir); os.IsNotExist(err) {
 			finalSigmaDir = ""
 		}
 	}
@@ -117,6 +189,11 @@ func main() {
 	ttlManager := NewTTLBanManager(storage, centralServer)
 	centralServer.SetTTLManager(ttlManager)
 	defer ttlManager.Stop()
+
+	// 4b. Multi-Node Fleet Mesh Manager (gRPC Bidirectional Orchestration)
+	fleetManager := NewFleetManager(storage, centralServer)
+	centralServer.SetFleetManager(fleetManager)
+	defer fleetManager.Close()
 
 	// Start Autonomous SOAR Engine with sliding-window threat correlator
 	if centralServer.GetSOAREngine() != nil {

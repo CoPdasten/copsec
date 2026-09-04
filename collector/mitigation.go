@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/copsec/collector/pkg/ebpf"
+	"github.com/copsec/collector/pkg/quarantine"
 )
 
 var (
@@ -88,17 +89,20 @@ func ExecuteInstantBan(ip string) error {
 	// 0. ANLIK eBPF/XDP FAST-PATH İMHA (NIC Ring Buffer / Driver Drop)
 	_ = ebpf.GetXDPEngine().AddBan(cleanIP)
 
-	// 1. ANLIK L3 İMHA (Kernel PREROUTING & INPUT)
-	_ = exec.Command("sudo", "iptables", "-t", "raw", "-I", "PREROUTING", "1", "-s", cleanIP, "-j", "DROP").Run()
-	_ = exec.Command("sudo", "iptables", "-I", "INPUT", "1", "-s", cleanIP, "-j", "DROP").Run()
+	// 1. Cross-platform Quarantine Driver (Linux iptables/conntrack/XDP or Windows Firewall)
+	if driver := quarantine.GetDriver(); driver != nil {
+		_ = driver.BlockIP(cleanIP, "Fleet/Edge Automated Quarantine")
+	} else {
+		// Fallback to direct iptables if driver not registered
+		_ = exec.Command("sudo", "iptables", "-t", "raw", "-I", "PREROUTING", "1", "-s", cleanIP, "-j", "DROP").Run()
+		_ = exec.Command("sudo", "iptables", "-I", "INPUT", "1", "-s", cleanIP, "-j", "DROP").Run()
+		_ = exec.Command("sudo", "conntrack", "-D", "-s", cleanIP).Run()
+		_ = exec.Command("sudo", "conntrack", "-D", "-d", cleanIP).Run()
+		_ = exec.Command("sudo", "ss", "-K", "dst", cleanIP).Run()
+		_ = exec.Command("sudo", "ss", "-K", "src", cleanIP).Run()
+	}
 
-	// 2. ANLIK L4 SOKET VE KERNEL STATE TEMİZLİĞİ (0 Gecikme)
-	_ = exec.Command("sudo", "conntrack", "-D", "-s", cleanIP).Run()
-	_ = exec.Command("sudo", "conntrack", "-D", "-d", cleanIP).Run()
-	_ = exec.Command("sudo", "ss", "-K", "dst", cleanIP).Run()
-	_ = exec.Command("sudo", "ss", "-K", "src", cleanIP).Run()
-
-	// 3. ASENKRON L7 NGINX WAF (Arka planda reload etsin, ana akışı bekletmesin)
+	// 2. ASENKRON L7 NGINX WAF (Arka planda reload etsin, ana akışı bekletmesin)
 	go func(targetIP string) {
 		blocklistPath := "/etc/nginx/conf.d/copsec_blocklist.conf"
 		data, _ := os.ReadFile(blocklistPath)
@@ -133,9 +137,14 @@ func ExecuteAbsoluteUnban(ip string) error {
 	// 0. eBPF/XDP Haritasından Temizle
 	_ = ebpf.GetXDPEngine().RemoveBan(ip)
 
-	// 1. iptables Kurallarını Kaldır
-	_ = exec.Command("sudo", "iptables", "-t", "raw", "-D", "PREROUTING", "-s", ip, "-j", "DROP").Run()
-	_ = exec.Command("sudo", "iptables", "-D", "INPUT", "-s", ip, "-j", "DROP").Run()
+	// 1. Cross-platform Quarantine Driver (Linux iptables/conntrack/XDP or Windows Firewall)
+	if driver := quarantine.GetDriver(); driver != nil {
+		_ = driver.UnblockIP(ip)
+	} else {
+		// iptables Kurallarını Kaldır
+		_ = exec.Command("sudo", "iptables", "-t", "raw", "-D", "PREROUTING", "-s", ip, "-j", "DROP").Run()
+		_ = exec.Command("sudo", "iptables", "-D", "INPUT", "-s", ip, "-j", "DROP").Run()
+	}
 
 	// 2. Nginx Blocklist Dosyasından Çıkar
 	blocklistPath := "/etc/nginx/conf.d/copsec_blocklist.conf"

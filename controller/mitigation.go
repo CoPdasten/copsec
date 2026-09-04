@@ -6,8 +6,12 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"sync"
+
+	"github.com/copsec/controller/pkg/quarantine"
+	"github.com/copsec/controller/pkg/whitelist"
 )
 
 var (
@@ -42,7 +46,8 @@ var knownPublicDNS = map[string]bool{
 	"2620:119:53::53":      true,
 }
 
-// isProtectedIP checks if an IP belongs to local machine, private networks, CGNAT, or public DNS resolvers.
+// isProtectedIP checks if an IP belongs to local machine, private networks, CGNAT, public DNS resolvers,
+// or dynamic persistent whitelist CIDRs / entries.
 func isProtectedIP(ipStr string) bool {
 	cleanIP := strings.TrimSpace(ipStr)
 	if cleanIP == "" || cleanIP == "-" || cleanIP == "127.0.0.1" || cleanIP == "::1" || cleanIP == "localhost" || cleanIP == "local" {
@@ -51,6 +56,13 @@ func isProtectedIP(ipStr string) bool {
 	if knownPublicDNS[cleanIP] || cleanIP == "37.59.108.186" {
 		return true
 	}
+
+	// 0. Dynamic Whitelist Radix/CIDR & Host Guard Check
+	if wlEngine := whitelist.GetDefaultEngine(); wlEngine != nil && wlEngine.IsWhitelisted(cleanIP) {
+		log.Printf("[AUDIT] Quarantine bypass triggered for whitelisted target: %s", cleanIP)
+		return true
+	}
+
 	parsed := net.ParseIP(cleanIP)
 	if parsed == nil {
 		return true
@@ -83,19 +95,19 @@ func ExecuteInstantBan(ip string) error {
 	bannedIPMap.Store(cleanIP, true)
 	banLock.Unlock()
 
-	// 1. ANLIK L3 İMHA (Kernel PREROUTING & INPUT)
-	_ = exec.Command("sudo", "iptables", "-t", "raw", "-I", "PREROUTING", "1", "-s", cleanIP, "-j", "DROP").Run()
-	_ = exec.Command("sudo", "iptables", "-I", "INPUT", "1", "-s", cleanIP, "-j", "DROP").Run()
+	// 1. Delegate to Platform Quarantine Driver (Linux iptables/conntrack or Windows Firewall netsh)
+	if driver := quarantine.GetDriver(); driver != nil {
+		if err := driver.BlockIP(cleanIP, "Autonomous SOAR Zero-Latency Mitigation"); err != nil {
+			log.Printf("[SOAR_MITIGATION] Quarantine driver block notice for %s: %v", cleanIP, err)
+		}
+	}
 
-	// 2. ANLIK L4 SOKET VE KERNEL STATE TEMİZLİĞİ (0 Gecikme)
-	_ = exec.Command("sudo", "conntrack", "-D", "-s", cleanIP).Run()
-	_ = exec.Command("sudo", "conntrack", "-D", "-d", cleanIP).Run()
-	_ = exec.Command("sudo", "ss", "-K", "dst", cleanIP).Run()
-	_ = exec.Command("sudo", "ss", "-K", "src", cleanIP).Run()
-
-	// 3. ASENKRON L7 NGINX WAF (Arka planda reload etsin, ana akışı bekletmesin)
+	// 2. Asynchronous L7 Nginx WAF blocklist update (Linux/reverse-proxy deployments)
 	go func(targetIP string) {
 		blocklistPath := "/etc/nginx/conf.d/copsec_blocklist.conf"
+		if runtime.GOOS == "windows" {
+			return
+		}
 		data, _ := os.ReadFile(blocklistPath)
 		if !strings.Contains(string(data), fmt.Sprintf("deny %s;", targetIP)) {
 			f, err := os.OpenFile(blocklistPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
@@ -113,41 +125,44 @@ func ExecuteInstantBan(ip string) error {
 	return nil
 }
 
-// ExecuteAbsoluteBan: L3 (RAW/INPUT), L4 (Socket/Conntrack Kill) ve L7 (Nginx WAF) Hibrit İnfaz
+// ExecuteAbsoluteBan: L3/Firewall, L4 Socket/Conntrack, and L7 Nginx WAF Hybrid Isolation
 func ExecuteAbsoluteBan(ip string) error {
 	return ExecuteInstantBan(ip)
 }
 
-// ExecuteAbsoluteUnban: İnfazı tüm katmanlardan eksiksiz temizleme
+// ExecuteAbsoluteUnban: Purge isolation across all platform layers
 func ExecuteAbsoluteUnban(ip string) error {
 	banLock.Lock()
 	defer banLock.Unlock()
 
 	ip = strings.TrimSpace(ip)
 
-	// 1. iptables Kurallarını Kaldır
-	_ = exec.Command("sudo", "iptables", "-t", "raw", "-D", "PREROUTING", "-s", ip, "-j", "DROP").Run()
-	_ = exec.Command("sudo", "iptables", "-D", "INPUT", "-s", ip, "-j", "DROP").Run()
+	// 1. Unblock via Platform Quarantine Driver (Linux iptables or Windows Firewall netsh)
+	if driver := quarantine.GetDriver(); driver != nil {
+		_ = driver.UnblockIP(ip)
+	}
 
-	// 2. Nginx Blocklist Dosyasından Çıkar
-	blocklistPath := "/etc/nginx/conf.d/copsec_blocklist.conf"
-	data, err := os.ReadFile(blocklistPath)
-	if err == nil {
-		lines := strings.Split(string(data), "\n")
-		var cleanLines []string
-		target := fmt.Sprintf("deny %s;", ip)
-		for _, l := range lines {
-			if strings.TrimSpace(l) != target && strings.TrimSpace(l) != "" {
-				cleanLines = append(cleanLines, l)
+	// 2. Remove from Nginx Blocklist (Linux/reverse-proxy deployments)
+	if runtime.GOOS != "windows" {
+		blocklistPath := "/etc/nginx/conf.d/copsec_blocklist.conf"
+		data, err := os.ReadFile(blocklistPath)
+		if err == nil {
+			lines := strings.Split(string(data), "\n")
+			var cleanLines []string
+			target := fmt.Sprintf("deny %s;", ip)
+			for _, l := range lines {
+				if strings.TrimSpace(l) != target && strings.TrimSpace(l) != "" {
+					cleanLines = append(cleanLines, l)
+				}
 			}
-		}
-		newContent := strings.Join(cleanLines, "\n")
-		if len(cleanLines) > 0 {
-			newContent += "\n"
-		}
-		_ = os.WriteFile(blocklistPath, []byte(newContent), 0644)
-		if err := exec.Command("sudo", "nginx", "-t").Run(); err == nil {
-			_ = exec.Command("sudo", "nginx", "-s", "reload").Run()
+			newContent := strings.Join(cleanLines, "\n")
+			if len(cleanLines) > 0 {
+				newContent += "\n"
+			}
+			_ = os.WriteFile(blocklistPath, []byte(newContent), 0644)
+			if err := exec.Command("sudo", "nginx", "-t").Run(); err == nil {
+				_ = exec.Command("sudo", "nginx", "-s", "reload").Run()
+			}
 		}
 	}
 

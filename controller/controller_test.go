@@ -14,6 +14,7 @@ import (
 	copsecproto "github.com/copsec/collector/proto"
 	"github.com/copsec/controller/pkg/sigma"
 	"github.com/copsec/controller/pkg/soar"
+	"github.com/copsec/controller/pkg/whitelist"
 	"google.golang.org/grpc/metadata"
 )
 
@@ -1498,6 +1499,139 @@ func TestSQLInjectionProtection(t *testing.T) {
 				t.Errorf("SQL Injection leak detected on payload %q: matched %v", payload, ev)
 			}
 		}
+	}
+}
+
+func TestWhitelistedIPBanRejection(t *testing.T) {
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "test_whitelist_ban.db")
+	store, err := NewStorageEngine(dbPath)
+	if err != nil {
+		t.Fatalf("StorageEngine init failed: %v", err)
+	}
+	defer store.Close()
+
+	wlEngine := whitelist.GetDefaultEngine()
+	wlEngine.SetStorage(store)
+
+	// Add a protected internal subnet
+	trustedSubnet := "192.168.10.0/24"
+	_, err = wlEngine.AddEntry(trustedSubnet, "Critical Corporate LAN", "ADMIN")
+	if err != nil {
+		t.Fatalf("Failed to add whitelist subnet: %v", err)
+	}
+
+	analyzer := NewRuleEngine("")
+	server := NewCentralServer(store, analyzer)
+	ttlMgr := NewTTLBanManager(store, server)
+	defer ttlMgr.Stop()
+	wsHub := NewWSHub()
+	webSoc := NewWebSOCServer(":0", server, store, ttlMgr, nil, wsHub)
+
+	// Attempting to ban IP inside whitelisted subnet (192.168.10.55)
+	whitelistedTarget := "192.168.10.55"
+	reqBody, _ := json.Marshal(map[string]interface{}{
+		"ip":               whitelistedTarget,
+		"duration_seconds": 3600,
+		"reason":           "Malicious Actor Simulation on Whitelisted Subnet",
+	})
+
+	req := httptest.NewRequest("POST", "/api/quarantine/ban", bytes.NewBuffer(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	webSoc.handleSOARBan(rec, req)
+
+	// Guardrail check: MUST return HTTP 409 Conflict
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("Expected HTTP 409 Conflict when banning whitelisted IP %s, got %d: %s",
+			whitelistedTarget, rec.Code, rec.Body.String())
+	}
+
+	var resp map[string]string
+	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
+	if !strings.Contains(resp["error"], "protected by active whitelist rule") {
+		t.Errorf("Expected rejection message in response, got: %v", resp)
+	}
+
+	// Verify target was NEVER added to active_bans table
+	activeBans, err := store.GetActiveBansDetailed()
+	if err != nil {
+		t.Fatalf("GetActiveBansDetailed failed: %v", err)
+	}
+	for _, b := range activeBans {
+		if b.IP == whitelistedTarget {
+			t.Errorf("Security violation: Whitelisted IP %s was inserted into active_bans!", whitelistedTarget)
+		}
+	}
+}
+
+func TestWhitelistAPICRUD(t *testing.T) {
+	tempDir := t.TempDir()
+	dbPath := filepath.Join(tempDir, "test_whitelist_api.db")
+	store, err := NewStorageEngine(dbPath)
+	if err != nil {
+		t.Fatalf("StorageEngine init failed: %v", err)
+	}
+	defer store.Close()
+
+	wlEngine := whitelist.GetDefaultEngine()
+	wlEngine.SetStorage(store)
+
+	analyzer := NewRuleEngine("")
+	server := NewCentralServer(store, analyzer)
+	ttlMgr := NewTTLBanManager(store, server)
+	defer ttlMgr.Stop()
+	wsHub := NewWSHub()
+	webSoc := NewWebSOCServer(":0", server, store, ttlMgr, nil, wsHub)
+
+	// 1. GET /api/whitelist
+	getReq := httptest.NewRequest("GET", "/api/whitelist", nil)
+	getRec := httptest.NewRecorder()
+	webSoc.handleWhitelist(getRec, getReq)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("GET /api/whitelist expected 200, got %d", getRec.Code)
+	}
+
+	// 2. POST /api/whitelist - Valid CIDR
+	postBody, _ := json.Marshal(map[string]interface{}{
+		"cidr_or_ip":  "10.200.0.0/16",
+		"description": "Branch Office VPN",
+	})
+	postReq := httptest.NewRequest("POST", "/api/whitelist", bytes.NewBuffer(postBody))
+	postReq.Header.Set("Content-Type", "application/json")
+	postRec := httptest.NewRecorder()
+	webSoc.handleWhitelist(postRec, postReq)
+	if postRec.Code != http.StatusCreated {
+		t.Fatalf("POST /api/whitelist expected 201, got %d: %s", postRec.Code, postRec.Body.String())
+	}
+
+	// 3. POST /api/whitelist - Invalid CIDR/IP
+	badBody, _ := json.Marshal(map[string]interface{}{
+		"cidr_or_ip": "not-an-ip-address",
+	})
+	badReq := httptest.NewRequest("POST", "/api/whitelist", bytes.NewBuffer(badBody))
+	badReq.Header.Set("Content-Type", "application/json")
+	badRec := httptest.NewRecorder()
+	webSoc.handleWhitelist(badRec, badReq)
+	if badRec.Code != http.StatusBadRequest {
+		t.Fatalf("POST /api/whitelist with invalid IP expected 400, got %d", badRec.Code)
+	}
+
+	// 4. DELETE /api/whitelist - Attempt loopback deletion (must be 403)
+	delLoopbackReq := httptest.NewRequest("DELETE", "/api/whitelist?cidr_or_ip=127.0.0.1/32", nil)
+	delLoopbackRec := httptest.NewRecorder()
+	webSoc.handleWhitelist(delLoopbackRec, delLoopbackReq)
+	if delLoopbackRec.Code != http.StatusForbidden {
+		t.Fatalf("DELETE loopback expected 403 Forbidden, got %d", delLoopbackRec.Code)
+	}
+
+	// 5. DELETE /api/whitelist - Delete the added subnet
+	delReq := httptest.NewRequest("DELETE", "/api/whitelist?cidr_or_ip=10.200.0.0/16", nil)
+	delRec := httptest.NewRecorder()
+	webSoc.handleWhitelist(delRec, delReq)
+	if delRec.Code != http.StatusOK {
+		t.Fatalf("DELETE /api/whitelist expected 200, got %d", delRec.Code)
 	}
 }
 

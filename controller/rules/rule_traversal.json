@@ -1,0 +1,17 @@
+{
+  "id": "RULE-TRAVERSAL-001",
+  "name": "Path Traversal \u0026 Arbitrary File Read",
+  "description": "Detects directory traversal sequences and access to sensitive Linux/Windows files",
+  "severity": "HIGH",
+  "threat_score": 75,
+  "mitre_technique_id": "T1083",
+  "enabled": true,
+  "target_field": "uri",
+  "match_type": "contains",
+  "pattern": "../",
+  "entropy_threshold": 0,
+  "window_seconds": 60,
+  "hit_threshold": 2,
+  "action": "BAN",
+  "ban_duration_sec": 3600
+}
