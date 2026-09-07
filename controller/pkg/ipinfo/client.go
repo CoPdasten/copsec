@@ -16,8 +16,24 @@ import (
 	"time"
 )
 
-// DefaultIPInfoToken is the fallback pre-configured token for live IPinfo.io lookups.
-const DefaultIPInfoToken = "5d61b28f40a2d8"
+// ipInfoTokenOnce ensures the environment-based token warning is logged only once.
+var ipInfoTokenOnce sync.Once
+
+// DefaultIPInfoToken returns the IPinfo token from environment variables.
+// It checks COPSEC_IPINFO_TOKEN first, then IPINFO_TOKEN.
+// If neither is set, it logs a warning and returns an empty string.
+func DefaultIPInfoToken() string {
+	token := os.Getenv("COPSEC_IPINFO_TOKEN")
+	if token == "" {
+		token = os.Getenv("IPINFO_TOKEN")
+	}
+	if token == "" {
+		ipInfoTokenOnce.Do(func() {
+			log.Printf("[WARN] No IPinfo token configured. Set COPSEC_IPINFO_TOKEN or IPINFO_TOKEN environment variable to enable IP intelligence lookups.")
+		})
+	}
+	return token
+}
 
 // ASNInfo contains Autonomous System Number metadata from IPinfo.
 type ASNInfo struct {
@@ -193,13 +209,7 @@ var (
 // GetDefaultClient returns the singleton IPinfo client.
 func GetDefaultClient() *Client {
 	clientOnce.Do(func() {
-		token := os.Getenv("IPINFO_TOKEN")
-		if token == "" {
-			token = os.Getenv("COPSEC_IPINFO_TOKEN")
-		}
-		if token == "" {
-			token = DefaultIPInfoToken
-		}
+		token := DefaultIPInfoToken()
 		defaultClient = NewClient(token)
 	})
 	return defaultClient
@@ -208,13 +218,7 @@ func GetDefaultClient() *Client {
 // NewClient initializes the IPinfo intelligence client with a background worker pool.
 func NewClient(token string) *Client {
 	if token == "" {
-		token = os.Getenv("IPINFO_TOKEN")
-		if token == "" {
-			token = os.Getenv("COPSEC_IPINFO_TOKEN")
-		}
-		if token == "" {
-			token = DefaultIPInfoToken
-		}
+		token = DefaultIPInfoToken()
 	}
 
 	c := &Client{
@@ -261,7 +265,7 @@ func (c *Client) GetToken() string {
 func (c *Client) IsConfigured() bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.token != "" && c.token != DefaultIPInfoToken
+	return c.token != ""
 }
 
 // SetBaseURL overrides the API endpoint (useful for mock testing).

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -205,6 +206,8 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	var wg sync.WaitGroup
+
 	// Hook TTL ban changes into WebSocket broadcast hub
 	ttlManager.SetOnBanChangeCallback(func(ban *DetailedBanRecord, action string) {
 		wsHub.Broadcast("ban_change", map[string]interface{}{
@@ -237,7 +240,9 @@ func main() {
 	}
 
 	// 7. Start gRPC Ingestion Server in background (Hub-and-Spoke)
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		grpcServer, err := StartGRPCServer(grpcAddr, centralServer)
 		if err != nil {
 			if isStandalone {
@@ -263,5 +268,18 @@ func main() {
 
 	log.Println("[INFO] Gracefully shutting down CoPSeC Controller & flushing SQLite WAL...")
 	cancel()
-	time.Sleep(150 * time.Millisecond)
+
+	// Wait for background goroutines to finish, with a timeout
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		log.Println("[INFO] All background goroutines stopped cleanly.")
+	case <-time.After(5 * time.Second):
+		log.Println("[WARN] Graceful shutdown timed out after 5s; proceeding with shutdown.")
+	}
 }

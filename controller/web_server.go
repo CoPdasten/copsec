@@ -339,7 +339,7 @@ func (ws *WebSOCServer) handleConfig(w http.ResponseWriter, r *http.Request) {
 
 func maskToken(token string) string {
 	token = strings.TrimSpace(token)
-	if token == "" || token == ipinfo.DefaultIPInfoToken {
+	if token == "" {
 		return ""
 	}
 	if len(token) <= 4 {
@@ -363,7 +363,7 @@ func (ws *WebSOCServer) handleConfigIPInfo(w http.ResponseWriter, r *http.Reques
 			token = ipinfo.GetDefaultClient().GetToken()
 		}
 
-		configured := token != "" && token != ipinfo.DefaultIPInfoToken
+		configured := token != ""
 		if configured {
 			json.NewEncoder(w).Encode(map[string]interface{}{
 				"configured":   true,
@@ -399,7 +399,7 @@ func (ws *WebSOCServer) handleConfigIPInfo(w http.ResponseWriter, r *http.Reques
 
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"status":     "saved",
-			"configured": token != "" && token != ipinfo.DefaultIPInfoToken,
+			"configured": token != "",
 		})
 		return
 	}
@@ -411,7 +411,7 @@ func (ws *WebSOCServer) loadSystemConfig() *SystemConfigDTO {
 	dto := &SystemConfigDTO{
 		GRPCAddr:         "0.0.0.0:8443",
 		AutoBanThreshold: 80,
-		IPInfoToken:      ipinfo.DefaultIPInfoToken,
+		IPInfoToken:      ipinfo.DefaultIPInfoToken(),
 		Configured:       false,
 	}
 
@@ -448,9 +448,6 @@ func (ws *WebSOCServer) saveSystemConfig(cfg *SystemConfigDTO) error {
 	}
 
 	tok := cfg.IPInfoToken
-	if tok == "" {
-		tok = ipinfo.DefaultIPInfoToken
-	}
 
 	cfgMap := map[string]string{
 		"grpc_addr":         cfg.GRPCAddr,
@@ -466,11 +463,7 @@ func (ws *WebSOCServer) applyRuntimeConfig(cfg *SystemConfigDTO) {
 	if ws.server != nil {
 		ws.server.SetAutoBanPolicy(true, cfg.AutoBanThreshold)
 
-		// Reconfigure IPinfo Token dynamically
 		tok := cfg.IPInfoToken
-		if tok == "" {
-			tok = ipinfo.DefaultIPInfoToken
-		}
 		ipinfo.GetDefaultClient().SetToken(tok)
 	}
 }

@@ -624,6 +624,9 @@
     <button class="tab-btn" onclick="navigateTo('telemetry')">[TELEMETRY] <span class="tab-badge" id="badgeTelemetry">0</span></button>
     <button class="tab-btn" onclick="navigateTo('alerts')">[ALERTS] <span class="tab-badge" id="badgeAlerts">0</span></button>
     <button class="tab-btn" onclick="navigateTo('rules')">[DETECTION RULES] <span class="tab-badge" id="badgeRules">0</span></button>
+    <button class="tab-btn" onclick="navigateTo('canary')">[CANARY DECEPTION] <span class="tab-badge" id="badgeCanary">0</span></button>
+    <button class="tab-btn" onclick="navigateTo('pcap')">[PCAP FORENSICS] <span class="tab-badge" id="badgePcap">0</span></button>
+    <button class="tab-btn" onclick="navigateTo('edr')">[KERNEL EDR] <span class="tab-badge" id="badgeEDR">0</span></button>
     <button class="tab-btn" onclick="navigateTo('settings')">[FLEET & SETTINGS]</button>
   </nav>
 
@@ -986,6 +989,130 @@
         <div id="whitelistTags" style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px;">
           <!-- Whitelist badges -->
         </div>
+      </div>
+    </div>
+
+    <!-- Tab: Canary Deception -->
+    <div id="tab-canary" class="tab-pane">
+      <div class="toolbar">
+        <div class="toolbar-left">
+          <span style="color: var(--text-muted); font-size: 11px;">Dynamic Honey-Token Deception Engine — Zero False-Positive Bait Credentials & Shadow Traps</span>
+        </div>
+        <div class="toolbar-right">
+          <button class="btn" onclick="generateCanaryToken('AWS_KEY')">[DEPLOY AWS KEY]</button>
+          <button class="btn" onclick="generateCanaryToken('API_TOKEN')">[DEPLOY BEARER TOKEN]</button>
+          <button class="btn" onclick="generateCanaryToken('DB_STRING')">[DEPLOY DB URI]</button>
+          <button class="btn" onclick="fetchCanaryTokens()">[REFRESH]</button>
+        </div>
+      </div>
+
+      <div class="metric-grid" style="grid-template-columns: repeat(3, 1fr);">
+        <div class="metric-card">
+          <div class="metric-header"><span>ACTIVE DECOYS</span><span class="badge badge-active">[ARMED]</span></div>
+          <div class="metric-val" id="canaryActiveCount">0</div>
+          <div class="metric-desc">Deployed honey-tokens awaiting attacker interaction</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-header"><span>TRIGGERED TRAPS</span><span class="badge badge-crit">[TRIPPED]</span></div>
+          <div class="metric-val" id="canaryTriggeredCount">0</div>
+          <div class="metric-desc">Attacker interactions with decoy credentials</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-header"><span>ZERO-FP BANS</span><span class="badge badge-xdp">[XDP_DROP]</span></div>
+          <div class="metric-val" id="canaryBansCount">0</div>
+          <div class="metric-desc">Autonomous quarantines dispatched from canary triggers</div>
+        </div>
+      </div>
+
+      <div class="card table-container">
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 100px;">TYPE</th>
+              <th style="width: 180px;">MASKED IDENTIFIER</th>
+              <th style="width: 130px;">CREATED AT</th>
+              <th style="width: 80px;">TRIP COUNT</th>
+              <th style="width: 100px;">STATUS</th>
+            </tr>
+          </thead>
+          <tbody id="canaryTableBody">
+            <tr><td colspan="5" style="text-align: center; color: var(--text-muted); padding: 18px;">No canary tokens deployed yet. Deploy decoy credentials above.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Tab: PCAP Forensics -->
+    <div id="tab-pcap" class="tab-pane">
+      <div class="toolbar">
+        <div class="toolbar-left">
+          <span style="color: var(--text-muted); font-size: 11px;">Pre-Attack Forensic PCAP Dumps — Circular 64MB In-Memory Ring Buffer Snapshots</span>
+        </div>
+        <div class="toolbar-right">
+          <button class="btn" onclick="fetchPcapSnapshots()">[REFRESH SNAPSHOTS]</button>
+        </div>
+      </div>
+
+      <div class="card table-container">
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 130px;">TIMESTAMP</th>
+              <th style="width: 120px;">ATTACKER IP</th>
+              <th style="width: 200px;">TRIGGER RULE</th>
+              <th style="width: 90px;">PCAP SIZE</th>
+              <th style="width: 80px;">PACKETS</th>
+              <th style="width: 130px; text-align: right;">ACTION</th>
+            </tr>
+          </thead>
+          <tbody id="pcapTableBody">
+            <tr><td colspan="6" style="text-align: center; color: var(--text-muted); padding: 18px;">No pre-attack PCAP snapshots captured yet</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Tab: Kernel EDR -->
+    <div id="tab-edr" class="tab-pane">
+      <div class="toolbar">
+        <div class="toolbar-left">
+          <span style="color: var(--text-muted); font-size: 11px;">eBPF Kernel EDR — Process Injection Guard & Rogue Process Termination Stream</span>
+        </div>
+        <div class="toolbar-right">
+          <button class="btn" id="btnEdrAutoScroll" onclick="toggleEdrAutoScroll()">[AUTO-SCROLL: ON]</button>
+          <button class="btn" onclick="clearEdrTerminal()">[CLEAR TERMINAL]</button>
+        </div>
+      </div>
+
+      <div class="metric-grid" style="grid-template-columns: repeat(4, 1fr);">
+        <div class="metric-card">
+          <div class="metric-header"><span>EDR KILLS</span><span class="badge badge-crit">[SIGKILL]</span></div>
+          <div class="metric-val" id="edrKillCount">0</div>
+          <div class="metric-desc">Rogue processes terminated by eBPF guard</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-header"><span>EDR ALERTS</span><span class="badge badge-high">[ALERT]</span></div>
+          <div class="metric-val" id="edrAlertCount">0</div>
+          <div class="metric-desc">Suspicious process detections (monitored)</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-header"><span>DNS ENTROPY</span><span class="badge badge-layer">[H&ge;3.8]</span></div>
+          <div class="metric-val" id="edrDnsEntropyCount">0</div>
+          <div class="metric-desc">High-entropy DNS queries (DGA / tunneling)</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-header"><span>DNS SINKHOLED</span><span class="badge badge-xdp">[BLOCKED]</span></div>
+          <div class="metric-val" id="edrDnsSinkholeCount">0</div>
+          <div class="metric-desc">Malicious domains intercepted & sinkholed</div>
+        </div>
+      </div>
+
+      <div class="card" style="flex: 1; display: flex; flex-direction: column;">
+        <div class="card-title">
+          <span>Kernel EDR & DNS Tunneling Live Terminal Stream</span>
+          <span class="badge badge-active" id="edrStreamStatus">[LIVE]</span>
+        </div>
+        <div class="terminal-box" id="edrTerminal" style="flex: 1; max-height: none; min-height: 300px; font-size: 11px;"></div>
       </div>
     </div>
 
@@ -1429,6 +1556,10 @@
       if (tabId === 'alerts') fetchAlerts();
       if (tabId === 'rules') fetchRules();
       if (tabId === 'settings') fetchSettings();
+      if (tabId === 'canary') fetchCanaryTokens();
+      if (tabId === 'pcap') fetchPcapSnapshots();
+      if (tabId === 'quarantine') fetchQuarantineBans();
+      if (tabId === 'stats') fetchStats();
     }
 
     // WebSocket Stream Connection
@@ -3330,6 +3461,15 @@ ${notes}
         } else if (e.key === '4') {
           e.preventDefault();
           navigateTo('rules');
+        } else if (e.key === '5') {
+          e.preventDefault();
+          navigateTo('canary');
+        } else if (e.key === '6') {
+          e.preventDefault();
+          navigateTo('pcap');
+        } else if (e.key === '7') {
+          e.preventDefault();
+          navigateTo('edr');
         } else if (e.key === '/') {
           e.preventDefault();
           if (activePane && activePane.id === 'tab-telemetry') {
@@ -3443,6 +3583,274 @@ ${notes}
       setInterval(fetchTopActors, 15000);
       setInterval(fetchSOARAutoPilotStatus, 30000);
     });
+
+    // ============================================
+    // CANARY DECEPTION SUBSYSTEM
+    // ============================================
+    let canaryTokensList = [];
+
+    async function fetchCanaryTokens() {
+      try {
+        const res = await fetch('/api/canary/tokens');
+        if (!res.ok) return;
+        const data = await res.json();
+        const tokens = data.tokens || [];
+        const stats = data.stats || {};
+        canaryTokensList = tokens;
+
+        document.getElementById('canaryActiveCount').textContent = stats.active_count || tokens.filter(t => !t.triggered).length;
+        document.getElementById('canaryTriggeredCount').textContent = stats.triggered_count || tokens.filter(t => t.triggered).length;
+        document.getElementById('canaryBansCount').textContent = stats.bans_dispatched || 0;
+        document.getElementById('badgeCanary').textContent = tokens.length;
+
+        const tbody = document.getElementById('canaryTableBody');
+        tbody.innerHTML = '';
+
+        if (tokens.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: var(--text-muted); padding: 18px;">No canary tokens deployed yet. Deploy decoy credentials above.</td></tr>';
+          return;
+        }
+
+        tokens.forEach(t => {
+          const tr = document.createElement('tr');
+          const typeStr = String(t.type || 'API_TOKEN').toUpperCase();
+          let typeBadge = '<span class="badge badge-layer">[API_TOKEN]</span>';
+          if (typeStr.includes('AWS')) typeBadge = '<span class="badge badge-crit">[AWS_KEY]</span>';
+          else if (typeStr.includes('DB')) typeBadge = '<span class="badge badge-high">[DB_URI]</span>';
+
+          const masked = escapeHTML(t.masked_value || t.value || '****');
+          const created = t.created_at ? new Date(t.created_at).toLocaleString() : '-';
+          const tripCount = t.trip_count || 0;
+          const statusBadge = t.triggered
+            ? '<span class="badge badge-crit">[TRIGGERED]</span>'
+            : '<span class="badge badge-active">[ARMED]</span>';
+
+          tr.innerHTML = `
+            <td>${typeBadge}</td>
+            <td style="font-weight: 600; color: var(--text);">${masked}</td>
+            <td style="color: var(--text-muted);">${created}</td>
+            <td style="font-weight: 600;">${tripCount}</td>
+            <td>${statusBadge}</td>
+          `;
+          tbody.appendChild(tr);
+        });
+      } catch (e) {
+        console.error('Failed to fetch canary tokens:', e);
+      }
+    }
+
+    async function generateCanaryToken(tokenType) {
+      try {
+        const res = await fetch('/api/canary/tokens', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: tokenType, metadata: '' })
+        });
+        if (res.ok) {
+          showToast(`[CANARY] Deployed ${tokenType} honey-token successfully`, 'ok');
+          fetchCanaryTokens();
+        } else {
+          showToast('[CANARY] Failed to deploy token', 'crit');
+        }
+      } catch (e) {
+        showToast('[CANARY] Error: ' + e.message, 'crit');
+      }
+    }
+
+    // ============================================
+    // PCAP FORENSICS SUBSYSTEM
+    // ============================================
+    let pcapSnapshots = [];
+
+    async function fetchPcapSnapshots() {
+      try {
+        const res = await fetch('/api/forensics/pcaps');
+        if (!res.ok) return;
+        const data = await res.json();
+        pcapSnapshots = data.pcaps || [];
+        document.getElementById('badgePcap').textContent = pcapSnapshots.length;
+
+        const tbody = document.getElementById('pcapTableBody');
+        tbody.innerHTML = '';
+
+        if (pcapSnapshots.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: var(--text-muted); padding: 18px;">No pre-attack PCAP snapshots captured yet</td></tr>';
+          return;
+        }
+
+        pcapSnapshots.forEach(p => {
+          const tr = document.createElement('tr');
+          const ts = p.timestamp_ms ? new Date(p.timestamp_ms).toLocaleString() : (p.created_at || '-');
+          const ip = escapeHTML(p.target_ip || '-');
+          const reason = escapeHTML(p.reason || 'Threshold quarantine');
+          const sizeKB = p.file_size ? (p.file_size / 1024).toFixed(1) + ' KB' : '-';
+          const packets = p.packet_count || '-';
+          const filename = escapeHTML(p.filename || '');
+
+          tr.innerHTML = `
+            <td style="color: var(--text-muted);">${ts}</td>
+            <td style="font-weight: 600; color: var(--text);">${ip}</td>
+            <td style="color: var(--text);">${reason}</td>
+            <td>${sizeKB}</td>
+            <td>${packets}</td>
+            <td style="text-align: right;">
+              <button class="btn btn-action" onclick="downloadPcap('${filename}')">[DOWNLOAD .PCAP]</button>
+            </td>
+          `;
+          tbody.appendChild(tr);
+        });
+      } catch (e) {
+        console.error('Failed to fetch PCAP snapshots:', e);
+      }
+    }
+
+    function downloadPcap(filename) {
+      if (!filename) return;
+      const apiKey = getStoredAPIKey();
+      let url = '/api/forensics/download?file=' + encodeURIComponent(filename);
+      if (apiKey) url += '&token=' + encodeURIComponent(apiKey);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      showToast('[PCAP] Downloading ' + filename, 'ok');
+    }
+
+    // Inline PCAP badge in Quarantine Vault rows
+    function appendPcapBadgeToQuarantineRows() {
+      if (pcapSnapshots.length === 0) return;
+      const pcapIPs = new Set(pcapSnapshots.map(p => p.target_ip));
+      const tbody = document.getElementById('quarantineTableBody');
+      if (!tbody) return;
+      const rows = tbody.getElementsByTagName('tr');
+      for (let r of rows) {
+        const ipCell = r.cells && r.cells[0];
+        if (ipCell) {
+          const ip = ipCell.textContent.trim();
+          if (pcapIPs.has(ip) && !ipCell.querySelector('.pcap-inline-badge')) {
+            const badge = document.createElement('span');
+            badge.className = 'badge badge-iso pcap-inline-badge';
+            badge.style.marginLeft = '6px';
+            badge.style.cursor = 'pointer';
+            badge.textContent = '[PCAP]';
+            badge.onclick = function(e) {
+              e.stopPropagation();
+              navigateTo('pcap');
+            };
+            ipCell.appendChild(badge);
+          }
+        }
+      }
+    }
+
+    // Patch fetchQuarantineBans to add PCAP badges
+    const _origFetchQuarantineBans = fetchQuarantineBans;
+    fetchQuarantineBans = async function() {
+      await _origFetchQuarantineBans();
+      appendPcapBadgeToQuarantineRows();
+    };
+
+    // ============================================
+    // KERNEL EDR & DNS TUNNELING TERMINAL STREAM
+    // ============================================
+    let edrKillCounter = 0;
+    let edrAlertCounter = 0;
+    let edrDnsEntropyCounter = 0;
+    let edrDnsSinkholeCounter = 0;
+    let edrAutoScroll = true;
+    const EDR_TERMINAL_MAX_LINES = 500;
+
+    function toggleEdrAutoScroll() {
+      edrAutoScroll = !edrAutoScroll;
+      document.getElementById('btnEdrAutoScroll').textContent = edrAutoScroll ? '[AUTO-SCROLL: ON]' : '[AUTO-SCROLL: OFF]';
+    }
+
+    function clearEdrTerminal() {
+      const term = document.getElementById('edrTerminal');
+      if (term) term.innerHTML = '';
+      showToast('[EDR] Terminal cleared', 'ok');
+    }
+
+    function appendEdrTerminalEntry(text, isKill) {
+      const term = document.getElementById('edrTerminal');
+      if (!term) return;
+
+      const line = document.createElement('div');
+      line.style.borderBottom = '1px solid #18181b';
+      line.style.padding = '2px 0';
+      line.style.color = isKill ? '#ffffff' : 'var(--text-muted)';
+      line.style.fontWeight = isKill ? '600' : '400';
+      line.textContent = text;
+      term.appendChild(line);
+
+      while (term.children.length > EDR_TERMINAL_MAX_LINES) {
+        term.removeChild(term.firstChild);
+      }
+
+      if (edrAutoScroll) {
+        term.scrollTop = term.scrollHeight;
+      }
+
+      document.getElementById('badgeEDR').textContent = edrKillCounter + edrAlertCounter;
+    }
+
+    function processEdrEvent(ev) {
+      if (!ev) return;
+      const layer = (ev.layer || '').toUpperCase();
+      const rule = (ev.rule_matched || ev.rule_id || '').toLowerCase();
+      const rawLower = (ev.raw_line || '').toLowerCase();
+      const ts = new Date(ev.timestamp_ms || Date.now()).toTimeString().split(' ')[0];
+
+      // EDR process termination events
+      if (layer === 'EDR' || rule.includes('edr') || rule.includes('reverse_shell') || rule.includes('process_injection') || rawLower.includes('sigkill') || rawLower.includes('edr_kill')) {
+        const isKill = rawLower.includes('sigkill') || rawLower.includes('kill') || rawLower.includes('terminated') || ev.threat_score >= 85;
+        if (isKill) {
+          edrKillCounter++;
+          document.getElementById('edrKillCount').textContent = edrKillCounter;
+          const pid = ev.raw_line?.match(/pid[:\s]*(\d+)/i)?.[1] || '?';
+          const comm = ev.raw_line?.match(/comm[=:\s]*([^\s,]+)/i)?.[1] || ev.raw_line?.match(/binary[=:\s]*([^\s,]+)/i)?.[1] || 'unknown';
+          const ip = ev.source_ip || '-';
+          const port = ev.dest_port || ev.source_port || '?';
+          appendEdrTerminalEntry(`[${ts}] [EDR_EXEC_TERMINATED] Target PID: ${pid} | Binary: ${comm} | Inbound Socket: ${ip}:${port} | Mitigated: SIGKILL | Score: ${ev.threat_score}/100`, true);
+        } else {
+          edrAlertCounter++;
+          document.getElementById('edrAlertCount').textContent = edrAlertCounter;
+          appendEdrTerminalEntry(`[${ts}] [EDR_ALERT] ${escapeHTML(ev.rule_matched || 'Suspicious Process')} | IP: ${ev.source_ip || '-'} | Score: ${ev.threat_score}/100`, false);
+        }
+        return;
+      }
+
+      // DNS entropy / tunneling / sinkhole events
+      if (rule.includes('dns') || rule.includes('entropy') || rule.includes('tunnel') || rule.includes('dga') || rule.includes('sinkhole') || rawLower.includes('dns') || rawLower.includes('entropy')) {
+        if (rule.includes('sinkhole') || rawLower.includes('sinkhole') || rawLower.includes('blocked')) {
+          edrDnsSinkholeCounter++;
+          document.getElementById('edrDnsSinkholeCount').textContent = edrDnsSinkholeCounter;
+          appendEdrTerminalEntry(`[${ts}] [DNS_SINKHOLED] Domain blocked: ${escapeHTML(ev.raw_line?.match(/domain[=:\s]*([^\s,]+)/i)?.[1] || ev.dest_ip || '?')} | Client: ${ev.source_ip || '-'} | Reason: ${escapeHTML(ev.rule_matched || 'Malicious domain')}`, true);
+        } else {
+          edrDnsEntropyCounter++;
+          document.getElementById('edrDnsEntropyCount').textContent = edrDnsEntropyCounter;
+          const entropy = ev.raw_line?.match(/entropy[=:\s]*(\d+\.?\d*)/i)?.[1] || '?';
+          appendEdrTerminalEntry(`[${ts}] [DNS_ENTROPY_SPIKE] H=${entropy} | Query: ${escapeHTML(ev.raw_line?.match(/query[=:\s]*([^\s,]+)/i)?.[1] || ev.dest_ip || '?')} | Client: ${ev.source_ip || '-'} | Score: ${ev.threat_score}/100`, false);
+        }
+        return;
+      }
+    }
+
+    // Hook into existing handleIncomingMessage to feed EDR terminal
+    const _origHandleIncomingMessage = handleIncomingMessage;
+    handleIncomingMessage = function(data, isFromQueue) {
+      _origHandleIncomingMessage(data, isFromQueue);
+      if (data.type === 'event' || data.type === 'ALERT_NEW' || data.type === 'alert') {
+        const ev = normalizeEvent(data.payload);
+        processEdrEvent(ev);
+      }
+    };
+
+    // Auto-fetch PCAP snapshots periodically
+    setInterval(fetchPcapSnapshots, 30000);
+    setInterval(fetchCanaryTokens, 30000);
   </script>
 </body>
 </html>

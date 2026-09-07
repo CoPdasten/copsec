@@ -1,1 +1,40 @@
-<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<group name=\"copsec_rules\">\n    <rule id=\"200101\" level=\"5\">\n        <decoded_as>copsec_ip_banned</decoded_as>\n        <match>IP_BANNED</match>\n        <description>CoPSeC: IP Ban Detection</description>\n    </rule>\n\n    <rule id=\"200102\" level=\"7\">\n        <decoded_as>copsec_threat_detection</decoded_as>\n        <match>THREAT</match>\n        <description>CoPSeC: High-Severity Threat Detected</description>\n    </rule>\n\n    <rule id=\"200103\" level=\"8\">\n        <decoded_as>copsec_suricata_alert</decoded_as>\n        <match>SURICATA_ALERT</match>\n        <description>CoPSeC: Suricata NIDS Alert - IDS Signature Match</description>\n    </rule>\n\n    <rule id=\"200104\" level=\"6\">\n        <decoded_as>copsec_mitre_mapping</decoded_as>\n        <match>mitre_technique_id</match>\n        <description>CoPSeC: MITRE ATT&CK Technique Detected</description>\n    </rule>\n\n    <rule id=\"200105\" level=\"9\">\n        <if_matched_group>copsec_rules</if_matched_group>\n        <match>severity.*HIGH</match>\n        <description>CoPSeC: Critical Severity - Escalating to SOC</description>\n        <group>alert,escalated</group>\n    </rule>\n\n    <rule id=\"200106\" level=\"10\">\n        <if_matched_group>copsec_rules</if_matched_group>\n        <match>subnet.*aggregat</match>\n        <description>CoPSeC: Subnet-Wide Attack Detected - Possible DDoS or Mass Exploitation</description>\n        <group>attack,distributed</group>\n    </rule>\n</group>\n
+<?xml version="1.0" encoding="UTF-8"?>
+<group name="copsec_rules">
+    <rule id="200101" level="5">
+        <decoded_as>copsec_ip_banned</decoded_as>
+        <match>IP_BANNED</match>
+        <description>CoPSeC: IP Ban Detection</description>
+    </rule>
+
+    <rule id="200102" level="7">
+        <decoded_as>copsec_threat_detection</decoded_as>
+        <match>THREAT</match>
+        <description>CoPSeC: High-Severity Threat Detected</description>
+    </rule>
+
+    <rule id="200103" level="8">
+        <decoded_as>copsec_suricata_alert</decoded_as>
+        <match>SURICATA_ALERT</match>
+        <description>CoPSeC: Suricata NIDS Alert - IDS Signature Match</description>
+    </rule>
+
+    <rule id="200104" level="6">
+        <decoded_as>copsec_mitre_mapping</decoded_as>
+        <match>mitre_technique_id</match>
+        <description>CoPSeC: MITRE ATT&amp;CK Technique Detected</description>
+    </rule>
+
+    <rule id="200105" level="9">
+        <if_matched_group>copsec_rules</if_matched_group>
+        <match>severity.*HIGH</match>
+        <description>CoPSeC: Critical Severity - Escalating to SOC</description>
+        <group>alert,escalated</group>
+    </rule>
+
+    <rule id="200106" level="10">
+        <if_matched_group>copsec_rules</if_matched_group>
+        <match>subnet.*aggregat</match>
+        <description>CoPSeC: Subnet-Wide Attack Detected - Possible DDoS or Mass Exploitation</description>
+        <group>attack,distributed</group>
+    </rule>
+</group>

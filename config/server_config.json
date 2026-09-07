@@ -1,0 +1,15 @@
+{
+  "_comment": "CoPSeC server configuration defaults. This file is not currently loaded by the application but serves as a reference for deployable server settings that mirror the CLI flags in controller/main.go.",
+  "grpc_addr": "0.0.0.0",
+  "grpc_port": 8443,
+  "web_addr": "0.0.0.0",
+  "web_port": 8080,
+  "allow_external_bind": false,
+  "mode": "fleet",
+  "rules_path": "/etc/copsec/rules.json",
+  "sigma_dir": "/etc/copsec/sigma",
+  "db_path": "/var/lib/copsec/data/copsec.db",
+  "auto_ban": true,
+  "auto_ban_threshold": 80,
+  "graceful_shutdown_timeout_seconds": 5
+}

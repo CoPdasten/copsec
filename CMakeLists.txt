@@ -184,6 +184,10 @@ if(BUILD_TESTS)
         ${LIBBPF_INCLUDE_DIRS}
     )
 
+    target_compile_definitions(test_bouncer PRIVATE
+        PROJECT_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+    )
+
     target_link_libraries(test_bouncer PRIVATE
         GTest::gtest_main
         ${NFTABLES_LIBRARIES}

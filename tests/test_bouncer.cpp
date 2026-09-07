@@ -28,7 +28,7 @@ TEST(WhitelistFastPathTest, ExternalUntrustedIP) {
 
 TEST(WhitelistConfigTest, LoadJsonConfig) {
     WhitelistManager wm;
-    EXPECT_TRUE(wm.load_whitelist("/home/copdasten/Documents/CoPSeC/copsec/config/whitelist.json"));
+    EXPECT_TRUE(wm.load_whitelist(std::string(PROJECT_SOURCE_DIR) + "/config/whitelist.json"));
     EXPECT_TRUE(wm.is_whitelisted("127.0.0.1"));
     EXPECT_TRUE(wm.is_whitelisted("10.0.5.10"));
     EXPECT_TRUE(wm.is_whitelisted("192.168.1.100"));

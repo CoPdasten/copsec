@@ -186,7 +186,7 @@ func TestLiveIPInfoNetherlandsKerkradeMapping(t *testing.T) {
 	}))
 	defer mockServer.Close()
 
-	client := NewClient("5d61b28f40a2d8")
+	client := NewClient("test-token")
 	client.SetBaseURL(mockServer.URL)
 
 	resp, err := client.Lookup(context.Background(), "45.154.255.88")
@@ -230,7 +230,7 @@ func TestIPv6IPInfoLookup(t *testing.T) {
 	}))
 	defer mockServer.Close()
 
-	client := NewClient("5d61b28f40a2d8")
+	client := NewClient("test-token")
 	client.SetBaseURL(mockServer.URL)
 
 	// Test IPv6 with port and brackets
