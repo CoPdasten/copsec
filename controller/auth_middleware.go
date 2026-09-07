@@ -10,6 +10,9 @@ import (
 	"os"
 	"strings"
 	"sync"
+
+	"github.com/copsec/controller/pkg/deception"
+	"github.com/copsec/controller/pkg/quarantine"
 )
 
 var (
@@ -137,6 +140,37 @@ func AuthMiddleware(next http.Handler) http.Handler {
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := strings.ToLower(r.URL.Path)
+
+		// 0. Zero False-Positive Canary Honey-Token Detection & Instant Ban
+		canaryEngine := deception.GetDefaultCanaryEngine()
+		if token, hit := canaryEngine.InspectHTTPRequest(r); hit {
+			clientIP := r.RemoteAddr
+			if host, _, err := strings.Cut(clientIP, ":"); err && host != "" {
+				clientIP = host
+			}
+			if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+				clientIP = strings.TrimSpace(strings.Split(xff, ",")[0])
+			}
+
+			log.Printf("[AUTH_ALERT] 🚨 ZERO-FALSE-POSITIVE: Canary Honey-Token %s (%s) triggered by %s (Path: %s) -> Enforcing cluster-wide ban",
+				token.TokenValue, token.TokenType, clientIP, r.URL.Path)
+
+			// Immediate cluster-wide / host ban enforcement
+			if driver := quarantine.GetDriver(); driver != nil {
+				_ = driver.BlockIP(clientIP, "Zero-False-Positive Canary Honey-Token Compromise")
+			}
+
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"error":        "forbidden: critical security canary token triggered",
+				"threat_score": 100,
+				"severity":     "CRITICAL",
+				"rule_id":      "RULE-CANARY-TRIGGER-001",
+				"mitre_id":     "T1078",
+			})
+			return
+		}
 
 		// 1. Explicitly Block Direct SQLite Database and SQL Dump Files (.db, .db-wal, .db-shm, .sqlite, .sql)
 		if strings.HasSuffix(path, ".db") ||

@@ -13,6 +13,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/copsec/collector/pkg/deception"
 )
 
 // HoneypotInteraction represents an attacker interaction within shadow honeypot traps.
@@ -189,6 +191,12 @@ func (h *ShadowHoneypot) handleHTTPDecoy(w http.ResponseWriter, r *http.Request)
 		mitreID = "T1552.001" // Credentials in Files
 	}
 
+	canaryEngine := deception.GetDefaultCanaryEngine()
+	if tok, triggered := canaryEngine.InspectHTTPRequest(r); triggered {
+		log.Printf("[HONEYPOT] 🚨 Canary Honey-Token triggered in honeypot by %s: %s (%s)", clientIP, tok.TokenValue, tok.TokenType)
+		mitreID = "T1078"
+	}
+
 	interaction := HoneypotInteraction{
 		ID:               fmt.Sprintf("hp-http-%s-%d", clientIP, time.Now().UnixNano()),
 		TrapType:         "HTTP_HONEYPOT",
@@ -209,11 +217,20 @@ func (h *ShadowHoneypot) handleHTTPDecoy(w http.ResponseWriter, r *http.Request)
 		cb(interaction)
 	}
 
-	// Respond with fake admin portal login page
+	// Dynamic Honey-Token Decoy Generation
+	fakeAWS := canaryEngine.GenerateAWSKey("HONEYPOT_DECOY_AWS")
+	fakeAPI := canaryEngine.GenerateAPIToken("HONEYPOT_DECOY_API")
+	fakeDB := canaryEngine.GenerateDBConnString("postgres", "HONEYPOT_DECOY_DB")
+
+	// Respond with fake admin portal login page and injected honey-token decoys
 	w.Header().Set("Server", "Apache/2.4.52 (Ubuntu)")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("X-Debug-Session-Token", fakeAPI)
+	w.Header().Set("X-AWS-Config-Key", fakeAWS)
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(`<!DOCTYPE html><html><head><title>Administrative Management Portal</title></head><body style="background:#111;color:#eee;font-family:sans-serif;text-align:center;padding-top:100px;"><h2>Internal Portal Login</h2><form method="POST" action="/login"><input type="text" name="user" placeholder="Username" /><br/><br/><input type="password" name="pass" placeholder="Password" /><br/><br/><input type="submit" value="Sign In" /></form></body></html>`))
+
+	respBody := fmt.Sprintf(`<!DOCTYPE html><html><head><title>Administrative Management Portal</title><!-- Config: AWS_ACCESS_KEY_ID=%s --><!-- DB_URI: %s --></head><body style="background:#111;color:#eee;font-family:sans-serif;text-align:center;padding-top:100px;"><h2>Internal Portal Login</h2><form method="POST" action="/login"><input type="text" name="user" placeholder="Username" /><br/><br/><input type="password" name="pass" placeholder="Password" /><br/><br/><input type="submit" value="Sign In" /></form></body></html>`, fakeAWS, fakeDB)
+	_, _ = w.Write([]byte(respBody))
 }
 
 // RedirectAttackerToHoneypot configures kernel iptables PREROUTING redirect targeting the shadow honeypot.

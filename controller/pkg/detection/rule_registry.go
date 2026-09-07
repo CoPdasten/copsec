@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"math"
 	"net/url"
 	"os"
 	"os/signal"
@@ -382,24 +381,6 @@ func (r *RuleRegistry) ListRules() []RuleStateDTO {
 	return res
 }
 
-// CalculateShannonEntropy measures data randomness in byte/character sequences.
-func CalculateShannonEntropy(input string) float64 {
-	if len(input) == 0 {
-		return 0.0
-	}
-	charCounts := make(map[rune]int)
-	for _, char := range input {
-		charCounts[char]++
-	}
-
-	total := float64(len(input))
-	entropy := 0.0
-	for _, count := range charCounts {
-		p := float64(count) / total
-		entropy -= p * math.Log2(p)
-	}
-	return entropy
-}
 
 // EvaluationResult represents a match and threshold decision from the evaluation pipeline.
 type EvaluationResult struct {

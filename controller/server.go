@@ -13,7 +13,9 @@ import (
 	"time"
 
 	copsecproto "github.com/copsec/collector/proto"
+	"github.com/copsec/controller/pkg/deception"
 	"github.com/copsec/controller/pkg/detection"
+	"github.com/copsec/controller/pkg/ebpf"
 	"github.com/copsec/controller/pkg/geoip"
 	"github.com/copsec/controller/pkg/ipinfo"
 	"github.com/copsec/controller/pkg/ml"
@@ -349,9 +351,31 @@ func (s *CentralServer) processEvent(nodeID string, event *copsecproto.LogEvent)
 		"message":     event.RawLine,
 	}
 
-	// 1. Dynamic Hot-Reloadable Detection Rules Engine (pkg/detection)
 	var dynamicAction detection.RuleAction
 	var dynamicBanDuration int
+
+	// 0a. Zero False-Positive Canary Honey-Token Detection
+	if canaryTok, hit := deception.GetDefaultCanaryEngine().InspectString(event.RawLine, event.ClientIp, event.Source); hit {
+		ruleID = "RULE-CANARY-TRIGGER-001"
+		mitreID = "T1078"
+		threatScore = 100
+		dynamicAction = detection.ActionBan
+		dynamicBanDuration = 86400
+		log.Printf("[CANARY_ALERT] 🚨 ZERO-FALSE-POSITIVE: Canary Honey-Token %s (%s) triggered by %s", canaryTok.TokenValue, canaryTok.TokenType, event.ClientIp)
+	}
+
+	// 0b. DNS High-Entropy Tunneling & C2 Exfiltration Evaluation
+	if event.Source == "suricata" || event.Source == "dns" || strings.Contains(event.RawLine, `"dns"`) || strings.Contains(event.RawLine, "query:") {
+		if dnsRes, triggered := detection.GetDefaultDNSEntropyEvaluator().IngestRawLog(event.RawLine); triggered {
+			ruleID = dnsRes.RuleID
+			threatScore = dnsRes.ThreatScore
+			mitreID = dnsRes.MitreID
+			dynamicAction = detection.ActionBan
+			dynamicBanDuration = 86400
+		}
+	}
+
+	// 1. Dynamic Hot-Reloadable Detection Rules Engine (pkg/detection)
 	detectionResults := detection.GetDefaultRegistry().EvaluateEvent(fields)
 	for _, res := range detectionResults {
 		if res.ThresholdMet {
@@ -613,6 +637,22 @@ func (s *CentralServer) processEvent(nodeID string, event *copsecproto.LogEvent)
 	if isolated {
 		stored.TriageStatus = "AUTO_MITIGATED"
 		isMitigated = true
+	}
+
+	// 3. Autonomous EDR Rogue Process Isolation
+	if (strings.Contains(strings.ToLower(stored.RuleID), "rce") ||
+		strings.Contains(strings.ToLower(stored.RuleID), "t1059") ||
+		strings.Contains(strings.ToLower(stored.RuleID), "shell") ||
+		stored.MitreTechniqueID == "T1059.004" ||
+		stored.MitreTechniqueID == "T1190") && stored.ClientIP != "" {
+		edrEng := ebpf.GetDefaultEDREngine()
+		if procs, ok := edrEng.LookupProcessByIP(stored.ClientIP); ok {
+			for _, p := range procs {
+				if edrEng.IsRogueProcess(p.Comm, p.BinaryPath) {
+					_, _ = edrEng.KillRogueProcess(p.PID, stored.ClientIP, fmt.Sprintf("Exploitation RCE Rule: %s", stored.RuleID))
+				}
+			}
+		}
 	}
 
 	// Check Autonomous Auto-Ban Policy & Dynamic TTL Management (only if not already mitigated)

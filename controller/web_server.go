@@ -13,9 +13,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/copsec/controller/pkg/deception"
 	"github.com/copsec/controller/pkg/detection"
 	"github.com/copsec/controller/pkg/dns"
 	"github.com/copsec/controller/pkg/ebpf"
+	"github.com/copsec/controller/pkg/forensics"
 	"github.com/copsec/controller/pkg/geoip"
 	"github.com/copsec/controller/pkg/healing"
 	"github.com/copsec/controller/pkg/ipinfo"
@@ -211,6 +213,13 @@ func (ws *WebSOCServer) Start() error {
 	mux.HandleFunc("/api/trust/score", ws.handleTrustScore)
 	mux.HandleFunc("/api/trust/entities", ws.handleTrustEntities)
 	mux.HandleFunc("/api/ml/stats", ws.handleMLStats)
+
+	// 2b. Pre-Attack Forensics & PCAP Ring Buffer Capture APIs
+	forensics.RegisterHTTPHandlers(mux, nil)
+
+	// 2c. Deception Honey-Token Engine APIs
+	mux.HandleFunc("/api/canary/tokens", ws.handleCanaryTokens)
+	mux.HandleFunc("/api/deception/canary", ws.handleCanaryTokens)
 
 	// 3. Embedded Web SOC Static Files
 	mux.HandleFunc("/", ws.handleStaticFiles)
@@ -1984,7 +1993,42 @@ func (ws *WebSOCServer) broadcastAlert(alert *StoredEvent) {
 	}
 	ws.wsHub.Broadcast("ALERT_NEW", alert)
 	ws.wsHub.Broadcast("alert_new", alert)
-	ws.wsHub.Broadcast("alert", alert)
-	ws.wsHub.Broadcast("event", alert)
 }
 
+func (ws *WebSOCServer) handleCanaryTokens(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	eng := deception.GetDefaultCanaryEngine()
+
+	if r.Method == http.MethodPost {
+		var req struct {
+			Type     string `json:"type"` // AWS_KEY, API_TOKEN, DB_STRING
+			Metadata string `json:"metadata"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		var tokenVal string
+		switch strings.ToUpper(req.Type) {
+		case "AWS_KEY":
+			tokenVal = eng.GenerateAWSKey(req.Metadata)
+		case "DB_STRING":
+			tokenVal = eng.GenerateDBConnString("postgres", req.Metadata)
+		default:
+			tokenVal = eng.GenerateAPIToken(req.Metadata)
+		}
+		tok, _ := eng.GetToken(tokenVal)
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"token":   tok,
+		})
+		return
+	}
+
+	tokens := eng.GetAllTokens()
+	stats := eng.GetStats()
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"stats":   stats,
+		"tokens":  tokens,
+	})
+}

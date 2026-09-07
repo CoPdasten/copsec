@@ -7,6 +7,8 @@ import (
 	"log"
 	"strings"
 	"sync"
+
+	"github.com/copsec/collector/pkg/forensics"
 )
 
 // FallbackQuarantineDriver provides an in-memory mock quarantine for unsupported operating systems (e.g. Darwin, BSD).
@@ -38,6 +40,12 @@ func (d *FallbackQuarantineDriver) BlockIP(ip string, reason string) error {
 	defer d.mu.Unlock()
 	d.blockedIPs[cleanIP] = reason
 	log.Printf("[QUARANTINE_FALLBACK] In-memory isolation registered for IP %s (Reason: %s)", cleanIP, reason)
+
+	// Trigger asynchronous pre-attack forensics PCAP snapshot
+	go func(targetIP, r string) {
+		_, _ = forensics.GetDefaultPCAPBuffer().SnapshotForIP(targetIP, r)
+	}(cleanIP, reason)
+
 	return nil
 }
 

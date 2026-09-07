@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/copsec/controller/pkg/forensics"
 )
 
 // LinuxQuarantineDriver implements QuarantineDriver using Linux iptables, conntrack, and XDP/eBPF hooks.
@@ -77,6 +79,12 @@ func (d *LinuxQuarantineDriver) BlockIP(ip string, reason string) error {
 
 	d.blockedIPs[cleanIP] = reason
 	log.Printf("[QUARANTINE_LINUX] ⚡ Enforced iptables/conntrack isolation for IP %s (Reason: %s)", cleanIP, reason)
+
+	// Trigger asynchronous pre-attack forensics PCAP snapshot
+	go func(targetIP, r string) {
+		_, _ = forensics.GetDefaultPCAPBuffer().SnapshotForIP(targetIP, r)
+	}(cleanIP, reason)
+
 	return nil
 }
 

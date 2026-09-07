@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/copsec/collector/pkg/forensics"
 )
 
 // WindowsQuarantineDriver implements QuarantineDriver using Windows Defender Firewall via netsh.exe.
@@ -121,6 +123,12 @@ func (d *WindowsQuarantineDriver) BlockIP(ip string, reason string) error {
 
 	d.blockedIPs[cleanIP] = reason
 	log.Printf("[QUARANTINE_WINDOWS] ⚡ Enforced Windows Firewall Block: %s (IP: %s, Reason: %s)", rName, cleanIP, reason)
+
+	// Trigger asynchronous pre-attack forensics PCAP snapshot
+	go func(targetIP, r string) {
+		_, _ = forensics.GetDefaultPCAPBuffer().SnapshotForIP(targetIP, r)
+	}(cleanIP, reason)
+
 	return nil
 }
 

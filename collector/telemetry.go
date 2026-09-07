@@ -5,7 +5,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -55,15 +54,8 @@ func CollectSystemMetrics() SystemMetrics {
 	// 2. CPU Calculation (Two samples from /proc/stat)
 	m.CPUPercent = calculateCPUUsage()
 
-	// 3. Disk Calculation (syscall.Statfs on root filesystem)
-	var stat syscall.Statfs_t
-	if err := syscall.Statfs("/", &stat); err == nil {
-		total := stat.Blocks * uint64(stat.Bsize)
-		free := stat.Bfree * uint64(stat.Bsize)
-		if total > 0 {
-			m.DiskUsedPerc = float32(float64(total-free) / float64(total) * 100)
-		}
-	}
+	// 3. Disk Calculation
+	m.DiskUsedPerc = calculateDiskUsage()
 
 	return m
 }

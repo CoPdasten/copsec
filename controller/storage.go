@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/copsec/controller/pkg/deception"
 	"github.com/copsec/controller/pkg/geoip"
 	"github.com/copsec/controller/pkg/models"
 	"github.com/copsec/controller/pkg/whitelist"
@@ -168,6 +169,7 @@ func NewStorageEngine(dbPath string) (*StorageEngine, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	_ = deception.GetDefaultCanaryEngine().SetDB(db)
 	_, _ = engine.FlushInvalidQuarantines()
 	if err := engine.HealAndBackfillHashChain(); err != nil {
 		log.Printf("[WARN] Hash chain backfill warning: %v", err)
@@ -444,6 +446,15 @@ func (s *StorageEngine) initSchema() error {
 		description TEXT DEFAULT '',
 		added_by TEXT DEFAULT 'SYSTEM',
 		created_at_ms INTEGER NOT NULL
+	);
+
+	CREATE TABLE IF NOT EXISTS honey_tokens (
+		token_value TEXT PRIMARY KEY,
+		token_type TEXT NOT NULL,
+		created_at_ms INTEGER NOT NULL,
+		triggered_count INTEGER DEFAULT 0,
+		last_triggered_ms INTEGER DEFAULT 0,
+		metadata TEXT DEFAULT ''
 	);
 	`
 	if _, err := s.db.Exec(baseTables); err != nil {
