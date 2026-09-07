@@ -286,6 +286,7 @@ setup_user_and_directories() {
   mkdir -p "${COPSEC_CONF_DIR}"
   mkdir -p "${COPSEC_DATA_DIR}"
   mkdir -p "${COPSEC_LOG_DIR}"
+  mkdir -p "${COPSEC_LOG_DIR}/forensics"
 
   # Permissions:
   # - Conf and Install directories: read/execute for service user, read-only for general users (chmod 750)

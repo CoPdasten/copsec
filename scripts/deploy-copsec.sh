@@ -178,8 +178,8 @@ fi
 
 # 6. Initialize Secure Directory Hierarchy
 echo -e "${CLR_MAGENTA}[*] Initializing secure directory hierarchy...${CLR_RESET}"
-mkdir -p /etc/copsec /var/lib/copsec/data /var/log/copsec /usr/local/bin /etc/nginx/conf.d
-chmod 0750 /etc/copsec /var/lib/copsec /var/log/copsec
+mkdir -p /etc/copsec /var/lib/copsec/data /var/log/copsec /var/log/copsec/forensics /usr/local/bin /etc/nginx/conf.d
+chmod 0750 /etc/copsec /var/lib/copsec /var/log/copsec /var/log/copsec/forensics
 
 # Ensure Nginx Blocklist file exists
 if [ ! -f "/etc/nginx/conf.d/copsec_blocklist.conf" ]; then
@@ -350,8 +350,8 @@ ExecStart=/usr/local/bin/copsec-collector \\
 Restart=always
 RestartSec=3s
 LimitNOFILE=1048576
-CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_NET_BIND_SERVICE CAP_SYS_ADMIN
-AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW CAP_NET_BIND_SERVICE CAP_SYS_ADMIN
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_NET_BIND_SERVICE CAP_BPF CAP_SYS_ADMIN
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW CAP_NET_BIND_SERVICE CAP_BPF CAP_SYS_ADMIN
 StandardOutput=journal
 StandardError=journal
 

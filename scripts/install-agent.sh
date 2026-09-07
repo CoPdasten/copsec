@@ -230,8 +230,8 @@ case "$PKG_MANAGER" in
 esac
 
 # 5. Prepare Directories with strict permissions (0750)
-mkdir -p /etc/copsec /var/lib/copsec /var/log/copsec /usr/local/bin /var/log/suricata /var/log/snort /var/run/snort
-chmod 0750 /etc/copsec /var/lib/copsec /var/log/copsec
+mkdir -p /etc/copsec /var/lib/copsec /var/log/copsec /var/log/copsec/forensics /usr/local/bin /var/log/suricata /var/log/snort /var/run/snort
+chmod 0750 /etc/copsec /var/lib/copsec /var/log/copsec /var/log/copsec/forensics
 
 # 6. Detect Active Log Sources Automatically
 echo -e "${CLR_MAGENTA}[*] Scanning system for active server log tailers...${CLR_RESET}"
@@ -430,7 +430,9 @@ ExecStart=/usr/local/bin/copsec-collector \\
   -snort-log ${DETECTED_SNORT}
 Restart=always
 RestartSec=3s
-LimitNOFILE=65536
+LimitNOFILE=1048576
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_NET_BIND_SERVICE CAP_BPF CAP_SYS_ADMIN
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW CAP_NET_BIND_SERVICE CAP_BPF CAP_SYS_ADMIN
 StandardOutput=journal
 StandardError=journal
 
