@@ -86,10 +86,11 @@ func (om *OffsetManager) Flush() error {
 
 // Tailer watches a single log file using inotify and streams lines.
 type Tailer struct {
-	source        string
-	filePath      string
-	offsetManager *OffsetManager
-	outChan       chan<- LogEntry
+	source         string
+	filePath       string
+	offsetManager  *OffsetManager
+	outChan        chan<- LogEntry
+	notFoundLogged bool
 }
 
 // NewTailer creates a new tailer instance.
@@ -133,15 +134,23 @@ func (t *Tailer) tailFile(ctx context.Context) error {
 	// Strictly Read-Only Open
 	file, err := os.OpenFile(t.filePath, os.O_RDONLY, 0)
 	if err != nil {
-		log.Printf("[TAILER_ERROR] Cannot open %s (%s): %v. Retrying in 3s...", t.source, t.filePath, err)
+		if os.IsNotExist(err) {
+			if !t.notFoundLogged {
+				log.Printf("[TAILER_INFO] Log source [%s] (%s) not found on host. Waiting for file creation...", t.source, t.filePath)
+				t.notFoundLogged = true
+			}
+		} else {
+			log.Printf("[TAILER_ERROR] Cannot open %s (%s): %v. Retrying in 5s...", t.source, t.filePath, err)
+		}
 		select {
 		case <-ctx.Done():
 			return nil
-		case <-time.After(3 * time.Second):
+		case <-time.After(5 * time.Second):
 			return nil
 		}
 	}
 	defer file.Close()
+	t.notFoundLogged = false
 	log.Printf("[TAILER_ACTIVE] Successfully hooked to %s (%s)", t.source, t.filePath)
 
 	stat, err := file.Stat()
