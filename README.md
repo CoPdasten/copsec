@@ -122,38 +122,67 @@ CoPSeC partitions responsibilities between high-speed kernel edge sensors (**Col
 
 ---
 
-## 🚀 Quick Start & Deployment
+## 🚀 Quick Start & One-Line Deployment
 
-### Prerequisites
-- Linux Kernel >= 5.8 (Debian, Ubuntu, Pardus, CentOS, AlmaLinux, Rocky Linux, RHEL, Fedora, Arch)
-- Go 1.22+
-- `sqlite3`, `curl`, `jq`, `libpcap-dev`, `openssl`, `iptables`, `conntrack`
+### ⚡ 1-Line Automated Installation
+
+#### 🏢 1. Central Controller & Web Cockpit (PC / Central Server)
+To deploy the Central Controller, High-Contrast Analyst Cockpit, gRPC Ingestion Hub, and Deception Engine with a single command:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CoPdasten/copsec/main/install.sh | sudo bash
+```
+
+> **What this does automatically:**
+> - Installs all OS dependencies (`Go`, `sqlite3`, `curl`, `jq`, `libpcap`, `openssl`, `iptables`, `conntrack`).
+> - Creates an isolated `copsec` system daemon account with hardened file permissions (`0700`/`0600`).
+> - Compiles and links binaries (`/usr/local/bin/copsec-controller`).
+> - Configures and enables `copsec.service` under `systemd`.
+> - Outputs your **Web Cockpit URL** (`http://<IP>:8080`) and **Master API Key**.
 
 ---
 
-### Automated Deployment Options
+#### 🛡️ 2. Edge Collector Sensor (Pardus / Ubuntu / Debian / RHEL / CentOS)
+To enroll any new remote server or VM into your CoPSeC cluster and attach eBPF/XDP kernel defenses:
 
-#### Option A: Central Controller Setup
-Deploys the central controller with Web SOC Cockpit, gRPC Fleet Mesh, SQLite state engine, and Deception Honey-Token API:
 ```bash
-sudo ./install.sh --port 8080 --api-key "YOUR_MASTER_API_KEY"
+curl -fsSL https://raw.githubusercontent.com/CoPdasten/copsec/main/scripts/install-agent.sh | sudo bash -s -- --controller <CONTROLLER_IP>:8443
 ```
+*(Replace `<CONTROLLER_IP>:8443` with your controller's LAN or Tailscale IP, e.g. `192.168.1.10:8443`)*
 
-#### Option B: Edge Collector Setup (Pardus / Debian / Ubuntu / RHEL)
-Installs the edge collector sensor and connects it to the central controller:
+> **What this does automatically:**
+> - Automatically detects host log streams (Syslog, SSH Auth, Nginx, Suricata, Snort).
+> - Attaches the sub-millisecond **eBPF/XDP** fast-path packet drop engine to network interfaces.
+> - Activates the **TCP Zero-Window Tarpit** and local honeypot listeners.
+> - Starts `copsec-collector.service` with automatic gRPC reconnection and offline SQLite queuing.
+
+---
+
+#### 💻 3. Standalone PC Mode (Single Machine / Laptop / Lab Testing)
+Run full intrusion detection, local interface sniffing, and cockpit triage in a single self-contained process:
+
 ```bash
+git clone https://github.com/CoPdasten/copsec.git && cd copsec
+(cd controller && go build -ldflags="-s -w" -o ../bin/copsec .)
+sudo ./bin/copsec --standalone --allow-external-bind
+```
+Then access the local cockpit directly at **http://localhost:8080**.
+
+---
+
+### ⚙️ Custom Installation Options (CLI Flags)
+
+You can pass custom parameters to customize ports, static API keys, and fleet groupings:
+
+```bash
+# Controller with custom Web port and predetermined Master API key:
+sudo bash install.sh --port 8080 --api-key "my-secure-master-token-2026"
+
+# Edge Agent with custom fleet group and node identifier:
 sudo bash scripts/install-agent.sh \
   --controller 192.168.1.10:8443 \
-  --api-key "YOUR_MASTER_API_KEY" \
-  --group "PARDUS_EDGE"
-```
-
-#### Option C: Standalone PC Mode (Single Machine / Laptop / Lab)
-Runs both controller and edge monitoring in a single standalone binary:
-```bash
-cd controller
-go build -ldflags="-s -w" -o copsec-standalone .
-sudo ./copsec-standalone --mode=standalone --auth-key="YOUR_MASTER_API_KEY"
+  --group "PROD_DATABASE_CLUSTER" \
+  --node-id "db-node-01"
 ```
 
 ---
