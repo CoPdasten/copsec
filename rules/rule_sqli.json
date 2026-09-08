@@ -1,0 +1,17 @@
+{
+  "id": "RULE-SQLI-001",
+  "name": "SQL Injection Attack Pattern",
+  "description": "Detects SQL injection operators, UNION SELECT queries, and tautology bypasses",
+  "severity": "CRITICAL",
+  "threat_score": 85,
+  "mitre_technique_id": "T1190",
+  "enabled": true,
+  "target_field": "raw_payload",
+  "match_type": "regex",
+  "pattern": "(?i)(union\\s+select|select\\s+.*from|or\\s+1=1|--\\s*$|waitfor\\s+delay|sleep\\(\\d+\\))",
+  "entropy_threshold": 0,
+  "window_seconds": 60,
+  "hit_threshold": 1,
+  "action": "BAN",
+  "ban_duration_sec": 86400
+}

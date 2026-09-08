@@ -26,3 +26,9 @@ controller/copsec-standalone
 # Hassas ortam/token dosyaları
 .env
 node.json
+
+# Forensics and PCAP captures
+forensics/
+*.pcap
+controller/forensics/
+
