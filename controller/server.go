@@ -224,7 +224,7 @@ func (s *CentralServer) authenticate(ctx context.Context) (string, error) {
 	nodeID := nodeIDs[0]
 	apiKey := apiKeys[0]
 
-	if !strings.HasPrefix(nodeID, "node-") || len(apiKey) < 8 {
+	if len(strings.TrimSpace(nodeID)) < 3 || len(strings.TrimSpace(apiKey)) < 8 {
 		return "", status.Errorf(codes.Unauthenticated, "invalid credentials format")
 	}
 
