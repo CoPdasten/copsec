@@ -207,43 +207,58 @@ CoPSeC eliminates persistent disk writes entirely by introducing an in-memory, i
 
 ## 🚀 Quick Start & One-Line Deployment
 
-### ⚡ 1-Line Automated Installation
+### ⚡ 1-Line Automated Installation (3-Tier Enterprise Topology)
 
-#### 🏢 1. Central Controller & Web Cockpit (PC / Central Server)
-To deploy the Central Controller, High-Contrast Analyst Cockpit, gRPC Ingestion Hub, and Deception Engine with a single command:
+#### 🗄️ 1. Tier 2: Primary Data Vault & Cryptographic Storage Server (Central SIEM Vault)
+To deploy the dedicated **Central Storage & Vault Node** where all security events, forensic PCAP dumps, SQLite WAL databases, and immutable SHA-256 hash chains are stored and protected:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CoPdasten/copsec/main/scripts/install-vault.sh | sudo bash
+```
+
+> **What this does automatically on the Storage Node:**
+> - Initializes the banking-grade **SQLite WAL** database engine (`/var/lib/copsec/copsec.db`).
+> - Installs the immutable database triggers (`prevent_audit_update`, `prevent_audit_delete`).
+> - Configures the **RAM & PCAP Forensic Archive** repository (`/var/log/copsec/forensics`).
+> - Binds the web management interface strictly to loopback `127.0.0.1:8080` (Zero `0.0.0.0` wildcard exposure).
+> - Activates the **gRPC Telemetry Ingestion Engine** on port `:50051` with automated Root CA and mTLS provisioning.
+> - Enables and starts the hardened `copsec-vault.service` under `systemd`.
+
+---
+
+#### 🛡️ 2. Tier 1: Edge Collector Sensor (DMZ / Fleet Nodes)
+To enroll any new remote server or DMZ node into your cluster and stream telemetry to your Storage Vault:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CoPdasten/copsec/main/deploy.sh | sudo bash -s -- --controller <VAULT_IP>:50051
+```
+*(Replace `<VAULT_IP>:50051` with your Vault server's IP, e.g. `192.168.1.8:50051`)*
+
+> **What this does automatically on the Edge Sensor:**
+> - Automatically detects host log streams (Syslog, SSH Auth, Nginx, Suricata, Snort).
+> - Attaches the sub-millisecond **eBPF/XDP** driver-level packet drop engine to network interfaces.
+> - Activates the **TCP Zero-Window Tarpit** (`:2223`) and local **Shadow Honeypots** (`:8088`).
+> - Starts the **30s RAM Forensic Ring Buffer** and connects to the Central Vault via authenticated **TLS 1.3 mTLS**.
+
+---
+
+#### 🖥️ 3. Tier 3: SOC Cockpit & Workstation (Secure Operator Access)
+Because the Tier 2 Vault strictly cloaks port `8080` from untrusted networks, analysts connect securely using zero-trust SSH port forwarding:
+
+```bash
+ssh -N -L 8080:127.0.0.1:8080 <vault-user>@<VAULT_IP>
+```
+Then access the high-contrast SOC Cockpit directly in your browser at **http://localhost:8080**.
+
+---
+
+#### 💻 4. Standalone All-in-One PC Mode (Single Machine / Laptop / Lab Testing)
+Run full intrusion detection, local interface sniffing, and cockpit triage in a single self-contained process:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/CoPdasten/copsec/main/install.sh | sudo bash
 ```
-
-> **What this does automatically:**
-> - Installs all OS dependencies (`Go`, `sqlite3`, `curl`, `jq`, `libpcap`, `openssl`, `iptables`, `conntrack`).
-> - Creates an isolated `copsec` system daemon account with hardened file permissions (`0700`/`0600`).
-> - Compiles and links binaries (`/usr/local/bin/copsec-controller`).
-> - Configures and enables `copsec.service` under `systemd`.
-> - Outputs your **Web Cockpit URL** (`http://<IP>:8080`) and **Master API Key**.
-
----
-
-#### 🛡️ 2. Edge Collector Sensor (Pardus / Ubuntu / Debian / RHEL / CentOS)
-To enroll any new remote server or VM into your CoPSeC cluster and attach eBPF/XDP kernel defenses:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/CoPdasten/copsec/main/scripts/install-agent.sh | sudo bash -s -- --controller <CONTROLLER_IP>:8443
-```
-*(Replace `<CONTROLLER_IP>:8443` with your controller's LAN or Tailscale IP, e.g. `192.168.1.10:8443`)*
-
-> **What this does automatically:**
-> - Automatically detects host log streams (Syslog, SSH Auth, Nginx, Suricata, Snort).
-> - Attaches the sub-millisecond **eBPF/XDP** fast-path packet drop engine to network interfaces.
-> - Activates the **TCP Zero-Window Tarpit** and local honeypot listeners.
-> - Starts `copsec-collector.service` with automatic gRPC reconnection and offline SQLite queuing.
-
----
-
-#### 💻 3. Standalone PC Mode (Single Machine / Laptop / Lab Testing)
-Run full intrusion detection, local interface sniffing, and cockpit triage in a single self-contained process:
-
+Or build and run locally:
 ```bash
 git clone https://github.com/CoPdasten/copsec.git && cd copsec
 (cd controller && go build -ldflags="-s -w" -o ../bin/copsec .)
