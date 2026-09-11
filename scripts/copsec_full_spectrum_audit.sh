@@ -61,10 +61,27 @@ log_warn() { echo -e "${CLR_YELLOW}[⚠️ WARN]${CLR_RESET} $1"; }
 log_metric() { echo -e "${CLR_GRAY}  ├─ ${1:<35} :${CLR_RESET} ${CLR_WHITE}${2}${CLR_RESET}"; }
 
 # --- Topology Configuration ---
-CHACHY_IP="${CHACHY_IP:-192.168.1.11}"
+if [[ -z "${CHACHY_IP:-}" ]]; then
+  if ping -c 1 -W 1 192.168.1.10 &>/dev/null; then
+    CHACHY_IP="192.168.1.10"
+  else
+    CHACHY_IP="192.168.1.11"
+  fi
+fi
 CHACHY_USER="${CHACHY_USER:-copdasten}"
 CHACHY_PASS="${CHACHY_PASS:-2951453}"
-CHACHY_HTTP_PORT="${CHACHY_HTTP_PORT:-80}"
+
+# Detect open ingress port on Chachy
+CHACHY_HTTP_PORT="${CHACHY_HTTP_PORT:-}"
+if [[ -z "$CHACHY_HTTP_PORT" ]]; then
+  for p in 80 8080 2223 8088; do
+    if nc -z -w 1 "$CHACHY_IP" "$p" 2>/dev/null; then
+      CHACHY_HTTP_PORT="$p"
+      break
+    fi
+  done
+  CHACHY_HTTP_PORT="${CHACHY_HTTP_PORT:-80}"
+fi
 
 PARDUS1_IP="${PARDUS1_IP:-192.168.1.8}"
 PARDUS1_USER="${PARDUS1_USER:-pardus}"
