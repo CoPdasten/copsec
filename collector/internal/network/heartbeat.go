@@ -17,6 +17,7 @@ import (
 	copsecproto "github.com/copsec/collector/proto"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 )
 
 // HeartbeatConfig defines parameters for the edge collector heartbeat engine.
@@ -156,6 +157,16 @@ func (hw *HeartbeatWorker) sendPulse(ctx context.Context) {
 
 	callCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
 	defer cancel()
+
+	apiKey := strings.TrimSpace(os.Getenv("COPSEC_API_KEY"))
+	if apiKey == "" {
+		apiKey = "copsec_default_secret_key"
+	}
+	callCtx = metadata.AppendToOutgoingContext(callCtx,
+		"x-node-id", hb.NodeId,
+		"x-api-key", apiKey,
+		"x-node-group", hb.NodeGroup,
+	)
 
 	resp, err := client.SendHeartbeat(callCtx, hb)
 	if err != nil {
