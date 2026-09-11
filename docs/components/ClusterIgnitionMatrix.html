@@ -1,0 +1,379 @@
+<!-- CoPSeC Pro Cluster-Wide One-Line Ignition Matrix -->
+<section class="copsec-ignition-matrix">
+  <div class="cim-container">
+    <div class="cim-header">
+      <div class="cim-badge">
+        <span class="cim-indicator"></span>
+        Zero-Touch Deployment
+      </div>
+      <h2 class="cim-title">Cluster-Wide One-Line Ignition Matrix</h2>
+      <p class="cim-subtitle">
+        Bootstrap enterprise intrusion detection and zero-trust telemetry across a clean, decoupled 2-node architecture.
+      </p>
+    </div>
+
+    <div class="cim-grid">
+      <!-- CARD 1: CONTROLLER -->
+      <article class="cim-card">
+        <div class="cim-card-header">
+          <span class="cim-step">STEP 01</span>
+          <span class="cim-node-type">Cluster Brain &amp; Ledger Hub</span>
+        </div>
+        <h3 class="cim-role">Central Database &amp; Vault Server</h3>
+        <p class="cim-desc">
+          Deploys the central SQLite WAL database, gRPC ingestion engine (:50051), and Web SOC Dashboard (:8080) with cryptographic anti-tamper triggers.
+        </p>
+        <div class="cim-pills">
+          <span class="cim-pill pill-cyan">gRPC :50051</span>
+          <span class="cim-pill pill-green">Web SOC :8080</span>
+          <span class="cim-pill pill-purple">SQLite WAL</span>
+        </div>
+
+        <div class="cim-terminal">
+          <div class="cim-term-bar">
+            <div class="cim-term-dots">
+              <span class="dot red"></span>
+              <span class="dot yellow"></span>
+              <span class="dot green"></span>
+              <span class="cim-term-shell">bash // root</span>
+            </div>
+            <button class="cim-copy-btn" data-target="cmd-controller" aria-label="Copy Central Server Command">
+              <span class="cim-btn-text">COPY</span>
+            </button>
+          </div>
+          <div class="cim-code-wrap">
+            <pre id="cmd-controller" class="cim-code"><code><span class="tok-cmd">curl</span> <span class="tok-flag">-fsSL</span> <span class="tok-url">https://raw.githubusercontent.com/CoPdasten/copsec/main/scripts/install.sh</span> <span class="tok-punct">\</span>
+  <span class="tok-punct">|</span> <span class="tok-cmd">sudo</span> bash -s -- <span class="tok-param">--role=controller</span></code></pre>
+          </div>
+        </div>
+      </article>
+
+      <!-- CARD 2: COLLECTOR -->
+      <article class="cim-card">
+        <div class="cim-card-header">
+          <span class="cim-step">STEP 02</span>
+          <span class="cim-node-type">Kernel-Native Ingress Inspector</span>
+        </div>
+        <h3 class="cim-role">Edge Sensor Node</h3>
+        <p class="cim-desc">
+          Attaches native eBPF/XDP packet inspection to the interface (eth0) and streams real-time threat telemetry directly to the central Vault server.
+        </p>
+        <div class="cim-pills">
+          <span class="cim-pill pill-green">eBPF/XDP Native</span>
+          <span class="cim-pill pill-amber">Wire-Speed Drop</span>
+          <span class="cim-pill pill-blue">Auto-Replication</span>
+        </div>
+
+        <div class="cim-terminal">
+          <div class="cim-term-bar">
+            <div class="cim-term-dots">
+              <span class="dot red"></span>
+              <span class="dot yellow"></span>
+              <span class="dot green"></span>
+              <span class="cim-term-shell">bash // root</span>
+            </div>
+            <button class="cim-copy-btn" data-target="cmd-collector" aria-label="Copy Edge Sensor Command">
+              <span class="cim-btn-text">COPY</span>
+            </button>
+          </div>
+          <div class="cim-code-wrap">
+            <pre id="cmd-collector" class="cim-code"><code><span class="tok-cmd">curl</span> <span class="tok-flag">-fsSL</span> <span class="tok-url">https://raw.githubusercontent.com/CoPdasten/copsec/main/scripts/install.sh</span> <span class="tok-punct">\</span>
+  <span class="tok-punct">|</span> <span class="tok-cmd">sudo</span> bash -s -- <span class="tok-param">--role=collector</span> <span class="tok-punct">\</span>
+  <span class="tok-flag">--controller-ip=</span><span class="tok-placeholder">&lt;SERVER_IP&gt;</span> <span class="tok-param">--interface=eth0</span></code></pre>
+          </div>
+        </div>
+      </article>
+    </div>
+  </div>
+</section>
+
+<style>
+  .copsec-ignition-matrix {
+    --bg-main: #050505;
+    --bg-card: #0c0d10;
+    --bg-term: #050608;
+    --border-color: #27272a;
+    --accent-green: #10b981;
+    --accent-cyan: #06b6d4;
+    --accent-amber: #f59e0b;
+    --font-code: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    --font-ui: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+
+    background-color: var(--bg-main);
+    color: #f4f4f5;
+    font-family: var(--font-ui);
+    padding: 3rem 1rem;
+    box-sizing: border-box;
+  }
+
+  .copsec-ignition-matrix * {
+    box-sizing: border-box;
+  }
+
+  .cim-container {
+    max-width: 1140px;
+    margin: 0 auto;
+  }
+
+  .cim-header {
+    text-align: center;
+    margin-bottom: 2.5rem;
+  }
+
+  .cim-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-family: var(--font-code);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    color: var(--accent-green);
+    background: rgba(16, 185, 129, 0.1);
+    border: 1px solid rgba(16, 185, 129, 0.3);
+    padding: 0.25rem 0.75rem;
+    border-radius: 9999px;
+    margin-bottom: 0.75rem;
+  }
+
+  .cim-indicator {
+    width: 6px;
+    height: 6px;
+    background-color: var(--accent-green);
+    border-radius: 50%;
+    box-shadow: 0 0 8px var(--accent-green);
+  }
+
+  .cim-title {
+    font-size: 1.75rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    margin: 0 0 0.5rem 0;
+    color: #ffffff;
+  }
+
+  .cim-subtitle {
+    color: #a1a1aa;
+    font-size: 0.875rem;
+    max-width: 580px;
+    margin: 0 auto;
+    line-height: 1.5;
+  }
+
+  .cim-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 1.5rem;
+  }
+
+  .cim-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    transition: border-color 0.2s ease, transform 0.2s ease;
+  }
+
+  .cim-card:hover {
+    border-color: #3f3f46;
+  }
+
+  .cim-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.75rem;
+  }
+
+  .cim-step {
+    font-family: var(--font-code);
+    font-size: 0.6875rem;
+    font-weight: 700;
+    color: var(--accent-green);
+    background: rgba(16, 185, 129, 0.12);
+    border: 1px solid rgba(16, 185, 129, 0.25);
+    padding: 0.15rem 0.45rem;
+    border-radius: 4px;
+    letter-spacing: 0.05em;
+  }
+
+  .cim-node-type {
+    font-size: 0.75rem;
+    color: #71717a;
+  }
+
+  .cim-role {
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: #ffffff;
+    margin: 0 0 0.5rem 0;
+  }
+
+  .cim-desc {
+    font-size: 0.8125rem;
+    color: #a1a1aa;
+    line-height: 1.5;
+    margin: 0 0 1rem 0;
+    min-height: 2.8rem;
+  }
+
+  .cim-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 1.25rem;
+  }
+
+  .cim-pill {
+    font-family: var(--font-code);
+    font-size: 0.6875rem;
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+    border: 1px solid;
+  }
+
+  .pill-cyan { border-color: rgba(6, 182, 212, 0.3); background: rgba(6, 182, 212, 0.1); color: #22d3ee; }
+  .pill-green { border-color: rgba(16, 185, 129, 0.3); background: rgba(16, 185, 129, 0.1); color: #34d399; }
+  .pill-purple { border-color: rgba(168, 85, 247, 0.3); background: rgba(168, 85, 247, 0.1); color: #c084fc; }
+  .pill-amber { border-color: rgba(245, 158, 11, 0.3); background: rgba(245, 158, 11, 0.1); color: #fbbf24; }
+  .pill-blue { border-color: rgba(59, 130, 246, 0.3); background: rgba(59, 130, 246, 0.1); color: #60a5fa; }
+
+  /* Terminal Snippet Box */
+  .cim-terminal {
+    background: var(--bg-term);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+
+  .cim-term-bar {
+    background: #111217;
+    border-bottom: 1px solid var(--border-color);
+    padding: 0.4rem 0.75rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .cim-term-dots {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+  }
+
+  .dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    display: inline-block;
+  }
+
+  .dot.red { background: #ef4444; }
+  .dot.yellow { background: #f59e0b; }
+  .dot.green { background: #10b981; }
+
+  .cim-term-shell {
+    font-family: var(--font-code);
+    font-size: 0.6875rem;
+    color: #71717a;
+    margin-left: 0.5rem;
+  }
+
+  .cim-copy-btn {
+    background: #27272a;
+    border: 1px solid #3f3f46;
+    color: #e4e4e7;
+    font-family: var(--font-code);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    padding: 0.25rem 0.65rem;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .cim-copy-btn:hover {
+    background: #3f3f46;
+    color: #ffffff;
+  }
+
+  .cim-copy-btn.copied {
+    background: #064e3b;
+    border-color: #10b981;
+    color: #6ee7b7;
+  }
+
+  .cim-code-wrap {
+    padding: 0.75rem;
+    background: #020202;
+  }
+
+  /* Critical Fix: Strict Zero Horizontal Overflow */
+  .cim-code {
+    margin: 0;
+    font-family: var(--font-code);
+    font-size: 0.75rem;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-break: break-all;
+    overflow-wrap: anywhere;
+    color: #d4d4d8;
+  }
+
+  /* Syntax Highlighting Tokens */
+  .tok-cmd { color: #34d399; font-weight: 600; }
+  .tok-flag { color: #fbbf24; }
+  .tok-param { color: #38bdf8; }
+  .tok-url { color: #60a5fa; text-decoration: underline; text-decoration-color: rgba(96, 165, 250, 0.3); }
+  .tok-punct { color: #71717a; font-weight: bold; }
+  .tok-placeholder {
+    background: rgba(245, 158, 11, 0.2);
+    color: #fde68a;
+    border: 1px solid rgba(245, 158, 11, 0.4);
+    padding: 0.1rem 0.35rem;
+    border-radius: 3px;
+    font-weight: 700;
+  }
+</style>
+
+<script>
+  (function () {
+    const rawCommands = {
+      'cmd-controller': 'curl -fsSL https://raw.githubusercontent.com/CoPdasten/copsec/main/scripts/install.sh \\\n  | sudo bash -s -- --role=controller',
+      'cmd-collector': 'curl -fsSL https://raw.githubusercontent.com/CoPdasten/copsec/main/scripts/install.sh \\\n  | sudo bash -s -- --role=collector \\\n  --controller-ip=<SERVER_IP> --interface=eth0'
+    };
+
+    document.querySelectorAll('.cim-copy-btn').forEach(btn => {
+      btn.addEventListener('click', async function () {
+        const targetId = this.getAttribute('data-target');
+        const textToCopy = rawCommands[targetId] || '';
+
+        try {
+          if (navigator.clipboard && window.isSecureContext) {
+            await navigator.clipboard.writeText(textToCopy);
+          } else {
+            const tempArea = document.createElement('textarea');
+            tempArea.value = textToCopy;
+            document.body.appendChild(tempArea);
+            tempArea.select();
+            document.execCommand('copy');
+            document.body.removeChild(tempArea);
+          }
+
+          const originalText = this.querySelector('.cim-btn-text').textContent;
+          this.querySelector('.cim-btn-text').textContent = 'COPIED';
+          this.classList.add('copied');
+
+          setTimeout(() => {
+            this.querySelector('.cim-btn-text').textContent = originalText;
+            this.classList.remove('copied');
+          }, 2000);
+        } catch (err) {
+          console.error('Clipboard copy failed:', err);
+        }
+      });
+    });
+  })();
+</script>
