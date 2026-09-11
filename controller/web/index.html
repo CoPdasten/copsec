@@ -615,12 +615,16 @@
       <div class="stat-pill clickable" onclick="openQuarantineModal()" title="View and manage kernel XDP quarantine list">
         ACTIVE BANS (XDP): <span class="val" id="statBans">0</span>
       </div>
+      <button id="btnExportAuditPdf" class="btn btn-accent" style="padding: 4px 10px; font-weight: 700; display: flex; align-items: center; gap: 6px; background: #1c1917; border: 1px solid #78716c; color: #f5f5f4; cursor: pointer;" onclick="exportAuditCompliancePDF()" title="Export Executive Cryptographic Compliance SLA PDF Report">
+        <span>📄</span> <span>[ 📄 Export Audit Compliance Report ]</span>
+      </button>
     </div>
   </header>
 
   <!-- Navigation Tabs -->
   <nav>
     <button class="tab-btn active" onclick="navigateTo('dashboard')">[DASHBOARD]</button>
+    <button class="tab-btn" onclick="navigateTo('fleet')">[FLEET / SENSORS] <span class="tab-badge" id="badgeFleet">0</span></button>
     <button class="tab-btn" onclick="navigateTo('telemetry')">[TELEMETRY] <span class="tab-badge" id="badgeTelemetry">0</span></button>
     <button class="tab-btn" onclick="navigateTo('alerts')">[ALERTS] <span class="tab-badge" id="badgeAlerts">0</span></button>
     <button class="tab-btn" onclick="navigateTo('rules')">[DETECTION RULES] <span class="tab-badge" id="badgeRules">0</span></button>
@@ -917,6 +921,54 @@
             <!-- Rules table rows -->
           </tbody>
         </table>
+      </div>
+    </div>
+
+    <!-- Tab: Multi-Node Fleet & Sensor Mesh View -->
+    <div id="tab-fleet" class="tab-pane">
+      <div class="toolbar">
+        <div class="toolbar-left">
+          <input type="text" id="fleetSearchBox" class="input-box" placeholder="Filter Node ID, Group, or IP..." oninput="filterFleetTable()" style="width: 250px;">
+          <select id="fleetStatusFilter" class="input-box" onchange="filterFleetTable()">
+            <option value="ALL">ALL STATUSES</option>
+            <option value="ACTIVE">ACTIVE ONLY</option>
+            <option value="BYPASS">BYPASS ONLY</option>
+            <option value="OFFLINE">OFFLINE ONLY</option>
+          </select>
+          <button class="btn" onclick="fetchFleetTelemetry(true)">[ 🔄 Refresh Fleet Telemetry ]</button>
+        </div>
+        <div class="toolbar-right">
+          <span style="font-size: 11px; color: var(--text-muted);">Real-Time Heartbeat: <span style="color: var(--accent); font-weight: 700;">10s</span> | Stale SLA: <span style="color: var(--text); font-weight: 700;">30s</span></span>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top: 10px;">
+        <div class="card-title">
+          <span>Edge Collector Fleet Health & NIC Bindings</span>
+          <span id="fleetActiveCountBadge" class="badge badge-low">[0 ACTIVE NODES]</span>
+        </div>
+        <div class="table-container" style="max-height: 540px;">
+          <table>
+            <thead>
+              <tr>
+                <th style="width: 180px;">NODE ID</th>
+                <th style="width: 130px;">GROUP</th>
+                <th style="width: 130px;">IP ADDRESS</th>
+                <th style="width: 110px;">MONITORED NIC</th>
+                <th style="width: 110px;">XDP STATUS</th>
+                <th style="width: 170px;">CPU USAGE</th>
+                <th style="width: 170px;">RAM USAGE</th>
+                <th style="width: 140px;">TOTAL MITIGATED</th>
+                <th>LAST SEEN</th>
+              </tr>
+            </thead>
+            <tbody id="interactiveFleetTableBody">
+              <tr>
+                <td colspan="9" style="text-align: center; color: var(--text-muted); padding: 24px;">Loading fleet telemetry from /api/fleet...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
 
@@ -1552,6 +1604,7 @@
       const pane = document.getElementById(`tab-${tabId}`);
       if (pane) pane.classList.add('active');
 
+      if (tabId === 'fleet') fetchFleetTelemetry();
       if (tabId === 'telemetry') fetchInitialTelemetry();
       if (tabId === 'alerts') fetchAlerts();
       if (tabId === 'rules') fetchRules();
@@ -2742,6 +2795,181 @@
       } catch (e) {}
     }
 
+    // Executive Cryptographic Compliance PDF Report Export
+    async function exportAuditCompliancePDF() {
+      showToast('Generating Cryptographic Compliance PDF Report...', 'ok');
+      try {
+        const token = getStoredAPIKey();
+        const headers = {};
+        if (token) {
+          headers['X-API-Key'] = token;
+          headers['Authorization'] = `Bearer ${token}`;
+        }
+
+        const res = await fetch('/api/audit/report/pdf', { headers });
+        if (!res.ok) {
+          if (res.status === 401) {
+            showToast('Authentication failed: Operator credentials required to export compliance audit report', 'crit');
+            return;
+          }
+          throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+        }
+
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        const today = new Date().toISOString().slice(0, 10);
+        a.download = `CoPSeC_Compliance_Audit_${today}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+        showToast('✓ Cryptographic SLA Audit Report exported successfully', 'ok');
+      } catch (err) {
+        showToast('Audit report generation error: ' + err.message, 'crit');
+      }
+    }
+
+    let cachedFleetData = [];
+
+    // Interactive Fleet / Sensors View Engine
+    async function fetchFleetTelemetry(manual = false) {
+      try {
+        const token = getStoredAPIKey();
+        const headers = {};
+        if (token) {
+          headers['X-API-Key'] = token;
+          headers['Authorization'] = `Bearer ${token}`;
+        }
+
+        const res = await fetch('/api/fleet', { headers });
+        if (!res.ok) return;
+        const agents = await res.json();
+        cachedFleetData = Array.isArray(agents) ? agents : [];
+
+        renderFleetTable(cachedFleetData);
+
+        // Update badge and top stats
+        const activeCount = cachedFleetData.filter(a => (a.xdp_status || '').toUpperCase() === 'ACTIVE').length;
+        const badgeFleet = document.getElementById('badgeFleet');
+        if (badgeFleet) badgeFleet.textContent = cachedFleetData.length;
+
+        const statNodes = document.getElementById('statNodes');
+        if (statNodes) statNodes.textContent = activeCount;
+
+        const activeBadge = document.getElementById('fleetActiveCountBadge');
+        if (activeBadge) activeBadge.textContent = `[${activeCount} ACTIVE / ${cachedFleetData.length} TOTAL NODES]`;
+
+        if (manual) {
+          showToast(`✓ Fleet Telemetry refreshed: ${activeCount} active edge sensors`, 'ok');
+        }
+      } catch (e) {
+        if (manual) showToast('Failed to fetch fleet telemetry: ' + e.message, 'crit');
+      }
+    }
+
+    function renderFleetTable(agents) {
+      const tbody = document.getElementById('interactiveFleetTableBody');
+      if (!tbody) return;
+
+      if (!agents || agents.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="9" style="text-align: center; color: var(--text-muted); padding: 24px;">No edge collector fleet agents registered yet.</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = '';
+      const nowMs = Date.now();
+
+      agents.forEach(a => {
+        const tr = document.createElement('tr');
+
+        // Status badge
+        let badgeHtml = '';
+        const statusUpper = (a.xdp_status || 'ACTIVE').toUpperCase();
+        if (statusUpper === 'ACTIVE') {
+          badgeHtml = `<span class="badge" style="background: #14532d; color: #4ade80; border: 1px solid #22c55e; font-weight: 700;">[ACTIVE]</span>`;
+        } else if (statusUpper === 'BYPASS') {
+          badgeHtml = `<span class="badge" style="background: #713f12; color: #fde047; border: 1px solid #eab308; font-weight: 700;">[BYPASS]</span>`;
+        } else {
+          badgeHtml = `<span class="badge" style="background: #7f1d1d; color: #f87171; border: 1px solid #ef4444; font-weight: 700;">[OFFLINE]</span>`;
+        }
+
+        // CPU gauge
+        const cpuPct = Math.min(100, Math.max(0, a.cpu_usage_pct || 0));
+        let cpuColor = '#22c55e';
+        if (cpuPct > 80) cpuColor = '#ef4444';
+        else if (cpuPct > 50) cpuColor = '#eab308';
+        const cpuGauge = `
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <div style="flex: 1; height: 6px; background: #27272a; border-radius: 3px; overflow: hidden;">
+              <div style="width: ${cpuPct}%; height: 100%; background: ${cpuColor};"></div>
+            </div>
+            <span style="font-family: monospace; font-size: 11px; width: 45px; text-align: right;">${cpuPct.toFixed(1)}%</span>
+          </div>
+        `;
+
+        // RAM gauge
+        const ramMB = a.memory_usage_mb || 0;
+        const ramBarWidth = Math.min(100, Math.max(4, (ramMB / 1024.0) * 100));
+        const ramGauge = `
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <div style="flex: 1; height: 6px; background: #27272a; border-radius: 3px; overflow: hidden;">
+              <div style="width: ${ramBarWidth}%; height: 100%; background: #38bdf8;"></div>
+            </div>
+            <span style="font-family: monospace; font-size: 11px; width: 55px; text-align: right;">${ramMB.toFixed(0)} MB</span>
+          </div>
+        `;
+
+        // Relative last seen
+        const diffSec = Math.max(0, Math.floor((nowMs - (a.last_seen_ms || nowMs)) / 1000));
+        let lastSeenText = `${diffSec}s ago`;
+        if (diffSec > 60) {
+          lastSeenText = `${Math.floor(diffSec / 60)}m ago`;
+        }
+
+        const dropsFormatted = Number(a.total_packets_dropped || 0).toLocaleString() + ' pkts';
+
+        tr.innerHTML = `
+          <td style="font-weight: 700; color: #f4f4f5;">
+            <span style="display: flex; align-items: center; gap: 6px;">
+              <span style="color: ${statusUpper === 'ACTIVE' ? '#22c55e' : '#71717a'};">●</span>
+              ${escapeHtml(a.node_id)}
+            </span>
+          </td>
+          <td style="color: #a1a1aa;"><span class="badge badge-iso">${escapeHtml(a.node_group || 'DMZ_INGRESS')}</span></td>
+          <td style="font-family: monospace; color: #38bdf8;">${escapeHtml(a.ip_address || '-')}</td>
+          <td style="font-family: monospace; color: #e4e4e7;">${escapeHtml(a.active_interface || 'eth0')}</td>
+          <td>${badgeHtml}</td>
+          <td>${cpuGauge}</td>
+          <td>${ramGauge}</td>
+          <td style="font-family: monospace; color: #fde047; font-weight: 600;">${dropsFormatted}</td>
+          <td style="font-size: 11px; color: ${diffSec > 30 ? '#ef4444' : '#a1a1aa'};">${lastSeenText}</td>
+        `;
+
+        tbody.appendChild(tr);
+      });
+    }
+
+    function filterFleetTable() {
+      const q = (document.getElementById('fleetSearchBox')?.value || '').toLowerCase();
+      const status = (document.getElementById('fleetStatusFilter')?.value || 'ALL').toUpperCase();
+
+      const filtered = cachedFleetData.filter(a => {
+        const matchesQ = !q ||
+          (a.node_id && a.node_id.toLowerCase().includes(q)) ||
+          (a.node_group && a.node_group.toLowerCase().includes(q)) ||
+          (a.ip_address && a.ip_address.toLowerCase().includes(q));
+
+        const matchesStatus = (status === 'ALL') ||
+          ((a.xdp_status || 'ACTIVE').toUpperCase() === status);
+
+        return matchesQ && matchesStatus;
+      });
+
+      renderFleetTable(filtered);
+    }
+
     // Fully Hydrated Forensic Slide-Over Drawer
     async function openDrawer(rawEvent) {
       if (!rawEvent) return;
@@ -3578,8 +3806,10 @@ ${notes}
       fetchRules();
       fetchQuarantineBans();
       fetchTopActors();
+      fetchFleetTelemetry();
       setInterval(fetchAlerts, 8000);
       setInterval(fetchQuarantineBans, 10000);
+      setInterval(fetchFleetTelemetry, 10000);
       setInterval(fetchTopActors, 15000);
       setInterval(fetchSOARAutoPilotStatus, 30000);
     });

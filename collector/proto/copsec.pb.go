@@ -193,14 +193,19 @@ func (x *StreamAck) GetMessage() string {
 
 // Heartbeat delivers agent telemetry and resource consumption
 type Heartbeat struct {
-	state           protoimpl.MessageState `protogen:"open.v1"`
-	NodeId          string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
-	UptimeSeconds   int64                  `protobuf:"varint,2,opt,name=uptime_seconds,json=uptimeSeconds,proto3" json:"uptime_seconds,omitempty"`
-	CpuUsage        float64                `protobuf:"fixed64,3,opt,name=cpu_usage,json=cpuUsage,proto3" json:"cpu_usage,omitempty"`
-	MemoryUsage     float64                `protobuf:"fixed64,4,opt,name=memory_usage,json=memoryUsage,proto3" json:"memory_usage,omitempty"`
-	ActiveBansCount int32                  `protobuf:"varint,5,opt,name=active_bans_count,json=activeBansCount,proto3" json:"active_bans_count,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	NodeId              string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	UptimeSeconds       int64                  `protobuf:"varint,2,opt,name=uptime_seconds,json=uptimeSeconds,proto3" json:"uptime_seconds,omitempty"`
+	CpuUsage            float64                `protobuf:"fixed64,3,opt,name=cpu_usage,json=cpuUsage,proto3" json:"cpu_usage,omitempty"`
+	MemoryUsage         float64                `protobuf:"fixed64,4,opt,name=memory_usage,json=memoryUsage,proto3" json:"memory_usage,omitempty"`
+	ActiveBansCount     int32                  `protobuf:"varint,5,opt,name=active_bans_count,json=activeBansCount,proto3" json:"active_bans_count,omitempty"`
+	NodeGroup           string                 `protobuf:"bytes,6,opt,name=node_group,json=nodeGroup,proto3" json:"node_group,omitempty"`
+	IpAddress           string                 `protobuf:"bytes,7,opt,name=ip_address,json=ipAddress,proto3" json:"ip_address,omitempty"`
+	ActiveInterface     string                 `protobuf:"bytes,8,opt,name=active_interface,json=activeInterface,proto3" json:"active_interface,omitempty"`
+	XdpStatus           string                 `protobuf:"bytes,9,opt,name=xdp_status,json=xdpStatus,proto3" json:"xdp_status,omitempty"`
+	TotalPacketsDropped int64                  `protobuf:"varint,10,opt,name=total_packets_dropped,json=totalPacketsDropped,proto3" json:"total_packets_dropped,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *Heartbeat) Reset() {
@@ -264,6 +269,41 @@ func (x *Heartbeat) GetMemoryUsage() float64 {
 func (x *Heartbeat) GetActiveBansCount() int32 {
 	if x != nil {
 		return x.ActiveBansCount
+	}
+	return 0
+}
+
+func (x *Heartbeat) GetNodeGroup() string {
+	if x != nil {
+		return x.NodeGroup
+	}
+	return ""
+}
+
+func (x *Heartbeat) GetIpAddress() string {
+	if x != nil {
+		return x.IpAddress
+	}
+	return ""
+}
+
+func (x *Heartbeat) GetActiveInterface() string {
+	if x != nil {
+		return x.ActiveInterface
+	}
+	return ""
+}
+
+func (x *Heartbeat) GetXdpStatus() string {
+	if x != nil {
+		return x.XdpStatus
+	}
+	return ""
+}
+
+func (x *Heartbeat) GetTotalPacketsDropped() int64 {
+	if x != nil {
+		return x.TotalPacketsDropped
 	}
 	return 0
 }

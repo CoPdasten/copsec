@@ -63,10 +63,10 @@ func (d *LinuxQuarantineDriver) BlockIP(ip string, reason string) error {
 	_ = exec.CommandContext(ctx, "iptables", "-t", "raw", "-I", "PREROUTING", "1", "-s", cleanIP, "-j", "DROP").Run()
 	if err := exec.CommandContext(ctx, "iptables", "-I", "INPUT", "1", "-s", cleanIP, "-j", "DROP").Run(); err != nil {
 		// Try with sudo fallback if running unprivileged
-		sudoCtx, sudoCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		sudoCtx, sudoCancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer sudoCancel()
-		_ = exec.CommandContext(sudoCtx, "sudo", "iptables", "-t", "raw", "-I", "PREROUTING", "1", "-s", cleanIP, "-j", "DROP").Run()
-		_ = exec.CommandContext(sudoCtx, "sudo", "iptables", "-I", "INPUT", "1", "-s", cleanIP, "-j", "DROP").Run()
+		_ = exec.CommandContext(sudoCtx, "sudo", "-n", "iptables", "-t", "raw", "-I", "PREROUTING", "1", "-s", cleanIP, "-j", "DROP").Run()
+		_ = exec.CommandContext(sudoCtx, "sudo", "-n", "iptables", "-I", "INPUT", "1", "-s", cleanIP, "-j", "DROP").Run()
 	}
 
 	// 3. Flush connection tracking and terminate existing sockets
@@ -105,8 +105,8 @@ func (d *LinuxQuarantineDriver) UnblockIP(ip string) error {
 	_ = exec.CommandContext(ctx, "iptables", "-D", "INPUT", "-s", cleanIP, "-j", "DROP").Run()
 
 	// Sudo fallback
-	_ = exec.CommandContext(ctx, "sudo", "iptables", "-t", "raw", "-D", "PREROUTING", "-s", cleanIP, "-j", "DROP").Run()
-	_ = exec.CommandContext(ctx, "sudo", "iptables", "-D", "INPUT", "-s", cleanIP, "-j", "DROP").Run()
+	_ = exec.CommandContext(ctx, "sudo", "-n", "iptables", "-t", "raw", "-D", "PREROUTING", "-s", cleanIP, "-j", "DROP").Run()
+	_ = exec.CommandContext(ctx, "sudo", "-n", "iptables", "-D", "INPUT", "-s", cleanIP, "-j", "DROP").Run()
 
 	delete(d.blockedIPs, cleanIP)
 	log.Printf("[QUARANTINE_LINUX] 🟢 Removed iptables isolation for IP %s", cleanIP)

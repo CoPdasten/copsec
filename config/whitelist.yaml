@@ -1,0 +1,21 @@
+# CoPSeC Enterprise CIDR Whitelist Configuration
+# Trusted network zones, corporate gateways, and security scanner subnets.
+# Packets matching these subnets bypass L7 DPI and eBPF drop maps (XDP_PASS).
+
+trusted_cidrs:
+  # Loopback
+  - 127.0.0.1/32
+  - 127.0.0.0/8
+  - "::1/128"
+
+  # RFC 1918 Private Ranges
+  - 10.0.0.0/8
+  - 172.16.0.0/12
+  - 192.168.0.0/16
+
+  # Carrier-Grade NAT & Mesh VPN
+  - 100.64.0.0/10
+
+  # Authorized Corporate Gateways & Scanners
+  - 198.51.100.50/32
+  - 203.0.113.10/32

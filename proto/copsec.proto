@@ -31,6 +31,11 @@ message Heartbeat {
   double cpu_usage = 3;
   double memory_usage = 4;
   int32 active_bans_count = 5;
+  string node_group = 6;
+  string ip_address = 7;
+  string active_interface = 8;
+  string xdp_status = 9;
+  int64 total_packets_dropped = 10;
 }
 
 // HeartbeatResponse contains acknowledgments and controller instructions

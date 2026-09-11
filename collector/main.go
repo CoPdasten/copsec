@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/copsec/collector/internal/dpi"
+	"github.com/copsec/collector/internal/network"
 	"github.com/copsec/collector/pkg/dns"
 	"github.com/copsec/collector/pkg/ebpf"
 	"github.com/copsec/collector/pkg/healing"
@@ -33,6 +35,9 @@ func main() {
 	auditLogPath := flag.String("audit-log", "/var/log/audit/audit.log", "Path to Linux auditd log file")
 	offsetFilePath := flag.String("offset-file", "/var/lib/copsec/offsets.json", "Path to save/load file offsets")
 	whitelistPath := flag.String("whitelist", "/etc/copsec/whitelist.json", "Path to whitelist configuration JSON")
+	whitelistYamlPath := flag.String("whitelist-yaml", "/etc/copsec/whitelist.yaml", "Path to enterprise CIDR whitelist configuration YAML")
+	mirrorSockPath := flag.String("mirror-sock", network.DefaultMirrorSocketPath, "Path to TLS Decryption Mirror UNIX domain socket")
+	reaperInterval := flag.Duration("ban-reaper-interval", 15*time.Second, "Interval for dynamic eBPF ban TTL reaper")
 	flag.Parse()
 
 	log.Println("[INFO] CoPSeC Ultra-Fast Edge Collector initializing (Hub-and-Spoke SIEM Ingestion)...")
@@ -94,9 +99,47 @@ func main() {
 	collector := NewMultiLogCollector(sources, finalOffsetPath, finalWhitelistPath, controllerClient)
 	fallbackEngine.SetWhitelistFilter(collector.GetFilter(), finalWhitelistPath)
 
+	// 4b. Enterprise CIDR Whitelist Engine & eBPF Fast-Bypass
+	cidrWhitelist := network.NewCIDRWhitelist()
+	finalWhitelistYamlPath := *whitelistYamlPath
+	if _, err := os.Stat(finalWhitelistYamlPath); os.IsNotExist(err) {
+		fallbackYaml := "../config/whitelist.yaml"
+		if _, err := os.Stat(fallbackYaml); err == nil {
+			finalWhitelistYamlPath = fallbackYaml
+		}
+	}
+	if err := cidrWhitelist.LoadFromFile(finalWhitelistYamlPath); err != nil {
+		if err := cidrWhitelist.LoadFromFile(finalWhitelistPath); err != nil {
+			log.Printf("[INFO] CIDR Whitelist initialized with %d default RFC1918/loopback subnets", len(cidrWhitelist.ListCIDRs()))
+		}
+	}
+	dpiInspector := dpi.GetDefaultInspector()
+	dpiInspector.SetWhitelist(cidrWhitelist)
+
 	// 5. Start Defensive Subsystems (FIM, Tarpit, Honeypot, YARA, Integrity Guard, DNS Sinkhole)
 	fimEngine := healing.GetDefaultFIMEngine()
 	go fimEngine.StartWatchLoop(ctx, 5*time.Second)
+
+	// 5b. Start Real-Time Fleet Telemetry Heartbeat Engine
+	hbWorker := network.NewHeartbeatWorker(network.HeartbeatConfig{
+		NodeID:             identityMgr.GetNodeID(),
+		ControllerEndpoint: *controllerAddr,
+		Interval:           10 * time.Second,
+	})
+	hbWorker.Start(ctx)
+	defer hbWorker.Stop()
+
+	// 5c. Start Dynamic eBPF Ban TTL Reaper & Audit Streamer
+	banManager := network.NewBanManager(*controllerAddr)
+	banManager.StartBanReaper(ctx, *reaperInterval)
+
+	// 5d. Start Transparent TLS Decryption Mirror Ingress Socket
+	mirrorServer := network.NewTLSMirrorServer(*mirrorSockPath, dpiInspector)
+	if err := mirrorServer.Start(ctx); err != nil {
+		log.Printf("[WARN] TLS Mirror Socket failed to start on %s: %v", *mirrorSockPath, err)
+	} else {
+		defer mirrorServer.Stop()
+	}
 
 	tarpitEngine := tarpit.GetDefaultTarpit()
 	go func() {

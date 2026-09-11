@@ -8,11 +8,13 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/copsec/controller/internal/reporting"
 	"github.com/copsec/controller/pkg/deception"
 	"github.com/copsec/controller/pkg/detection"
 	"github.com/copsec/controller/pkg/dns"
@@ -210,6 +212,9 @@ func (ws *WebSOCServer) Start() error {
 	mux.HandleFunc("/api/soar/autopilot", ws.handleSOARAutoPilot)
 	mux.HandleFunc("/api/soar/stats", ws.handleSOARStats)
 	mux.HandleFunc("/api/audit/verify-integrity", ws.handleAuditVerifyIntegrity)
+	mux.HandleFunc("/api/audit/report/pdf", ws.handleCompliancePDFExport)
+	mux.HandleFunc("/api/audit/report", ws.handleCompliancePDFExport)
+	mux.HandleFunc("/api/fleet", ws.handleFleet)
 	mux.HandleFunc("/api/trust/score", ws.handleTrustScore)
 	mux.HandleFunc("/api/trust/entities", ws.handleTrustEntities)
 	mux.HandleFunc("/api/ml/stats", ws.handleMLStats)
@@ -1942,6 +1947,131 @@ func (ws *WebSOCServer) handleAuditVerifyIntegrity(w http.ResponseWriter, r *htt
 	}
 
 	json.NewEncoder(w).Encode(resp)
+}
+
+func (ws *WebSOCServer) handleFleet(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if ws.storage != nil {
+		fleet, err := ws.storage.GetFleetStatus(r.Context(), 30*time.Second)
+		if err == nil && len(fleet) > 0 {
+			_ = json.NewEncoder(w).Encode(fleet)
+			return
+		}
+	}
+
+	if ws.server != nil {
+		sessions := ws.server.GetNodesSnapshot()
+		var list []AgentTelemetry
+		for _, s := range sessions {
+			list = append(list, AgentTelemetry{
+				NodeID:          s.NodeID,
+				NodeGroup:       s.Group,
+				IPAddress:       s.RemoteAddr,
+				ActiveInterface: "eth0",
+				XDPStatus:       "ACTIVE",
+				LastSeenMs:      s.LastSeen.UnixMilli(),
+				CPUUsagePct:     s.CPUUsage,
+				MemoryUsageMB:   s.MemoryUsage,
+			})
+		}
+		if len(list) > 0 {
+			_ = json.NewEncoder(w).Encode(list)
+			return
+		}
+	}
+
+	_ = json.NewEncoder(w).Encode([]AgentTelemetry{})
+}
+
+func (ws *WebSOCServer) handleCompliancePDFExport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, `{"error":"Method Not Allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	forensicsDir := "/var/log/copsec/forensics"
+	if envDir := os.Getenv("COPSEC_FORENSICS_DIR"); envDir != "" {
+		forensicsDir = envDir
+	}
+
+	summary, err := reporting.BuildReportSummary(r.Context(), nil, forensicsDir)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":"Failed to compile audit summary: %v"}`, err), http.StatusInternalServerError)
+		return
+	}
+
+	if ws.storage != nil {
+		valid, count, lastHash, vErr := ws.storage.VerifyLogIntegrity()
+		summary.AuditTrailVerified = valid && vErr == nil
+		summary.AuditTrailRecordCount = int(count)
+		summary.AuditTrailLastHash = lastHash
+		if valid && vErr == nil {
+			summary.AuditTrailVerdict = "VERDICT: 100% VERIFIED - SHA-256 HASH CHAIN TAMPER-FREE"
+		} else {
+			summary.AuditTrailVerdict = "VERDICT: INTEGRITY FAILURE - CRYPTOGRAPHIC HASH CHAIN TAMPERED"
+		}
+
+		if fleet, fErr := ws.storage.GetFleetStatus(r.Context(), 30*time.Second); fErr == nil && len(fleet) > 0 {
+			summary.FleetNodes = nil
+			summary.TotalActiveFleetNodes = 0
+			summary.PacketsDroppedXDP = 0
+			for _, a := range fleet {
+				if a.XDPStatus == "ACTIVE" {
+					summary.TotalActiveFleetNodes++
+				}
+				summary.PacketsDroppedXDP += a.TotalPacketsDropped
+				summary.FleetNodes = append(summary.FleetNodes, reporting.FleetNodeSnapshot{
+					NodeID:              a.NodeID,
+					NodeGroup:           a.NodeGroup,
+					IPAddress:           a.IPAddress,
+					ActiveInterface:     a.ActiveInterface,
+					XDPStatus:           a.XDPStatus,
+					CPUUsagePct:         a.CPUUsagePct,
+					MemoryUsageMB:       a.MemoryUsageMB,
+					TotalPacketsDropped: a.TotalPacketsDropped,
+				})
+			}
+		}
+
+		// Query unbans from audit trail
+		rows, qErr := ws.storage.db.QueryContext(r.Context(), `
+			SELECT id, timestamp, actor_identity, actor_ip, target_entity, justification, cryptographic_hash
+			FROM security_audit_trail
+			WHERE action_type = 'MANUAL_UNBAN'
+			ORDER BY id DESC LIMIT 15
+		`)
+		if qErr == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var u reporting.UnbanAuditRecord
+				var tsStr string
+				if err := rows.Scan(&u.ID, &tsStr, &u.ActorID, &u.ActorIP, &u.TargetIP, &u.Justification, &u.CryptographicHash); err == nil {
+					u.Timestamp, _ = time.Parse("2006-01-02 15:04:05", tsStr)
+					summary.RecentUnbans = append(summary.RecentUnbans, u)
+				}
+			}
+		}
+
+		var totalIncidents int64
+		_ = ws.storage.db.QueryRowContext(r.Context(), "SELECT COUNT(*) FROM events").Scan(&totalIncidents)
+		if totalIncidents > 0 {
+			summary.AggregateIncidents = totalIncidents
+		}
+	}
+
+	dateStr := time.Now().UTC().Format("2006-01-02")
+	filename := fmt.Sprintf("CoPSeC_Compliance_Audit_%s.pdf", dateStr)
+
+	w.Header().Set("Content-Type", "application/pdf")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Expires", "0")
+
+	if err := reporting.GenerateCompliancePDF(summary, w); err != nil {
+		log.Printf("[ERROR] Failed to generate compliance PDF: %v", err)
+	}
 }
 
 func (ws *WebSOCServer) handleTrustScore(w http.ResponseWriter, r *http.Request) {

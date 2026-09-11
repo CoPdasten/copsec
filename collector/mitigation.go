@@ -94,12 +94,12 @@ func ExecuteInstantBan(ip string) error {
 		_ = driver.BlockIP(cleanIP, "Fleet/Edge Automated Quarantine")
 	} else {
 		// Fallback to direct iptables if driver not registered
-		_ = exec.Command("sudo", "iptables", "-t", "raw", "-I", "PREROUTING", "1", "-s", cleanIP, "-j", "DROP").Run()
-		_ = exec.Command("sudo", "iptables", "-I", "INPUT", "1", "-s", cleanIP, "-j", "DROP").Run()
-		_ = exec.Command("sudo", "conntrack", "-D", "-s", cleanIP).Run()
-		_ = exec.Command("sudo", "conntrack", "-D", "-d", cleanIP).Run()
-		_ = exec.Command("sudo", "ss", "-K", "dst", cleanIP).Run()
-		_ = exec.Command("sudo", "ss", "-K", "src", cleanIP).Run()
+		_ = exec.Command("sudo", "-n", "iptables", "-t", "raw", "-I", "PREROUTING", "1", "-s", cleanIP, "-j", "DROP").Run()
+		_ = exec.Command("sudo", "-n", "iptables", "-I", "INPUT", "1", "-s", cleanIP, "-j", "DROP").Run()
+		_ = exec.Command("sudo", "-n", "conntrack", "-D", "-s", cleanIP).Run()
+		_ = exec.Command("sudo", "-n", "conntrack", "-D", "-d", cleanIP).Run()
+		_ = exec.Command("sudo", "-n", "ss", "-K", "dst", cleanIP).Run()
+		_ = exec.Command("sudo", "-n", "ss", "-K", "src", cleanIP).Run()
 	}
 
 	// 2. ASENKRON L7 NGINX WAF (Arka planda reload etsin, ana akışı bekletmesin)
@@ -111,8 +111,8 @@ func ExecuteInstantBan(ip string) error {
 			if err == nil {
 				_, _ = f.WriteString(fmt.Sprintf("deny %s;\n", targetIP))
 				_ = f.Close()
-				if err := exec.Command("sudo", "nginx", "-t").Run(); err == nil {
-					_ = exec.Command("sudo", "nginx", "-s", "reload").Run()
+				if err := exec.Command("sudo", "-n", "nginx", "-t").Run(); err == nil {
+					_ = exec.Command("sudo", "-n", "nginx", "-s", "reload").Run()
 				}
 			}
 		}
@@ -142,8 +142,8 @@ func ExecuteAbsoluteUnban(ip string) error {
 		_ = driver.UnblockIP(ip)
 	} else {
 		// iptables Kurallarını Kaldır
-		_ = exec.Command("sudo", "iptables", "-t", "raw", "-D", "PREROUTING", "-s", ip, "-j", "DROP").Run()
-		_ = exec.Command("sudo", "iptables", "-D", "INPUT", "-s", ip, "-j", "DROP").Run()
+		_ = exec.Command("sudo", "-n", "iptables", "-t", "raw", "-D", "PREROUTING", "-s", ip, "-j", "DROP").Run()
+		_ = exec.Command("sudo", "-n", "iptables", "-D", "INPUT", "-s", ip, "-j", "DROP").Run()
 	}
 
 	// 2. Nginx Blocklist Dosyasından Çıkar
@@ -163,8 +163,8 @@ func ExecuteAbsoluteUnban(ip string) error {
 			newContent += "\n"
 		}
 		_ = os.WriteFile(blocklistPath, []byte(newContent), 0644)
-		if err := exec.Command("sudo", "nginx", "-t").Run(); err == nil {
-			_ = exec.Command("sudo", "nginx", "-s", "reload").Run()
+		if err := exec.Command("sudo", "-n", "nginx", "-t").Run(); err == nil {
+			_ = exec.Command("sudo", "-n", "nginx", "-s", "reload").Run()
 		}
 	}
 

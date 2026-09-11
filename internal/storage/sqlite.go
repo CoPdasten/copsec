@@ -41,18 +41,33 @@ type ActiveBan struct {
 	Status          string    `json:"status"`
 }
 
+// AgentTelemetry models an edge collector sensor node's health, binding, and XDP line-rate drops.
+type AgentTelemetry struct {
+	NodeID              string  `json:"node_id"`
+	NodeGroup           string  `json:"node_group"`
+	IPAddress           string  `json:"ip_address"`
+	ActiveInterface     string  `json:"active_interface"`
+	XDPStatus           string  `json:"xdp_status"` // 'ACTIVE', 'BYPASS', 'OFFLINE'
+	LastSeenMs          int64   `json:"last_seen_ms"`
+	CPUUsagePct         float64 `json:"cpu_usage_pct"`
+	MemoryUsageMB       float64 `json:"memory_usage_mb"`
+	TotalPacketsDropped int64   `json:"total_packets_dropped"`
+}
+
 // SecurityStorage provides banking-grade, SQLi-immune storage with tamper-resistant auditing.
 type SecurityStorage struct {
 	db *sql.DB
 	mu sync.RWMutex
 
 	// Pre-compiled prepared statements guaranteeing 100% parameterized execution
-	stmtInsertAudit     *sql.Stmt
-	stmtGetLastAudit    *sql.Stmt
-	stmtInsertBan       *sql.Stmt
-	stmtRevokeBan       *sql.Stmt
-	stmtGetActiveBans   *sql.Stmt
-	stmtCheckBan        *sql.Stmt
+	stmtInsertAudit          *sql.Stmt
+	stmtGetLastAudit         *sql.Stmt
+	stmtInsertBan            *sql.Stmt
+	stmtRevokeBan            *sql.Stmt
+	stmtGetActiveBans        *sql.Stmt
+	stmtCheckBan             *sql.Stmt
+	stmtUpsertAgentHeartbeat *sql.Stmt
+	stmtGetRecentUnbans      *sql.Stmt
 }
 
 // NewSecurityStorage initializes embedded WAL-mode SQLite with append-only audit protections.
@@ -131,6 +146,21 @@ func (s *SecurityStorage) initSchema() error {
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_bans_status ON active_bans(status);
+
+	-- 4. Multi-Node Fleet Telemetry Table
+	CREATE TABLE IF NOT EXISTS fleet_agents (
+		node_id TEXT PRIMARY KEY,
+		node_group TEXT NOT NULL,
+		ip_address TEXT NOT NULL,
+		active_interface TEXT NOT NULL,
+		xdp_status TEXT NOT NULL,          -- 'ACTIVE', 'BYPASS', 'OFFLINE'
+		last_seen_ms INTEGER NOT NULL,
+		cpu_usage_pct REAL DEFAULT 0.0,
+		memory_usage_mb REAL DEFAULT 0.0,
+		total_packets_dropped INTEGER DEFAULT 0
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_agent_last_seen ON fleet_agents(last_seen_ms);
 	`
 
 	_, err := s.db.Exec(schema)
@@ -182,6 +212,36 @@ func (s *SecurityStorage) prepareStatements() error {
 
 	s.stmtCheckBan, err = s.db.Prepare(`
 		SELECT ip, reason, ban_time_ms, duration_seconds, status FROM active_bans WHERE ip = ? AND status = 'ACTIVE'
+	`)
+	if err != nil {
+		return err
+	}
+
+	s.stmtUpsertAgentHeartbeat, err = s.db.Prepare(`
+		INSERT INTO fleet_agents (
+			node_id, node_group, ip_address, active_interface, xdp_status,
+			last_seen_ms, cpu_usage_pct, memory_usage_mb, total_packets_dropped
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(node_id) DO UPDATE SET
+			node_group = excluded.node_group,
+			ip_address = excluded.ip_address,
+			active_interface = excluded.active_interface,
+			xdp_status = excluded.xdp_status,
+			last_seen_ms = excluded.last_seen_ms,
+			cpu_usage_pct = excluded.cpu_usage_pct,
+			memory_usage_mb = excluded.memory_usage_mb,
+			total_packets_dropped = excluded.total_packets_dropped
+	`)
+	if err != nil {
+		return err
+	}
+
+	s.stmtGetRecentUnbans, err = s.db.Prepare(`
+		SELECT id, timestamp, actor_identity, actor_ip, action_type, target_entity, justification, cryptographic_hash
+		FROM security_audit_trail
+		WHERE action_type = 'MANUAL_UNBAN'
+		ORDER BY id DESC
+		LIMIT ?
 	`)
 	return err
 }
@@ -396,6 +456,142 @@ func (s *SecurityStorage) VerifyAuditTrailIntegrity(ctx context.Context) (bool, 
 	return true, recordCount, nil
 }
 
+// UpsertAgentHeartbeat writes or updates node telemetry using ON CONFLICT(node_id) DO UPDATE.
+func (s *SecurityStorage) UpsertAgentHeartbeat(ctx context.Context, agent AgentTelemetry) error {
+	nodeID := strings.TrimSpace(agent.NodeID)
+	if nodeID == "" {
+		return errors.New("fleet agent upsert failed: node_id cannot be empty")
+	}
+	if agent.NodeGroup == "" {
+		agent.NodeGroup = "DEFAULT"
+	}
+	if agent.ActiveInterface == "" {
+		agent.ActiveInterface = "eth0"
+	}
+	if agent.XDPStatus == "" {
+		agent.XDPStatus = "ACTIVE"
+	}
+	if agent.LastSeenMs <= 0 {
+		agent.LastSeenMs = time.Now().UnixMilli()
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.stmtUpsertAgentHeartbeat.ExecContext(ctx,
+		nodeID,
+		agent.NodeGroup,
+		agent.IPAddress,
+		agent.ActiveInterface,
+		agent.XDPStatus,
+		agent.LastSeenMs,
+		agent.CPUUsagePct,
+		agent.MemoryUsageMB,
+		agent.TotalPacketsDropped,
+	)
+	if err != nil {
+		return fmt.Errorf("failed to upsert agent heartbeat for node %s: %w", nodeID, err)
+	}
+	return nil
+}
+
+// GetFleetStatus queries all registered nodes, dynamically flagging any node whose
+// last_seen_ms is older than staleThreshold (default 30s) as OFFLINE.
+func (s *SecurityStorage) GetFleetStatus(ctx context.Context, staleThreshold time.Duration) ([]AgentTelemetry, error) {
+	if staleThreshold <= 0 {
+		staleThreshold = 30 * time.Second
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT node_id, node_group, ip_address, active_interface, xdp_status,
+		       last_seen_ms, cpu_usage_pct, memory_usage_mb, total_packets_dropped
+		FROM fleet_agents
+		ORDER BY node_id ASC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query fleet status: %w", err)
+	}
+	defer rows.Close()
+
+	nowMs := time.Now().UnixMilli()
+	staleThresholdMs := staleThreshold.Milliseconds()
+	var fleet []AgentTelemetry
+
+	for rows.Next() {
+		var a AgentTelemetry
+		if err := rows.Scan(
+			&a.NodeID,
+			&a.NodeGroup,
+			&a.IPAddress,
+			&a.ActiveInterface,
+			&a.XDPStatus,
+			&a.LastSeenMs,
+			&a.CPUUsagePct,
+			&a.MemoryUsageMB,
+			&a.TotalPacketsDropped,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan fleet agent row: %w", err)
+		}
+
+		// Dynamically flag nodes whose last_seen_ms is older than 30s as OFFLINE
+		if (nowMs - a.LastSeenMs) > staleThresholdMs {
+			a.XDPStatus = "OFFLINE"
+		}
+
+		fleet = append(fleet, a)
+	}
+
+	return fleet, rows.Err()
+}
+
+// GetRecentUnbans returns the last N manual unban operations for audit reporting.
+func (s *SecurityStorage) GetRecentUnbans(ctx context.Context, limit int) ([]AuditEntry, error) {
+	if limit <= 0 {
+		limit = 15
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rows, err := s.stmtGetRecentUnbans.QueryContext(ctx, limit)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query recent unbans: %w", err)
+	}
+	defer rows.Close()
+
+	var entries []AuditEntry
+	for rows.Next() {
+		var e AuditEntry
+		var tsStr string
+		if err := rows.Scan(&e.ID, &tsStr, &e.ActorIdentity, &e.ActorIP, &e.ActionType, &e.TargetEntity, &e.Justification, &e.CryptographicHash); err != nil {
+			return nil, err
+		}
+		e.Timestamp, _ = time.Parse("2006-01-02 15:04:05", tsStr)
+		if e.Timestamp.IsZero() {
+			e.Timestamp, _ = time.Parse(time.RFC3339, tsStr)
+		}
+		entries = append(entries, e)
+	}
+	return entries, rows.Err()
+}
+
+// GetAuditSummary returns aggregate audit metrics for compliance reporting.
+func (s *SecurityStorage) GetAuditSummary(ctx context.Context) (totalIncidents int64, totalPacketsDropped int64, activeNodes int, err error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	_ = s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM security_audit_trail").Scan(&totalIncidents)
+	_ = s.db.QueryRowContext(ctx, "SELECT COALESCE(SUM(total_packets_dropped), 0) FROM fleet_agents").Scan(&totalPacketsDropped)
+
+	nowMs := time.Now().UnixMilli()
+	_ = s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM fleet_agents WHERE (? - last_seen_ms) <= 30000 AND xdp_status != 'OFFLINE'", nowMs).Scan(&activeNodes)
+
+	return totalIncidents, totalPacketsDropped, activeNodes, nil
+}
+
 // Close gracefully closes all prepared statements and the database connection.
 func (s *SecurityStorage) Close() error {
 	s.mu.Lock()
@@ -407,6 +603,8 @@ func (s *SecurityStorage) Close() error {
 	if s.stmtRevokeBan != nil { _ = s.stmtRevokeBan.Close() }
 	if s.stmtGetActiveBans != nil { _ = s.stmtGetActiveBans.Close() }
 	if s.stmtCheckBan != nil { _ = s.stmtCheckBan.Close() }
+	if s.stmtUpsertAgentHeartbeat != nil { _ = s.stmtUpsertAgentHeartbeat.Close() }
+	if s.stmtGetRecentUnbans != nil { _ = s.stmtGetRecentUnbans.Close() }
 
 	if s.db != nil {
 		return s.db.Close()

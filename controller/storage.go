@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -138,6 +139,19 @@ type NodeRegistryRecord struct {
 	ActiveBansCount int     `json:"active_bans_count"`
 	UptimeSeconds   int64   `json:"uptime_seconds"`
 	Status          string  `json:"status"`
+}
+
+// AgentTelemetry models an edge collector sensor node's health, binding, and XDP line-rate drops.
+type AgentTelemetry struct {
+	NodeID              string  `json:"node_id"`
+	NodeGroup           string  `json:"node_group"`
+	IPAddress           string  `json:"ip_address"`
+	ActiveInterface     string  `json:"active_interface"`
+	XDPStatus           string  `json:"xdp_status"` // 'ACTIVE', 'BYPASS', 'OFFLINE'
+	LastSeenMs          int64   `json:"last_seen_ms"`
+	CPUUsagePct         float64 `json:"cpu_usage_pct"`
+	MemoryUsageMB       float64 `json:"memory_usage_mb"`
+	TotalPacketsDropped int64   `json:"total_packets_dropped"`
 }
 
 // StorageEngine manages the embedded WAL-mode SQLite database.
@@ -417,6 +431,20 @@ func (s *StorageEngine) initSchema() error {
 		uptime_seconds INTEGER DEFAULT 0,
 		status TEXT DEFAULT 'ACTIVE'
 	);
+
+	CREATE TABLE IF NOT EXISTS fleet_agents (
+		node_id TEXT PRIMARY KEY,
+		node_group TEXT NOT NULL,
+		ip_address TEXT NOT NULL,
+		active_interface TEXT NOT NULL,
+		xdp_status TEXT NOT NULL,          -- 'ACTIVE', 'BYPASS', 'OFFLINE'
+		last_seen_ms INTEGER NOT NULL,
+		cpu_usage_pct REAL DEFAULT 0.0,
+		memory_usage_mb REAL DEFAULT 0.0,
+		total_packets_dropped INTEGER DEFAULT 0
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_agent_last_seen ON fleet_agents(last_seen_ms);
 
 	CREATE TABLE IF NOT EXISTS system_config (
 		key TEXT PRIMARY KEY,
@@ -1088,6 +1116,106 @@ func (s *StorageEngine) GetRegisteredNodes() ([]NodeRegistryRecord, error) {
 		}
 	}
 	return list, nil
+}
+
+// UpsertAgentHeartbeat records or updates real-time node telemetry in fleet_agents.
+func (s *StorageEngine) UpsertAgentHeartbeat(ctx context.Context, agent AgentTelemetry) error {
+	nodeID := strings.TrimSpace(agent.NodeID)
+	if nodeID == "" {
+		return fmt.Errorf("fleet agent upsert failed: node_id cannot be empty")
+	}
+	if agent.NodeGroup == "" {
+		agent.NodeGroup = "DEFAULT"
+	}
+	if agent.ActiveInterface == "" {
+		agent.ActiveInterface = "eth0"
+	}
+	if agent.XDPStatus == "" {
+		agent.XDPStatus = "ACTIVE"
+	}
+	if agent.LastSeenMs <= 0 {
+		agent.LastSeenMs = time.Now().UnixMilli()
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	query := `INSERT INTO fleet_agents (
+		node_id, node_group, ip_address, active_interface, xdp_status,
+		last_seen_ms, cpu_usage_pct, memory_usage_mb, total_packets_dropped
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	ON CONFLICT(node_id) DO UPDATE SET
+		node_group = excluded.node_group,
+		ip_address = excluded.ip_address,
+		active_interface = excluded.active_interface,
+		xdp_status = excluded.xdp_status,
+		last_seen_ms = excluded.last_seen_ms,
+		cpu_usage_pct = excluded.cpu_usage_pct,
+		memory_usage_mb = excluded.memory_usage_mb,
+		total_packets_dropped = excluded.total_packets_dropped`
+
+	_, err := s.db.ExecContext(ctx, query,
+		nodeID,
+		agent.NodeGroup,
+		agent.IPAddress,
+		agent.ActiveInterface,
+		agent.XDPStatus,
+		agent.LastSeenMs,
+		agent.CPUUsagePct,
+		agent.MemoryUsageMB,
+		agent.TotalPacketsDropped,
+	)
+	return err
+}
+
+// GetFleetStatus queries all registered nodes, dynamically flagging any node whose
+// last_seen_ms is older than staleThreshold (default 30s) as OFFLINE.
+func (s *StorageEngine) GetFleetStatus(ctx context.Context, staleThreshold time.Duration) ([]AgentTelemetry, error) {
+	if staleThreshold <= 0 {
+		staleThreshold = 30 * time.Second
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	query := `SELECT node_id, node_group, ip_address, active_interface, xdp_status,
+	                 last_seen_ms, cpu_usage_pct, memory_usage_mb, total_packets_dropped
+	          FROM fleet_agents
+	          ORDER BY node_id ASC`
+	rows, err := s.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	nowMs := time.Now().UnixMilli()
+	staleThresholdMs := staleThreshold.Milliseconds()
+	var fleet []AgentTelemetry
+
+	for rows.Next() {
+		var a AgentTelemetry
+		if err := rows.Scan(
+			&a.NodeID,
+			&a.NodeGroup,
+			&a.IPAddress,
+			&a.ActiveInterface,
+			&a.XDPStatus,
+			&a.LastSeenMs,
+			&a.CPUUsagePct,
+			&a.MemoryUsageMB,
+			&a.TotalPacketsDropped,
+		); err != nil {
+			return nil, err
+		}
+
+		if (nowMs - a.LastSeenMs) > staleThresholdMs {
+			a.XDPStatus = "OFFLINE"
+		}
+
+		fleet = append(fleet, a)
+	}
+
+	return fleet, rows.Err()
 }
 
 // MarkStaleNodesOffline sets status to OFFLINE for nodes with no heartbeat for more than staleDuration.

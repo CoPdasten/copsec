@@ -243,13 +243,13 @@ func (h *ShadowHoneypot) RedirectAttackerToHoneypot(ip string, serviceType strin
 	h.redirectedIPs.Store(cleanIP, serviceType)
 
 	// 1. Flush any conflicting DROP rules for this IP to allow honeypot capture
-	_ = exec.Command("sudo", "iptables", "-t", "raw", "-D", "PREROUTING", "-s", cleanIP, "-j", "DROP").Run()
-	_ = exec.Command("sudo", "iptables", "-D", "INPUT", "-s", cleanIP, "-j", "DROP").Run()
+	_ = exec.Command("sudo", "-n", "iptables", "-t", "raw", "-D", "PREROUTING", "-s", cleanIP, "-j", "DROP").Run()
+	_ = exec.Command("sudo", "-n", "iptables", "-D", "INPUT", "-s", cleanIP, "-j", "DROP").Run()
 
 	// 2. Redirect SSH (22) -> Decoy Port 2222 and HTTP (80/443) -> Decoy Port 8088
-	_ = exec.Command("sudo", "iptables", "-t", "nat", "-I", "PREROUTING", "1", "-p", "tcp", "-s", cleanIP, "--dport", "22", "-j", "REDIRECT", "--to-ports", "2222").Run()
-	_ = exec.Command("sudo", "iptables", "-t", "nat", "-I", "PREROUTING", "1", "-p", "tcp", "-s", cleanIP, "--dport", "80", "-j", "REDIRECT", "--to-ports", "8088").Run()
-	_ = exec.Command("sudo", "iptables", "-t", "nat", "-I", "PREROUTING", "1", "-p", "tcp", "-s", cleanIP, "--dport", "443", "-j", "REDIRECT", "--to-ports", "8088").Run()
+	_ = exec.Command("sudo", "-n", "iptables", "-t", "nat", "-I", "PREROUTING", "1", "-p", "tcp", "-s", cleanIP, "--dport", "22", "-j", "REDIRECT", "--to-ports", "2222").Run()
+	_ = exec.Command("sudo", "-n", "iptables", "-t", "nat", "-I", "PREROUTING", "1", "-p", "tcp", "-s", cleanIP, "--dport", "80", "-j", "REDIRECT", "--to-ports", "8088").Run()
+	_ = exec.Command("sudo", "-n", "iptables", "-t", "nat", "-I", "PREROUTING", "1", "-p", "tcp", "-s", cleanIP, "--dport", "443", "-j", "REDIRECT", "--to-ports", "8088").Run()
 
 	log.Printf("[HONEYPOT] 🪤 Configured Kernel PREROUTING Deception Redirection for %s -> Decoys (2222/8088)", cleanIP)
 	return nil
@@ -260,9 +260,9 @@ func (h *ShadowHoneypot) RemoveRedirection(ip string) error {
 	cleanIP := strings.TrimSpace(ip)
 	h.redirectedIPs.Delete(cleanIP)
 
-	_ = exec.Command("sudo", "iptables", "-t", "nat", "-D", "PREROUTING", "-p", "tcp", "-s", cleanIP, "--dport", "22", "-j", "REDIRECT", "--to-ports", "2222").Run()
-	_ = exec.Command("sudo", "iptables", "-t", "nat", "-D", "PREROUTING", "-p", "tcp", "-s", cleanIP, "--dport", "80", "-j", "REDIRECT", "--to-ports", "8088").Run()
-	_ = exec.Command("sudo", "iptables", "-t", "nat", "-D", "PREROUTING", "-p", "tcp", "-s", cleanIP, "--dport", "443", "-j", "REDIRECT", "--to-ports", "8088").Run()
+	_ = exec.Command("sudo", "-n", "iptables", "-t", "nat", "-D", "PREROUTING", "-p", "tcp", "-s", cleanIP, "--dport", "22", "-j", "REDIRECT", "--to-ports", "2222").Run()
+	_ = exec.Command("sudo", "-n", "iptables", "-t", "nat", "-D", "PREROUTING", "-p", "tcp", "-s", cleanIP, "--dport", "80", "-j", "REDIRECT", "--to-ports", "8088").Run()
+	_ = exec.Command("sudo", "-n", "iptables", "-t", "nat", "-D", "PREROUTING", "-p", "tcp", "-s", cleanIP, "--dport", "443", "-j", "REDIRECT", "--to-ports", "8088").Run()
 	return nil
 }
 

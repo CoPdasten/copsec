@@ -857,6 +857,46 @@ func (s *CentralServer) SendHeartbeat(ctx context.Context, hb *copsecproto.Heart
 		})
 	}
 
+	if s.storage != nil {
+		nodeGroup := hb.GetNodeGroup()
+		if nodeGroup == "" && ok {
+			nodeGroup = session.Group
+		}
+		if nodeGroup == "" {
+			nodeGroup = "DMZ_INGRESS"
+		}
+
+		ipAddr := hb.GetIpAddress()
+		if ipAddr == "" && ok {
+			ipAddr = session.RemoteAddr
+		}
+		if ipAddr == "" {
+			ipAddr = "127.0.0.1"
+		}
+
+		activeIface := hb.GetActiveInterface()
+		if activeIface == "" {
+			activeIface = "eth0"
+		}
+
+		xdpStatus := hb.GetXdpStatus()
+		if xdpStatus == "" {
+			xdpStatus = "ACTIVE"
+		}
+
+		_ = s.storage.UpsertAgentHeartbeat(ctx, AgentTelemetry{
+			NodeID:              nodeID,
+			NodeGroup:           nodeGroup,
+			IPAddress:           ipAddr,
+			ActiveInterface:     activeIface,
+			XDPStatus:           xdpStatus,
+			LastSeenMs:          time.Now().UnixMilli(),
+			CPUUsagePct:         hb.CpuUsage,
+			MemoryUsageMB:       hb.MemoryUsage,
+			TotalPacketsDropped: hb.GetTotalPacketsDropped(),
+		})
+	}
+
 	return &copsecproto.HeartbeatResponse{
 		Acknowledged: true,
 	}, nil
