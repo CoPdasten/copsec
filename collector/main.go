@@ -38,7 +38,13 @@ func main() {
 	whitelistYamlPath := flag.String("whitelist-yaml", "/etc/copsec/whitelist.yaml", "Path to enterprise CIDR whitelist configuration YAML")
 	mirrorSockPath := flag.String("mirror-sock", network.DefaultMirrorSocketPath, "Path to TLS Decryption Mirror UNIX domain socket")
 	reaperInterval := flag.Duration("ban-reaper-interval", 15*time.Second, "Interval for dynamic eBPF ban TTL reaper")
+	ifaceFlag := flag.String("interface", "", "Network interface for eBPF/XDP mitigation (e.g. eth0)")
+	xdpModeFlag := flag.String("xdp-mode", "native", "eBPF/XDP driver attachment mode ('native' or 'generic')")
 	flag.Parse()
+
+	if *ifaceFlag != "" {
+		ebpf.GetXDPEngine().SetInterfaceAndMode(*ifaceFlag, *xdpModeFlag)
+	}
 
 	log.Println("[INFO] CoPSeC Ultra-Fast Edge Collector initializing (Hub-and-Spoke SIEM Ingestion)...")
 

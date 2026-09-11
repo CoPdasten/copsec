@@ -46,6 +46,21 @@ func GetXDPEngine() *XDPMitigationEngine {
 	return defaultEngine
 }
 
+// SetInterfaceAndMode dynamically updates the target network interface and XDP operational mode.
+func (x *XDPMitigationEngine) SetInterfaceAndMode(iface string, mode string) {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	if strings.TrimSpace(iface) != "" {
+		x.interfaceName = strings.TrimSpace(iface)
+	}
+	if strings.EqualFold(mode, "native") || strings.EqualFold(mode, "xdp_drv") {
+		x.xdpMode = "XDP_DRV"
+	} else if strings.EqualFold(mode, "generic") || strings.EqualFold(mode, "xdp_skb") {
+		x.xdpMode = "XDP_SKB"
+	}
+	log.Printf("[XDP_EBPF] Interface reconfigured: %s (Mode: %s)", x.interfaceName, x.xdpMode)
+}
+
 // NewXDPMitigationEngine initializes the eBPF/XDP drop map and driver attachment.
 func NewXDPMitigationEngine(iface string) *XDPMitigationEngine {
 	if iface == "" {

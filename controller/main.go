@@ -32,6 +32,8 @@ func main() {
 	rulesPath := flag.String("rules", "../config/rules.json", "Rules JSON path")
 	sigmaDir := flag.String("sigma-dir", "/etc/copsec/sigma", "SigmaHQ detection rules directory")
 	dbPath := flag.String("db", "./data/copsec.db", "SQLite DB path")
+	dbPathFlag := flag.String("db-path", "", "Alias for --db (SQLite DB path)")
+	portFlag := flag.Int("port", 0, "Alias for --web-port")
 	autoBan := flag.Bool("auto-ban", true, "Enable autonomous SOAR auto-ban")
 	autoBanThreshold := flag.Int("auto-ban-threshold", 80, "Threat score threshold for auto-ban")
 	flag.Parse()
@@ -40,9 +42,12 @@ func main() {
 
 	// Support COPSEC_PORT environment override if not explicitly specified via CLI flag
 	effectiveWebPort := *webPortFlag
+	if *portFlag > 0 {
+		effectiveWebPort = *portFlag
+	}
 	isWebPortPassed := false
 	flag.Visit(func(f *flag.Flag) {
-		if f.Name == "web-port" {
+		if f.Name == "web-port" || f.Name == "port" {
 			isWebPortPassed = true
 		}
 	})
@@ -84,9 +89,12 @@ func main() {
 
 	// 1. Embedded Timeseries Storage (WAL-mode SQLite)
 	finalDbPath := *dbPath
+	if *dbPathFlag != "" {
+		finalDbPath = *dbPathFlag
+	}
 	isDbPassed := false
 	flag.Visit(func(f *flag.Flag) {
-		if f.Name == "db" {
+		if f.Name == "db" || f.Name == "db-path" {
 			isDbPassed = true
 		}
 	})
