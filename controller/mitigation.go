@@ -114,8 +114,8 @@ func ExecuteInstantBan(ip string) error {
 			if err == nil {
 				_, _ = f.WriteString(fmt.Sprintf("deny %s;\n", targetIP))
 				_ = f.Close()
-				if err := exec.Command("sudo", "nginx", "-t").Run(); err == nil {
-					_ = exec.Command("sudo", "nginx", "-s", "reload").Run()
+				if err := exec.Command("sudo", "-n", "nginx", "-t").Run(); err == nil {
+					_ = exec.Command("sudo", "-n", "nginx", "-s", "reload").Run()
 				}
 			}
 		}
@@ -160,8 +160,8 @@ func ExecuteAbsoluteUnban(ip string) error {
 				newContent += "\n"
 			}
 			_ = os.WriteFile(blocklistPath, []byte(newContent), 0644)
-			if err := exec.Command("sudo", "nginx", "-t").Run(); err == nil {
-				_ = exec.Command("sudo", "nginx", "-s", "reload").Run()
+			if err := exec.Command("sudo", "-n", "nginx", "-t").Run(); err == nil {
+				_ = exec.Command("sudo", "-n", "nginx", "-s", "reload").Run()
 			}
 		}
 	}

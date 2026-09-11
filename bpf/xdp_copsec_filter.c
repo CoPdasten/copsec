@@ -1,6 +1,8 @@
 #include <linux/bpf.h>
 #include <linux/if_ether.h>
 #include <linux/ip.h>
+#include <linux/tcp.h>
+#include <linux/udp.h>
 #include <bpf/bpf_helpers.h>
 
 // Dynamic quarantine entry metadata for line-rate kernel drops with TTL
@@ -34,6 +36,12 @@ struct {
     __type(value, __u32); // 1 = trusted / bypass
 } whitelisted_ips SEC(".maps");
 
+// 3. Ring buffer map for zero-copy kernel-to-userspace drop telemetry (256 KB)
+struct {
+    __uint(type, BPF_MAP_TYPE_RINGBUF);
+    __uint(max_entries, 256 * 1024);
+} telemetry_ringbuf SEC(".maps");
+
 // Telemetry counters
 struct {
     __uint(type, BPF_MAP_TYPE_ARRAY);
@@ -48,9 +56,60 @@ enum {
     COPSEC_PACKETS_WHITELISTED = 2
 };
 
+// Drop reasons: 1: SYN Flood, 2: L7 DPI Signature, 3: Entropy Anomaly, 4: Rate Limit
+enum drop_reason_t {
+    DROP_REASON_SYN_FLOOD       = 1,
+    DROP_REASON_L7_DPI          = 2,
+    DROP_REASON_ENTROPY_ANOMALY = 3,
+    DROP_REASON_RATE_LIMIT      = 4
+};
+
+// Strict binary event structure aligned to 64-bit boundaries (Total: 24 bytes)
+struct drop_event_t {
+    __u32 src_ip;
+    __u16 src_port;
+    __u16 protocol;
+    __u8  drop_reason;
+    __u8  pad[7];
+    __u64 timestamp_ns;
+};
+
 static __always_inline void increment_counter(__u32 key) {
     __u64* counter = bpf_map_lookup_elem(&xdp_counters, &key);
     if (counter) (*counter)++;
+}
+
+static __always_inline void emit_drop_event(struct iphdr *ip, void *data_end, __u8 reason, __u64 now_ns) {
+    struct drop_event_t *event = bpf_ringbuf_reserve(&telemetry_ringbuf, sizeof(struct drop_event_t), 0);
+    if (!event) {
+        return;
+    }
+
+    event->src_ip = ip->saddr;
+    event->protocol = ip->protocol;
+    event->drop_reason = reason;
+    #pragma unroll
+    for (int i = 0; i < 7; i++) {
+        event->pad[i] = 0;
+    }
+    event->timestamp_ns = now_ns;
+
+    __u16 src_port = 0;
+    void *l4 = (void *)(ip + 1);
+    if (ip->protocol == 6) { // IPPROTO_TCP
+        struct tcphdr *tcp = l4;
+        if ((void *)(tcp + 1) <= data_end) {
+            src_port = __constant_ntohs(tcp->source);
+        }
+    } else if (ip->protocol == 17) { // IPPROTO_UDP
+        struct udphdr *udp = l4;
+        if ((void *)(udp + 1) <= data_end) {
+            src_port = __constant_ntohs(udp->source);
+        }
+    }
+    event->src_port = src_port;
+
+    bpf_ringbuf_submit(event, 0);
 }
 
 SEC("xdp")
@@ -77,6 +136,11 @@ int copsec_xdp(struct xdp_md *ctx) {
         __u64 now_ns = bpf_ktime_get_ns();
         // ttl_ns == 0 denotes permanent ban; otherwise check expiration
         if (entry->ttl_ns == 0 || now_ns < (entry->ban_timestamp_ns + entry->ttl_ns)) {
+            __u8 reason = DROP_REASON_RATE_LIMIT;
+            if (entry->reason_code >= 1 && entry->reason_code <= 4) {
+                reason = (__u8)entry->reason_code;
+            }
+            emit_drop_event(ip, data_end, reason, now_ns);
             increment_counter(COPSEC_PACKETS_DROPPED);
             return XDP_DROP;
         }
@@ -85,6 +149,7 @@ int copsec_xdp(struct xdp_md *ctx) {
     // Fallback check against legacy ban_map
     __u64* legacy_expiry = bpf_map_lookup_elem(&ban_map, &ip->saddr);
     if (legacy_expiry && *legacy_expiry > bpf_ktime_get_ns() / 1000000000ULL) {
+        emit_drop_event(ip, data_end, DROP_REASON_RATE_LIMIT, bpf_ktime_get_ns());
         increment_counter(COPSEC_PACKETS_DROPPED);
         return XDP_DROP;
     }

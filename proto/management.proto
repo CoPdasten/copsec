@@ -1,0 +1,50 @@
+syntax = "proto3";
+
+package copsec.management;
+
+option go_package = "github.com/copsec/collector/proto/management;managementproto";
+
+// SensorManagementService provides dynamic remote administration of collector sensors.
+service SensorManagementService {
+  // PushSignatures atomically compiles and hot-swaps updated threat signature bundles.
+  rpc PushSignatures(SignatureBundle) returns (PushSignaturesResponse);
+
+  // GetEngineStatus reports the active DFA ruleset metadata and swap metrics.
+  rpc GetEngineStatus(EngineStatusRequest) returns (EngineStatusResponse);
+}
+
+message SignatureRule {
+  string id = 1;
+  string name = 2;
+  string pattern = 3;
+  string category = 4;
+  string severity = 5;
+}
+
+message SignatureBundle {
+  string bundle_id = 1;
+  string bundle_version = 2;
+  string pushed_by = 3; // e.g. "pardus1"
+  int64 timestamp_ms = 4;
+  repeated SignatureRule rules = 5;
+  bytes raw_bundle_data = 6; // raw json or yaml payload
+}
+
+message PushSignaturesResponse {
+  bool success = 1;
+  string message = 2;
+  uint32 rules_loaded = 3;
+  uint64 engine_version = 4;
+  int64 timestamp_ms = 5;
+}
+
+message EngineStatusRequest {
+  string requester_id = 1;
+}
+
+message EngineStatusResponse {
+  uint32 active_rules_count = 1;
+  uint64 engine_version = 2;
+  int64 last_swap_timestamp_ms = 3;
+  uint64 total_swaps = 4;
+}

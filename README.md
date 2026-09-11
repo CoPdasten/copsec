@@ -140,6 +140,88 @@ CoPSeC is engineered across **6 core architectural pillars** that decouple high-
 
 ---
 
+## ⚡ Next-Gen Enterprise Subsystems (CoPSeC Pro)
+
+CoPSeC Pro advances single-node lab verification into a multi-node distributed defense ecosystem through four high-performance, kernel-integrated layers:
+
+```text
++--------------------------------------------------------------------------------------------------+
+|                                  Linux Kernel (eBPF / XDP Fast-Path)                            |
+|  [ NIC Ingress ] -> [ In-Kernel Whitelist ] -> [ banned_ips TTL Map ] -> [ XDP_DROP Action ]     |
+|                                                                                |                 |
+|                                                                bpf_ringbuf_reserve / submit      |
+|                                                                                v                 |
+|                                                                     [ telemetry_ringbuf ]        |
++--------------------------------------------------------------------------------+-----------------+
+                                                                                 | Zero-Copy mmap
+                                                                                 v
++--------------------------------------------------------------------------------------------------+
+|                             collector/internal/bpf/ringbuf.go                                   |
+|  [ ringbuf.Reader ] -> [ Zero-Alloc Direct Memory Cast ] -> [ DropEvent ] -> [ TelemetryBus ]   |
++--------------------------------------------------------------------------------------------------+
+         |                                                                   |
+         | Gossip Threat Propagation                                         | Dynamic Push
+         v                                                                   v
++-------------------------------------+                   +------------------------------------+
+| collector/internal/cluster/gossip.go|                   |  collector/internal/dpi/reloader.go|
+|  - Memberlist Broadcast Engine      |                   |   - atomic.Pointer[AhoCorasickDFA] |
+|  - Attacker IPv4 + TTL (Binary)     |                   |   - [256]*trieNode Jump Transitions|
+|  - Auto eBPF ban_map replication    |                   |   - gRPC Management Endpoint (Push)|
++-------------------------------------+                   +------------------------------------+
+         |                                                                   |
+         | Edge-to-Controller gRPC / Fleet Ingestion                         |
+         +-----------------------------------+-------------------------------+
+                                             |
+                                             v
++--------------------------------------------------------------------------------------------------+
+|                             controller/internal/export/siem.go                                   |
+|  [ RingChannelBuffer (Non-blocking) ] -> [ Worker Pool ] -> [ CEF / RFC 5424 Syslog over mTLS ]  |
+|                                                                |                                 |
+|                                         +----------------------+---------------------+           |
+|                                         v                                            v           |
+|                                 [ Wazuh / Splunk ]                         [ Elastic Logstash ]  |
++--------------------------------------------------------------------------------------------------+
+```
+
+### 1. Zero-Copy Kernel Telemetry via `BPF_MAP_TYPE_RINGBUF`
+* **Kernel Map & Structure Alignment:** Defines a 256 KB `BPF_MAP_TYPE_RINGBUF` (`telemetry_ringbuf`) in `bpf/xdp_copsec_filter.c` paired with a strict 64-bit aligned binary event structure `struct drop_event_t` (24 bytes):
+  ```c
+  struct drop_event_t {
+      __u32 src_ip;
+      __u16 src_port;
+      __u16 protocol;
+      __u8  drop_reason; // 1: SYN Flood, 2: L7 DPI Signature, 3: Entropy Anomaly, 4: Rate Limit
+      __u8  pad[7];
+      __u64 timestamp_ns;
+  };
+  ```
+* **Event-Driven Telemetry:** On every drop action (`banned_ips` expiration or fast-path drop), `emit_drop_event()` executes `bpf_ringbuf_reserve()` and `bpf_ringbuf_submit()` with zero userspace polling overhead.
+* **Userspace Zero-Allocation Processing:** `collector/internal/bpf/ringbuf.go` uses `cilium/ebpf/ringbuf` to read raw samples in a dedicated goroutine, converting raw memory to `DropEvent` with **0 heap allocations per event** (`testing.AllocsPerRun`).
+
+### 2. Zero-Downtime Dynamic DFA Rule Compilation & Hot-Swap (`atomic.Pointer`)
+* **Lock-Free Atomic Pointer Swaps:** `collector/internal/dpi/reloader.go` encapsulates `atomic.Pointer[AhoCorasickDFA]`, completely decoupling high-speed concurrent readers from rule updates.
+* **Deterministic Jump-Table Compilation:** Rule signatures are compiled into an immutable Aho-Corasick automaton with precomputed `[256]*trieNode` jump transitions (`curr.children[b] = curr.fail.children[b]`) via BFS, eliminating fail pointer chaining loops during packet scanning.
+* **Remote gRPC Management Endpoint:** Implements `SensorManagementService` (`proto/management.proto`) on the collector, allowing central controller nodes (e.g. `pardus1`) to remotely push updated threat signature bundles without restarting the sensor.
+
+### 3. Distributed Threat Synchronization (Gossip / Memberlist Protocol)
+* **Decentralized Reputation Propagation:** `collector/internal/cluster/gossip.go` implements a lightweight mesh broadcaster using HashiCorp `memberlist`.
+* **Binary Wire Format (`ThreatSyncBroadcast`):**
+  - Header: Magic byte `0x43` ('C') + Type `0x01`
+  - Attacker IPv4 (4 bytes)
+  - Quarantine TTL in seconds (uint32 big-endian)
+  - Source Node ID (uint16 length-prefixed UTF-8 string)
+* **Autonomous Line-Rate NIC Ban Injection:** When an edge sensor drops an IP at line rate, it disseminates a gossip broadcast so adjacent nodes (e.g., `chachy`, secondary DMZ sensors) immediately inject the IP into their local eBPF `banned_ips` map without waiting for controller polling.
+
+### 4. Enterprise SIEM Exporter (ArcSight CEF & RFC 5424 over mTLS)
+* **Non-Blocking Ring-Channel Buffer:** `controller/internal/export/siem.go` wraps a circular ring buffer (`RingChannelBuffer`) that displaces oldest events during upstream network congestion, guaranteeing the gRPC stream and ingestion engine never stall.
+* **ArcSight Common Event Format (CEF):** Formats drop events matching standard enterprise SIEM syntax:
+  ```text
+  CEF:0|CoPSeC|KernelXDP|1.4|DROP|<Reason>|<Severity>|src=<IP> cs1Label=CVE cs1=<CVE> cn1Label=LatencyNs cn1=<Latency>
+  ```
+* **RFC 5424 Syslog & Transport Targets:** Supports RFC 5424 Syslog envelopes over TCP/TLS with mutual TLS (mTLS) client certificate, private key, and Root CA verification, alongside raw TCP sockets for Wazuh, Splunk TCP inputs, and Elastic Logstash/Filebeat.
+
+---
+
 ## 🧠 Autonomous RAM-Based Forensic Ring Buffer & Snapshot Engine
 
 ### The Problem: Disk Bottlenecks in Modern Packet Forensics
@@ -396,20 +478,24 @@ All endpoints require the `X-API-Key: <YOUR_API_KEY>` header.
 
 ## 🧪 Comprehensive Verification & Test Suite
 
-All components are rigorously tested across C++ unit tests, Go package suites, and live multi-node laboratory environments.
+All components are rigorously tested across C++ unit tests, Go package suites with race detection, and live multi-node laboratory environments.
 
 ```bash
-# 1. Run C++ / Fast-Path Whitelist Tests
+# 1. Unified Compilation: Build eBPF targets and standalone binaries into bin/
+make all
+
+# 2. Execute Full Go Test Suite with Race Detector (-race)
+make test
+
+# 3. Individual Package Test Execution
+(cd collector && go test -race -v ./...)
+(cd controller && go test -race -v ./...)
+
+# 4. Compile eBPF Bytecode Targets Only
+make bpf
+
+# 5. Run C++ / Fast-Path Whitelist Tests
 ctest --test-dir build --output-on-failure
-
-# 2. Run Root Go Unit & Regression Tests
-go test -v ./...
-
-# 3. Run Collector Edge Sensor Tests
-cd collector && go test -v ./...
-
-# 4. Run Controller & SOAR Engine Tests
-cd controller && go test -v ./...
 ```
 
 ### SRE Benchmark & Multi-Node Verification Suite

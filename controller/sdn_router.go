@@ -54,9 +54,9 @@ func (d *BGPFlowspecDriver) EnforceEdgeDrop(ctx context.Context, ip string, dura
 	}
 
 	// Delete pre-existing route if present to avoid EEXIST
-	_ = exec.CommandContext(ctx, "sudo", "ip", "route", "del", "blackhole", cidr).Run()
+	_ = exec.CommandContext(ctx, "sudo", "-n", "ip", "route", "del", "blackhole", cidr).Run()
 
-	cmd := exec.CommandContext(ctx, "sudo", "ip", "route", "add", "blackhole", cidr)
+	cmd := exec.CommandContext(ctx, "sudo", "-n", "ip", "route", "add", "blackhole", cidr)
 	out, err := cmd.CombinedOutput()
 	if err != nil && !strings.Contains(string(out), "File exists") {
 		log.Printf("[SDN_ROUTER] ⚠️ IP-Route blackhole command output: %s (err: %v)", string(out), err)
@@ -81,7 +81,7 @@ func (d *BGPFlowspecDriver) ReleaseEdgeDrop(ctx context.Context, ip string) erro
 		}
 	}
 
-	_ = exec.CommandContext(ctx, "sudo", "ip", "route", "del", "blackhole", cidr).Run()
+	_ = exec.CommandContext(ctx, "sudo", "-n", "ip", "route", "del", "blackhole", cidr).Run()
 	log.Printf("[SDN_ROUTER] 🟢 BGP/IP-Route Blackhole Released for %s", cidr)
 	return nil
 }
