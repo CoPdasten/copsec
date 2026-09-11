@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/copsec/collector/internal/cluster"
 	"github.com/copsec/collector/internal/dpi"
 	"github.com/copsec/collector/internal/network"
 	"github.com/copsec/collector/pkg/dns"
@@ -40,7 +42,20 @@ func main() {
 	reaperInterval := flag.Duration("ban-reaper-interval", 15*time.Second, "Interval for dynamic eBPF ban TTL reaper")
 	ifaceFlag := flag.String("interface", "", "Network interface for eBPF/XDP mitigation (e.g. eth0)")
 	xdpModeFlag := flag.String("xdp-mode", "native", "eBPF/XDP driver attachment mode ('native' or 'generic')")
+	controllerIPFlag := flag.String("controller-ip", "", "Controller IP address (auto-configures gRPC target)")
+	gossipPortFlag := flag.Int("gossip-port", 7946, "Port for Memberlist Gossip threat replication")
+	gossipJoinFlag := flag.String("gossip-join", "", "Initial Memberlist Gossip peer(s) to join (comma-separated host:port)")
+	mgmtPortFlag := flag.Int("mgmt-port", 50052, "Port for dynamic rule management gRPC service")
 	flag.Parse()
+
+	if *controllerIPFlag != "" {
+		trimmed := strings.TrimSpace(*controllerIPFlag)
+		if !strings.Contains(trimmed, ":") {
+			*controllerAddr = trimmed + ":50051"
+		} else {
+			*controllerAddr = trimmed
+		}
+	}
 
 	if *ifaceFlag != "" {
 		ebpf.GetXDPEngine().SetInterfaceAndMode(*ifaceFlag, *xdpModeFlag)
@@ -145,6 +160,36 @@ func main() {
 		log.Printf("[WARN] TLS Mirror Socket failed to start on %s: %v", *mirrorSockPath, err)
 	} else {
 		defer mirrorServer.Stop()
+	}
+
+	// 5e. Start Distributed Threat Synchronization (Memberlist Gossip Mesh)
+	var gossipPeers []string
+	if *gossipJoinFlag != "" {
+		for _, p := range strings.Split(*gossipJoinFlag, ",") {
+			if trimmed := strings.TrimSpace(p); trimmed != "" {
+				gossipPeers = append(gossipPeers, trimmed)
+			}
+		}
+	}
+	gossipCluster, err := cluster.NewGossipCluster(cluster.GossipConfig{
+		NodeID:   identityMgr.GetNodeID(),
+		BindPort: *gossipPortFlag,
+		Peers:    gossipPeers,
+	})
+	if err != nil {
+		log.Printf("[WARN] Gossip cluster initialization note: %v", err)
+	} else {
+		defer gossipCluster.Shutdown()
+	}
+
+	// 5f. Start Dynamic Rule Reloader Management Endpoint
+	dynamicEngine := dpi.NewDynamicEngine(dpi.GetEmbeddedSignatures())
+	mgmtLis, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", *mgmtPortFlag))
+	if err == nil {
+		mgmtServer, err := dpi.StartManagementServer(mgmtLis, dynamicEngine)
+		if err == nil {
+			defer mgmtServer.Stop()
+		}
 	}
 
 	tarpitEngine := tarpit.GetDefaultTarpit()

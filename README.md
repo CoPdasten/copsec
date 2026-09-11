@@ -287,40 +287,45 @@ CoPSeC eliminates persistent disk writes entirely by introducing an in-memory, i
 
 ---
 
-## 🚀 Quick Start & One-Line Deployment
+## 🚀 Quick Start & Autonomous Cluster Ignition
 
-### ⚡ 1-Line Automated Installation (3-Tier Enterprise Topology)
-
-#### 🗄️ 1. Tier 2: Primary Data Vault & Cryptographic Storage Server (Central SIEM Vault)
-To deploy the dedicated **Central Storage & Vault Node** where all security events, forensic PCAP dumps, SQLite WAL databases, and immutable SHA-256 hash chains are stored and protected:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/CoPdasten/copsec/main/scripts/install-vault.sh | sudo bash
-```
-
-> **What this does automatically on the Storage Node:**
-> - Initializes the banking-grade **SQLite WAL** database engine (`/var/lib/copsec/copsec.db`).
-> - Installs the immutable database triggers (`prevent_audit_update`, `prevent_audit_delete`).
-> - Configures the **RAM & PCAP Forensic Archive** repository (`/var/log/copsec/forensics`).
-> - Binds the web management interface strictly to loopback `127.0.0.1:8080` (Zero `0.0.0.0` wildcard exposure).
-> - Activates the **gRPC Telemetry Ingestion Engine** on port `:50051` with automated Root CA and mTLS provisioning.
-> - Enables and starts the hardened `copsec-vault.service` under `systemd`.
+CoPSeC Pro features a unified, idempotent, zero-touch installer (`scripts/install.sh`) supporting multi-role automated provisioning across your entire enterprise defense cluster. It handles package installation, binary resolution/compilation, eBPF/XDP driver hook detachment, directory tree creation, SQLite WAL ledger initialization with cryptographic anti-tamper triggers, and systemd service registration.
 
 ---
 
-#### 🛡️ 2. Tier 1: Edge Collector Sensor (DMZ / Fleet Nodes)
-To enroll any new remote server or DMZ node into your cluster and stream telemetry to your Storage Vault:
+### ⚡ Cluster-Wide One-Line Ignition Matrix
 
+#### 1. Central Controller & Vault (`chachy` — `192.168.1.10`)
+Deploys the central brain, gRPC ingestion engine (`:50051`), Web SOC Cockpit (`:8080`), and banking-grade SQLite ledger with `CRYPTOGRAPHIC_VIOLATION` triggers:
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CoPdasten/copsec/main/deploy.sh | sudo bash -s -- --controller <VAULT_IP>:50051
+curl -fsSL https://raw.githubusercontent.com/CoPdasten/copsec/main/scripts/install.sh | sudo bash -s -- --role=controller
 ```
-*(Replace `<VAULT_IP>:50051` with your Vault server's IP, e.g. `192.168.1.8:50051`)*
 
-> **What this does automatically on the Edge Sensor:**
-> - Automatically detects host log streams (Syslog, SSH Auth, Nginx, Suricata, Snort).
-> - Attaches the sub-millisecond **eBPF/XDP** driver-level packet drop engine to network interfaces.
-> - Activates the **TCP Zero-Window Tarpit** (`:2223`) and local **Shadow Honeypots** (`:8088`).
-> - Starts the **30s RAM Forensic Ring Buffer** and connects to the Central Vault via authenticated **TLS 1.3 mTLS**.
+#### 2. Edge Sensor 1 (`pardus1` — `192.168.1.8`, Initial Seed Node)
+Hooks native eBPF/XDP to `eth0`, binds Memberlist Gossip listener on `:7946`, activates the dynamic Ban Reaper, and connects to the central Controller:
+```bash
+curl -fsSL https://raw.githubusercontent.com/CoPdasten/copsec/main/scripts/install.sh | sudo bash -s -- --role=collector --controller-ip=192.168.1.10 --interface=eth0
+```
+
+#### 3. Edge Sensor 2 (`pardus2` — `192.168.1.11`, Mesh Gossip Peer Node)
+Hooks native eBPF/XDP to `eth0`, connects to the central Controller, and dynamically joins `pardus1`'s Gossip mesh (`192.168.1.8:7946`) for peer-to-peer threat replication:
+```bash
+curl -fsSL https://raw.githubusercontent.com/CoPdasten/copsec/main/scripts/install.sh | sudo bash -s -- --role=collector --controller-ip=192.168.1.10 --interface=eth0 --gossip-join=192.168.1.8:7946
+```
+
+---
+
+### 🔍 Single Verification Probe Command
+
+Verify cluster registration, active node heartbeats, and interface/XDP states directly from any terminal:
+```bash
+curl -s http://192.168.1.10:8080/api/fleet | jq -e '
+  length >= 2 and
+  (map(select(.node_id == "pardus1" or .hostname == "pardus1")) | length >= 1) and
+  (map(select(.node_id == "pardus2" or .hostname == "pardus2")) | length >= 1) and
+  all(.[]; .xdp_status == "ACTIVE" or .status == "ACTIVE")
+' && curl -s http://192.168.1.10:8080/api/fleet | jq .
+```
 
 ---
 
