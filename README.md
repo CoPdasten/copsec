@@ -3,9 +3,10 @@
 > Autonomous, kernel-native intrusion detection, deception honey-tokens, pre-attack PCAP forensics, cryptographic audit chaining, eBPF EDR, and real-time multi-node SOC triage ecosystem built with Go, eBPF/XDP, C++, and SQLite.
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Language-Go%201.22+-00ADD8?style=for-the-badge&logo=go&logoColor=white" alt="Go" />
+  <img src="https://img.shields.io/badge/Language-Go%201.25+-00ADD8?style=for-the-badge&logo=go&logoColor=white" alt="Go" />
   <img src="https://img.shields.io/badge/Kernel-eBPF%20%2F%20XDP-orange?style=for-the-badge&logo=linux&logoColor=white" alt="eBPF/XDP" />
-  <img src="https://img.shields.io/badge/Deception-Honey--Tokens%20%26%20Tarpit-blue?style=for-the-badge" alt="Honey Tokens & Tarpit" />
+  <img src="https://img.shields.io/badge/Mesh-Memberlist%20Gossip%20:7946-blueviolet?style=for-the-badge" alt="Gossip Mesh" />
+  <img src="https://img.shields.io/badge/SIEM-ArcSight%20CEF%20%2F%20RFC%205424-blue?style=for-the-badge" alt="Enterprise SIEM" />
   <img src="https://img.shields.io/badge/Forensics-Pre--Attack%20PCAP%20Buffer-purple?style=for-the-badge" alt="PCAP Forensics" />
   <img src="https://img.shields.io/badge/Crypt-SHA--256%20Merkle%20Chaining-red?style=for-the-badge" alt="SHA-256 Hash Chain" />
   <img src="https://img.shields.io/badge/Fleet-gRPC%20Multi--Node%20Mesh-green?style=for-the-badge" alt="gRPC Fleet Mesh" />
@@ -329,46 +330,46 @@ curl -s http://192.168.1.10:8080/api/fleet | jq -e '
 
 ---
 
-#### 🖥️ 3. Tier 3: SOC Cockpit & Workstation (Secure Operator Access)
-Because the Tier 2 Vault strictly cloaks port `8080` from untrusted networks, analysts connect securely using zero-trust SSH port forwarding:
+### 🖥️ Secure Operator Access (SOC Cockpit)
+The Controller Web Cockpit binds to port `8080`. When deployed with zero-trust network cloaking, analysts connect securely via SSH port forwarding:
 
 ```bash
-ssh -N -L 8080:127.0.0.1:8080 <vault-user>@<VAULT_IP>
+ssh -N -L 8080:127.0.0.1:8080 <vault-user>@<CONTROLLER_IP>
 ```
-Then access the high-contrast SOC Cockpit directly in your browser at **http://localhost:8080**.
+Then navigate to **http://localhost:8080** to access the high-contrast SOC Cockpit, live event stream, and forensic downloads.
 
 ---
 
-#### 💻 4. Standalone All-in-One PC Mode (Single Machine / Laptop / Lab Testing)
+### 💻 Standalone All-in-One Mode (Single Node / Lab Testing)
 Run full intrusion detection, local interface sniffing, and cockpit triage in a single self-contained process:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CoPdasten/copsec/main/install.sh | sudo bash
-```
-Or build and run locally:
-```bash
 git clone https://github.com/CoPdasten/copsec.git && cd copsec
-(cd controller && go build -ldflags="-s -w" -o ../bin/copsec .)
-sudo ./bin/copsec --standalone --allow-external-bind
+make all
+sudo ./bin/copsec-controller --allow-external-bind=true &
+sudo ./bin/copsec-collector --controller=127.0.0.1:50051 --interface=eth0
 ```
 Then access the local cockpit directly at **http://localhost:8080**.
 
 ---
 
-### ⚙️ Custom Installation Options (CLI Flags)
+### ⚙️ Autonomous Installer Options (`scripts/install.sh`)
 
-You can pass custom parameters to customize ports, static API keys, and fleet groupings:
+The unified installer accepts both `--flag=value` and `--flag value` syntaxes:
 
-```bash
-# Controller with custom Web port and predetermined Master API key:
-sudo bash install.sh --port 8080 --api-key "my-secure-master-token-2026"
-
-# Edge Agent with custom fleet group and node identifier:
-sudo bash scripts/install-agent.sh \
-  --controller 192.168.1.10:8443 \
-  --group "PROD_DATABASE_CLUSTER" \
-  --node-id "db-node-01"
-```
+| CLI Option | Default | Target Role | Description |
+| :--- | :--- | :--- | :--- |
+| `--role=<controller\|collector>` | `collector` | Both | Node role to provision and bind to systemd |
+| `--controller-ip=<ip>` | `192.168.1.10` | Collector | Central controller IP address (auto-configures gRPC) |
+| `--controller=<ip:port>` | `<controller-ip>:50051` | Collector | Explicit gRPC server address |
+| `--interface=<iface>` | Auto-detected (`eth0`) | Collector | Network interface for eBPF/XDP driver hook |
+| `--xdp-mode=<native\|generic>` | `native` | Collector | XDP driver attachment mode |
+| `--gossip-port=<port>` | `7946` | Collector | Port for Memberlist Gossip threat replication |
+| `--gossip-join=<ip:port>` | `""` | Collector | Initial Gossip mesh peer to join (e.g. `192.168.1.8:7946`) |
+| `--ban-reaper-interval=<dur>`| `15s` | Collector | Dynamic eBPF ban TTL eviction reaper interval |
+| `--grpc-port=<port>` | `50051` | Controller | Central gRPC ingestion port |
+| `--port=<port>` | `8080` | Controller | Minimalist Web SOC Cockpit HTTP port |
+| `--db-path=<path>` | `/var/lib/copsec/vault.db`| Controller | Immutable SQLite WAL ledger database path |
 
 ---
 
@@ -376,9 +377,43 @@ sudo bash scripts/install-agent.sh \
 
 The CoPSeC Controller exposes REST endpoints for automated SOAR orchestration, telemetry ingestion, and SOC integration.
 
-All endpoints require the `X-API-Key: <YOUR_API_KEY>` header.
+Health and monitoring probes (`/api/fleet`, `/health`) are open for cluster telemetry; authenticated endpoints require the `X-API-Key: <YOUR_API_KEY>` or `Authorization: Bearer <token>` header.
 
-### 1. Fleet Nodes Telemetry & Health
+### 1. Cluster Fleet Real-Time Health & Telemetry
+* **Endpoint:** `GET /api/fleet`
+* **Authentication:** Probe-safe (unauthenticated)
+* **Description:** Returns real-time status of all enrolled edge sensors, active heartbeats, interface mappings, and eBPF/XDP state.
+* **Sample Response:**
+  ```json
+  [
+    {
+      "node_id": "pardus1",
+      "hostname": "pardus1",
+      "ip_address": "192.168.1.8:46126",
+      "active_interface": "eth0",
+      "xdp_status": "ACTIVE",
+      "last_seen_ms": 1788780068573,
+      "cpu_usage_pct": 0.45,
+      "memory_usage_mb": 42.10,
+      "status": "ACTIVE"
+    },
+    {
+      "node_id": "pardus2",
+      "hostname": "pardus2",
+      "ip_address": "192.168.1.11:51280",
+      "active_interface": "eth0",
+      "xdp_status": "ACTIVE",
+      "last_seen_ms": 1788780069012,
+      "cpu_usage_pct": 0.38,
+      "memory_usage_mb": 39.80,
+      "status": "ACTIVE"
+    }
+  ]
+  ```
+
+---
+
+### 2. Fleet Nodes Telemetry & Health
 * **Endpoint:** `GET /api/nodes`
 * **Description:** Lists all registered edge collectors, CPU/RAM usage, active BPF bans, and real-time connection status.
 * **Sample Response:**
@@ -514,10 +549,10 @@ ctest --test-dir build --output-on-failure
 ```
 
 #### Verified 4-Node Multi-Tier Enterprise Lab Topology
-* **Tier 2 Primary Vault (`pardus1` - `192.168.1.8`):** SQLite WAL, SHA-256 Hash Chain, Cloaked `127.0.0.1:8080`, gRPC `:50051`.
-* **Tier 3 SOC Cockpit (`pardus2` - `192.168.1.11`):** Operator Workstation, SSH Port-Forwarding Tunnel to Cloaked Vault.
-* **Tier 1 Edge Collector / DMZ (`chachy` - `192.168.1.10`):** XDP Fast-Path, Shadow Honeypot `:8088`, Tarpit `:2223`, RAM-Based PCAP Buffer.
-* **Red Team Attacker Node (`kali` - `192.168.1.12`):** External L7 Shellshock exploit and L4 line-rate SYN flood generator.
+* **Central Controller & Vault (`chachy` — `192.168.1.10`):** Immutable SQLite WAL ledger (`vault.db`), SHA-256 Hash Chaining, Web SOC Cockpit (`:8080`), Fleet Ingestion gRPC (`:50051`), Upstream SIEM Exporter (CEF/Syslog on `:514`).
+* **Edge Sensor 1 (`pardus1` — `192.168.1.8`, Seed Sensor):** Native eBPF/XDP on `eth0`, Shadow Honeypot (`:8088`), Tarpit (`:2223`), RAM PCAP Buffer, Memberlist Gossip Seed Listener (`:7946`).
+* **Edge Sensor 2 (`pardus2` — `192.168.1.11`, Mesh Sensor):** Native eBPF/XDP on `eth0`, Dynamic Ban Reaper, Connected to Controller (`:50051`), Memberlist Gossip Peer joined to `192.168.1.8:7946`.
+* **Adversary / Auditor Node (`kali` — `192.168.1.12`):** External L7 Shellshock exploit engine, L4 line-rate SYN flood generator, and cluster verification probe auditor.
 
 ```text
 ==========================================================================================
@@ -526,15 +561,16 @@ ctest --test-dir build --output-on-failure
 +-------------------------------------+---------------------------------+--------------+
 | Verification Check / Component      | Security Guarantee / SLA        | SRE Status   |
 +-------------------------------------+---------------------------------+--------------+
-| Tier 2 Primary Vault (192.168.1.8)  | 127.0.0.1:8080 (0.0.0.0 Cloaked) | PASS         |
-| Tier 1 Edge Collector (192.168.1.10) | mTLS Telemetry & Honeypot       | PASS         |
-| Zero-Trust Port Cloaking            | nmap Port 8080 CLOSED/FILTERED  | PASS         |
-| Authorized SSH Tunnel Access        | HTTP 200 OK via Tunnel          | PASS         |
+| Central Controller (192.168.1.10)   | Fleet Ingestion & Web Cockpit   | PASS         |
+| Edge Sensor 1 (192.168.1.8)         | Native XDP & Gossip Seed :7946  | PASS         |
+| Edge Sensor 2 (192.168.1.11)        | Native XDP & Mesh Peer Replicate| PASS         |
+| Gossip Threat Replication           | Sub-Second Peer IP Ban Sync     | PASS         |
+| Single Verification Probe           | HTTP 200 OK via /api/fleet      | PASS         |
 | L7 Attack & Canary Quarantine       | Instant Quarantine Ban Sync     | PASS         |
-| L4 Line-Rate SYN Flood Handling     | XDP Fast-Path Drop              | PASS         |
-| Forensic Ring Buffer Dump           | Valid .pcap File Dumped         | PASS         |
+| L4 Line-Rate SYN Flood Handling     | XDP Fast-Path Drop (<10µs)      | PASS         |
+| Forensic Ring Buffer Dump           | Valid .pcap File Dumped (RAM)   | PASS         |
 | Audit Trail Hash Chaining           | SHA-256 Non-Repudiable Chain    | PASS         |
-| SQLite Trigger Guard                | SECURITY VIOLATION on Tamper    | PASS         |
+| SQLite Trigger Guard                | CRYPTOGRAPHIC_VIOLATION on Edit | PASS         |
 +-------------------------------------+---------------------------------+--------------+
 
 >>> FINAL AUDIT VERDICT: 100% PASS - BANKING-GRADE ZERO-TRUST & CRYPTOGRAPHIC COMPLIANCE CERTIFIED <<<
