@@ -549,7 +549,7 @@ ctest --test-dir build --output-on-failure
 ```
 
 #### Verified 4-Node Multi-Tier Enterprise Lab Topology
-* **Central Controller & Vault (`chachy` — `192.168.1.10`):** Immutable SQLite WAL ledger (`vault.db`), SHA-256 Hash Chaining, Web SOC Cockpit (`:8080`), Fleet Ingestion gRPC (`:50051`), Upstream SIEM Exporter (CEF/Syslog on `:514`).
+* **Central Controller & Vault (`cahcy` — `192.168.1.10`):** Immutable SQLite WAL ledger (`vault.db`), SHA-256 Hash Chaining, Web SOC Cockpit (`:8080`), Fleet Ingestion gRPC (`:50051`), Upstream SIEM Exporter (CEF/Syslog on `:514`).
 * **Edge Sensor 1 (`pardus1` — `192.168.1.8`, Seed Sensor):** Native eBPF/XDP on `eth0`, Shadow Honeypot (`:8088`), Tarpit (`:2223`), RAM PCAP Buffer, Memberlist Gossip Seed Listener (`:7946`).
 * **Edge Sensor 2 (`pardus2` — `192.168.1.11`, Mesh Sensor):** Native eBPF/XDP on `eth0`, Dynamic Ban Reaper, Connected to Controller (`:50051`), Memberlist Gossip Peer joined to `192.168.1.8:7946`.
 * **Adversary / Auditor Node (`kali` — `192.168.1.12`):** External L7 Shellshock exploit engine, L4 line-rate SYN flood generator, and cluster verification probe auditor.
