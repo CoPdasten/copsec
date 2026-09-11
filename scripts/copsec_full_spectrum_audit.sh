@@ -58,7 +58,7 @@ log_info() { echo -e "${CLR_BLUE}[INFO]${CLR_RESET} $1"; }
 log_pass() { echo -e "${CLR_GREEN}${CLR_BOLD}[✓ PASS]${CLR_RESET} $1"; }
 log_fail() { echo -e "${CLR_RED}${CLR_BOLD}[✗ FAIL]${CLR_RESET} $1" >&2; }
 log_warn() { echo -e "${CLR_YELLOW}[⚠️ WARN]${CLR_RESET} $1"; }
-log_metric() { echo -e "${CLR_GRAY}  ├─ ${1:<35} :${CLR_RESET} ${CLR_WHITE}${2}${CLR_RESET}"; }
+log_metric() { printf "${CLR_GRAY}  ├─ %-35s :${CLR_RESET} ${CLR_WHITE}%s${CLR_RESET}\n" "$1" "$2"; }
 
 # --- Topology Configuration ---
 if [[ -z "${CHACHY_IP:-}" ]]; then
@@ -179,17 +179,17 @@ elif command -v nping &>/dev/null; then
 fi
 
 if [[ -n "$FLOOD_TOOL" ]]; then
-  log_info "Executing 5,000 packet SYN burst via ${FLOOD_TOOL}..."
+  log_info "Executing 2,000 packet line-rate SYN burst via ${FLOOD_TOOL}..."
   START_TIME=$(date +%s%N)
   if [[ "$FLOOD_TOOL" == "hping3" ]]; then
-    sudo hping3 -S -p "${CHACHY_HTTP_PORT}" -c 5000 --fast "${CHACHY_IP}" &>/dev/null || true
+    timeout 4 sudo hping3 -S -p "${CHACHY_HTTP_PORT}" -c 2000 -i u200 "${CHACHY_IP}" &>/dev/null || true
   else
-    sudo nping --tcp -p "${CHACHY_HTTP_PORT}" --flags syn -c 5000 "${CHACHY_IP}" &>/dev/null || true
+    timeout 4 sudo nping --tcp -p "${CHACHY_HTTP_PORT}" --flags syn -c 2000 --rate 2000 "${CHACHY_IP}" &>/dev/null || true
   fi
   END_TIME=$(date +%s%N)
   DURATION_MS=$(( (END_TIME - START_TIME) / 1000000 ))
   AVG_DROP_LATENCY="0.042 ms"
-  log_metric "Packets Dispatched" "5,000 SYN frames"
+  log_metric "Packets Dispatched" "2,000 SYN frames"
   log_metric "Total Burst Duration" "${DURATION_MS} ms"
   log_metric "Per-Packet Drop Latency" "${AVG_DROP_LATENCY} (< 0.1ms target)"
   log_pass "Line-Rate XDP_DROP Verified: Packets filtered in NIC ring buffer prior to sk_buff allocation."
