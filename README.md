@@ -296,22 +296,21 @@ CoPSeC Pro features a unified, idempotent, zero-touch installer (`scripts/instal
 
 ### ⚡ Cluster-Wide One-Line Ignition Matrix
 
-#### 1. Central Controller & Vault (`chachy` — `192.168.1.10`)
-Deploys the central brain, gRPC ingestion engine (`:50051`), Web SOC Cockpit (`:8080`), and banking-grade SQLite ledger with `CRYPTOGRAPHIC_VIOLATION` triggers:
+Deploy CoPSeC Pro across your decoupled 2-node architecture in seconds using our zero-touch, unified installer:
+
+#### 1. Central Database & Vault Server
+Deploys the central SQLite WAL database, gRPC ingestion engine (`:50051`), Web SOC Dashboard (`:8080`), and banking-grade audit integrity triggers:
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CoPdasten/copsec/main/scripts/install.sh | sudo bash -s -- --role=controller
+curl -fsSL https://raw.githubusercontent.com/CoPdasten/copsec/main/scripts/install.sh \
+  | sudo bash -s -- --role=controller
 ```
 
-#### 2. Edge Sensor 1 (`pardus1` — `192.168.1.8`, Initial Seed Node)
-Hooks native eBPF/XDP to `eth0`, binds Memberlist Gossip listener on `:7946`, activates the dynamic Ban Reaper, and connects to the central Controller:
+#### 2. Edge Sensor Node
+Attaches native eBPF/XDP packet inspection to the interface (`eth0`) and streams real-time threat telemetry directly to the central Vault server:
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CoPdasten/copsec/main/scripts/install.sh | sudo bash -s -- --role=collector --controller-ip=192.168.1.10 --interface=eth0
-```
-
-#### 3. Edge Sensor 2 (`pardus2` — `192.168.1.11`, Mesh Gossip Peer Node)
-Hooks native eBPF/XDP to `eth0`, connects to the central Controller, and dynamically joins `pardus1`'s Gossip mesh (`192.168.1.8:7946`) for peer-to-peer threat replication:
-```bash
-curl -fsSL https://raw.githubusercontent.com/CoPdasten/copsec/main/scripts/install.sh | sudo bash -s -- --role=collector --controller-ip=192.168.1.10 --interface=eth0 --gossip-join=192.168.1.8:7946
+curl -fsSL https://raw.githubusercontent.com/CoPdasten/copsec/main/scripts/install.sh \
+  | sudo bash -s -- --role=collector \
+  --controller-ip=<SERVER_IP> --interface=eth0
 ```
 
 ---
@@ -320,12 +319,10 @@ curl -fsSL https://raw.githubusercontent.com/CoPdasten/copsec/main/scripts/insta
 
 Verify cluster registration, active node heartbeats, and interface/XDP states directly from any terminal:
 ```bash
-curl -s http://192.168.1.10:8080/api/fleet | jq -e '
-  length >= 2 and
-  (map(select(.node_id == "pardus1" or .hostname == "pardus1")) | length >= 1) and
-  (map(select(.node_id == "pardus2" or .hostname == "pardus2")) | length >= 1) and
+curl -s http://<SERVER_IP>:8080/api/fleet | jq -e '
+  length >= 1 and
   all(.[]; .xdp_status == "ACTIVE" or .status == "ACTIVE")
-' && curl -s http://192.168.1.10:8080/api/fleet | jq .
+' && curl -s http://<SERVER_IP>:8080/api/fleet | jq .
 ```
 
 ---
