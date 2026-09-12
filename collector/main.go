@@ -46,6 +46,8 @@ func main() {
 	gossipPortFlag := flag.Int("gossip-port", 7946, "Port for Memberlist Gossip threat replication")
 	gossipJoinFlag := flag.String("gossip-join", "", "Initial Memberlist Gossip peer(s) to join (comma-separated host:port)")
 	mgmtPortFlag := flag.Int("mgmt-port", 50052, "Port for dynamic rule management gRPC service")
+	enableTarpitFlag := flag.Bool("enable-tarpit", true, "Enable Asymmetric Zero-Window XDP Tarpit engine")
+	enableSynProxyFlag := flag.Bool("enable-syn-proxy", true, "Enable Stateful Kernel TCP SYN-Proxy mitigation")
 	flag.Parse()
 
 	if *controllerIPFlag != "" {
@@ -58,7 +60,28 @@ func main() {
 	}
 
 	if *ifaceFlag != "" {
-		ebpf.GetXDPEngine().SetInterfaceAndMode(*ifaceFlag, *xdpModeFlag)
+		resolvedIface := strings.TrimSpace(*ifaceFlag)
+		if _, err := net.InterfaceByName(resolvedIface); err != nil {
+			if _, err2 := net.InterfaceByName("enp0s3"); err2 == nil {
+				log.Printf("[INFO] Interface %s not found on host; dynamically resolving to active VirtualBox interface 'enp0s3'", resolvedIface)
+				resolvedIface = "enp0s3"
+			} else {
+				ifaces, _ := net.Interfaces()
+				for _, ifc := range ifaces {
+					if (ifc.Flags&net.FlagLoopback == 0) && (ifc.Flags&net.FlagUp != 0) {
+						log.Printf("[INFO] Interface %s not found; dynamically resolving to active interface '%s'", resolvedIface, ifc.Name)
+						resolvedIface = ifc.Name
+						break
+					}
+				}
+			}
+		}
+		ebpf.GetXDPEngine().SetInterfaceAndMode(resolvedIface, *xdpModeFlag)
+	}
+
+	if *enableSynProxyFlag {
+		_ = ebpf.GetXDPEngine().EnableSynProxy(0)
+		log.Println("[INFO] ⚡ In-kernel Stateful TCP SYN-Proxy active defense enabled")
 	}
 
 	log.Println("[INFO] CoPSeC Ultra-Fast Edge Collector initializing (Hub-and-Spoke SIEM Ingestion)...")
@@ -192,11 +215,14 @@ func main() {
 		}
 	}
 
-	tarpitEngine := tarpit.GetDefaultTarpit()
-	go func() {
-		_ = tarpitEngine.Start(ctx)
-	}()
-	defer tarpitEngine.Close()
+	if *enableTarpitFlag {
+		tarpitEngine := tarpit.GetDefaultTarpit()
+		go func() {
+			_ = tarpitEngine.Start(ctx)
+		}()
+		defer tarpitEngine.Close()
+		log.Println("[INFO] ⚡ Asymmetric XDP Zero-Window Tarpit defense active")
+	}
 
 	honeypotEngine := honeypot.GetDefaultShadowHoneypot()
 	honeypotEngine.SetEventHandler(func(interaction honeypot.HoneypotInteraction) {

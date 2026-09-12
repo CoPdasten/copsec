@@ -298,59 +298,64 @@ CoPSeC Pro features a unified, idempotent, zero-touch installer (`scripts/instal
 
 ---
 
-### ⚡ Cluster-Wide One-Line Ignition Matrix
+## ⚡ Deployment & Ignition Topologies
 
-Deploy CoPSeC Pro across your decoupled 2-node architecture in seconds using our zero-touch, unified installer:
+CoPSeC Pro scales seamlessly from single-host development environments to enterprise-grade, multi-tiered security operations centers. Select the deployment model suited to your infrastructure:
 
-#### 1. Central Database & Vault Server
-Deploys the central SQLite WAL database, gRPC ingestion engine (`:50051`), Web SOC Dashboard (`:8080`), and banking-grade audit integrity triggers:
+---
+
+### Option 1: Standalone All-in-One (Single Host / Dev & Edge)
+Runs the entire stack on a single machine or VPS. Deploys the SQLite WAL vault, gRPC receiver, eBPF/XDP engine, and Web SOC Cockpit locally.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/CoPdasten/copsec/main/scripts/install.sh \
+  | sudo bash -s -- --role=standalone --interface=eth0
+```
+* **Ports Active:** `:8080` (Web Cockpit), `127.0.0.1:50051` (Local gRPC)
+* **Storage:** Local immutable SQLite ledger at `/var/lib/copsec/vault.db`
+
+---
+
+### Option 2: Standard Distributed (Central Management PC + Edge Sensors)
+Your primary workstation functions as the cluster brain, log repository, and visual cockpit, while remote edge servers stream telemetry directly to your IP.
+
+**Step 1: On Your Central PC / Controller:**
 ```bash
 curl -fsSL https://raw.githubusercontent.com/CoPdasten/copsec/main/scripts/install.sh \
   | sudo bash -s -- --role=controller
 ```
 
-#### 2. Edge Sensor Node
-Attaches native eBPF/XDP packet inspection to the interface (`eth0`) and streams real-time threat telemetry directly to the central Vault server:
+**Step 2: On Remote Servers to Protect (Edge Sensors):**
 ```bash
 curl -fsSL https://raw.githubusercontent.com/CoPdasten/copsec/main/scripts/install.sh \
   | sudo bash -s -- --role=collector \
-  --controller-ip=<SERVER_IP> --interface=eth0
+  --controller-ip=<CENTRAL_PC_IP> --interface=eth0
 ```
 
 ---
 
-### 🔍 Single Verification Probe Command
+### Option 3: Enterprise Tiered SOC (Dedicated Database Hub + Frontline Sensors + Analyst UI)
+Complete physical separation of duties. Keeps database operations isolated from network attacks and allows zero-storage analyst dashboards.
 
-Verify cluster registration, active node heartbeats, and interface/XDP states directly from any terminal:
+**Step 1: Dedicated Vault Server (Isolated Database Hub):**
 ```bash
-curl -s http://<SERVER_IP>:8080/api/fleet | jq -e '
-  length >= 1 and
-  all(.[]; .xdp_status == "ACTIVE" or .status == "ACTIVE")
-' && curl -s http://<SERVER_IP>:8080/api/fleet | jq .
+curl -fsSL https://raw.githubusercontent.com/CoPdasten/copsec/main/scripts/install.sh \
+  | sudo bash -s -- --role=vault-server
 ```
 
----
-
-### 🖥️ Secure Operator Access (SOC Cockpit)
-The Controller Web Cockpit binds to port `8080`. When deployed with zero-trust network cloaking, analysts connect securely via SSH port forwarding:
-
+**Step 2: Frontline Edge Sensors (XDP / Tarpit / SYN-Proxy):**
 ```bash
-ssh -N -L 8080:127.0.0.1:8080 <vault-user>@<CONTROLLER_IP>
+curl -fsSL https://raw.githubusercontent.com/CoPdasten/copsec/main/scripts/install.sh \
+  | sudo bash -s -- --role=collector \
+  --controller-ip=<VAULT_SERVER_IP> --interface=eth0
 ```
-Then navigate to **http://localhost:8080** to access the high-contrast SOC Cockpit, live event stream, and forensic downloads.
 
----
-
-### 💻 Standalone All-in-One Mode (Single Node / Lab Testing)
-Run full intrusion detection, local interface sniffing, and cockpit triage in a single self-contained process:
-
+**Step 3: Analyst Cockpit (Zero-Storage Web SOC):**
 ```bash
-git clone https://github.com/CoPdasten/copsec.git && cd copsec
-make all
-sudo ./bin/copsec-controller --allow-external-bind=true &
-sudo ./bin/copsec-collector --controller=127.0.0.1:50051 --interface=eth0
+curl -fsSL https://raw.githubusercontent.com/CoPdasten/copsec/main/scripts/install.sh \
+  | sudo bash -s -- --role=cockpit-proxy \
+  --vault-ip=<VAULT_SERVER_IP>
 ```
-Then access the local cockpit directly at **http://localhost:8080**.
 
 ---
 
@@ -360,17 +365,18 @@ The unified installer accepts both `--flag=value` and `--flag value` syntaxes:
 
 | CLI Option | Default | Target Role | Description |
 | :--- | :--- | :--- | :--- |
-| `--role=<controller\|collector>` | `collector` | Both | Node role to provision and bind to systemd |
+| `--role=<standalone\|controller\|collector\|vault-server\|cockpit-proxy>` | `collector` | All | Node role to provision and bind to systemd |
 | `--controller-ip=<ip>` | `192.168.1.10` | Collector | Central controller IP address (auto-configures gRPC) |
+| `--vault-ip=<ip>` | `192.168.1.10` | Cockpit Proxy / Collector | Dedicated Vault server IP address |
 | `--controller=<ip:port>` | `<controller-ip>:50051` | Collector | Explicit gRPC server address |
-| `--interface=<iface>` | Auto-detected (`eth0`) | Collector | Network interface for eBPF/XDP driver hook |
-| `--xdp-mode=<native\|generic>` | `native` | Collector | XDP driver attachment mode |
+| `--interface=<iface>` | Auto-detected (`eth0`) | Collector / Standalone | Network interface for eBPF/XDP driver hook |
+| `--xdp-mode=<native\|generic>` | `native` | Collector / Standalone | XDP driver attachment mode |
 | `--gossip-port=<port>` | `7946` | Collector | Port for Memberlist Gossip threat replication |
 | `--gossip-join=<ip:port>` | `""` | Collector | Initial Gossip mesh peer to join (e.g. `192.168.1.8:7946`) |
-| `--ban-reaper-interval=<dur>`| `15s` | Collector | Dynamic eBPF ban TTL eviction reaper interval |
-| `--grpc-port=<port>` | `50051` | Controller | Central gRPC ingestion port |
-| `--port=<port>` | `8080` | Controller | Minimalist Web SOC Cockpit HTTP port |
-| `--db-path=<path>` | `/var/lib/copsec/vault.db`| Controller | Immutable SQLite WAL ledger database path |
+| `--ban-reaper-interval=<dur>`| `15s` | Collector / Standalone | Dynamic eBPF ban TTL eviction reaper interval |
+| `--grpc-port=<port>` | `50051` | Controller / Vault | Central gRPC ingestion port |
+| `--port=<port>` | `8080` | Controller / Vault / Cockpit | Web SOC Cockpit HTTP port |
+| `--db-path=<path>` | `/var/lib/copsec/vault.db`| Controller / Vault / Standalone | Immutable SQLite WAL ledger database path |
 
 ---
 

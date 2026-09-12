@@ -36,6 +36,7 @@ func main() {
 	portFlag := flag.Int("port", 0, "Alias for --web-port")
 	autoBan := flag.Bool("auto-ban", true, "Enable autonomous SOAR auto-ban")
 	autoBanThreshold := flag.Int("auto-ban-threshold", 80, "Threat score threshold for auto-ban")
+	remoteVaultFlag := flag.String("remote-vault", "", "Remote Vault / Controller address to proxy telemetry from (e.g. 192.168.1.11:50051 or 192.168.1.11:8080)")
 	flag.Parse()
 
 	isStandalone := *standaloneFlag || *pcFlag || strings.EqualFold(strings.TrimSpace(*modeFlag), "standalone")
@@ -71,6 +72,12 @@ func main() {
 		webAddr = fmt.Sprintf("127.0.0.1:%d", effectiveWebPort)
 	} else if *webAddrFlag != "" {
 		webAddr = *webAddrFlag
+	}
+
+	// Check if running in Central SOC Cockpit Analyst / Proxy Mode
+	if *remoteVaultFlag != "" {
+		runCockpitProxyMode(*remoteVaultFlag, webAddr, *allowExternalBind)
+		return
 	}
 
 	if isStandalone {
