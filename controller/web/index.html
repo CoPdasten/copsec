@@ -1616,7 +1616,35 @@
     }
 
     // WebSocket Stream Connection
+    let wsReconnectAttempts = 0;
+    let wsReconnectTimer = null;
+
+    function scheduleWSRetry() {
+      if (wsReconnectTimer) {
+        clearTimeout(wsReconnectTimer);
+        wsReconnectTimer = null;
+      }
+      wsReconnectAttempts++;
+      // Exponential backoff: base 1s, factor 1.5, max 30s + jitter (0-500ms)
+      const baseDelay = Math.min(30000, 1000 * Math.pow(1.5, Math.min(wsReconnectAttempts, 10)));
+      const jitter = Math.random() * 500;
+      const delay = Math.round(baseDelay + jitter);
+      wsReconnectTimer = setTimeout(() => {
+        wsReconnectTimer = null;
+        connectWS();
+      }, delay);
+    }
+
     function connectWS() {
+      // Guard against duplicate sockets
+      if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+        return;
+      }
+      if (wsReconnectTimer) {
+        clearTimeout(wsReconnectTimer);
+        wsReconnectTimer = null;
+      }
+
       const loc = window.location;
       const proto = loc.protocol === 'https:' ? 'wss:' : 'ws:';
       const apiKey = getStoredAPIKey();
@@ -1625,9 +1653,15 @@
         wsUrl += `?token=${encodeURIComponent(apiKey)}`;
       }
 
-      ws = new WebSocket(wsUrl);
+      try {
+        ws = new WebSocket(wsUrl);
+      } catch (err) {
+        scheduleWSRetry();
+        return;
+      }
 
       ws.onopen = () => {
+        wsReconnectAttempts = 0;
         document.getElementById('liveDot').classList.remove('offline');
         document.getElementById('connLabel').textContent = 'STREAM CONNECTED';
       };
@@ -1635,10 +1669,12 @@
       ws.onclose = () => {
         document.getElementById('liveDot').classList.add('offline');
         document.getElementById('connLabel').textContent = 'RECONNECTING...';
-        setTimeout(connectWS, 2500);
+        scheduleWSRetry();
       };
 
-      ws.onerror = () => ws.close();
+      ws.onerror = () => {
+        try { ws.close(); } catch(e) {}
+      };
 
       ws.onmessage = (msg) => {
         try {

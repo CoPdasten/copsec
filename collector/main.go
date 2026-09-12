@@ -7,12 +7,15 @@ import (
 	"log"
 	"net"
 	"os"
+	"errors"
 	"os/signal"
 	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
 
+	ciliumEbpf "github.com/cilium/ebpf"
+	"github.com/copsec/collector/internal/bpf"
 	"github.com/copsec/collector/internal/cluster"
 	"github.com/copsec/collector/internal/dpi"
 	"github.com/copsec/collector/internal/network"
@@ -218,7 +221,9 @@ func main() {
 	if *enableTarpitFlag {
 		tarpitEngine := tarpit.GetDefaultTarpit()
 		go func() {
-			_ = tarpitEngine.Start(ctx)
+			if err := tarpitEngine.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
+				log.Printf("[WARN] Tarpit engine runtime note: %v", err)
+			}
 		}()
 		defer tarpitEngine.Close()
 		log.Println("[INFO] ⚡ Asymmetric XDP Zero-Window Tarpit defense active")
@@ -240,13 +245,50 @@ func main() {
 		}
 	})
 	go func() {
-		_ = honeypotEngine.Start(ctx)
+		if err := honeypotEngine.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			log.Printf("[WARN] Honeypot engine runtime note: %v", err)
+		}
 	}()
 	defer honeypotEngine.Close()
 
-	_ = ebpf.GetDefaultIntegrityGuard()
-	_ = dns.GetDefaultSinkhole()
-	_ = yara.GetDefaultScanner()
+	if ig := ebpf.GetDefaultIntegrityGuard(); ig != nil {
+		log.Println("[INFO] 🛡️ eBPF Kernel Map & Driver Integrity Guard active")
+	}
+	if sh := dns.GetDefaultSinkhole(); sh != nil {
+		log.Println("[INFO] 🌐 Autonomous DNS Sinkhole active")
+	}
+	if yr := yara.GetDefaultScanner(); yr != nil {
+		log.Println("[INFO] 🔬 Memory & Payload YARA Scanner active")
+	}
+
+	// 5g. Attach Kernel RingBuffer Drop Telemetry Processor if pinned map exists
+	pinRingbufCandidates := []string{
+		filepath.Join(ebpf.DefaultBPFPinPath, "telemetry_ringbuf"),
+		"/sys/fs/bpf/telemetry_ringbuf",
+	}
+	for _, pinPath := range pinRingbufCandidates {
+		if rbMap, err := ciliumEbpf.LoadPinnedMap(pinPath, nil); err == nil {
+			telemetryProc, err := bpf.NewReader(&bpf.TelemetryObjects{TelemetryRingbuf: rbMap}, bpf.FuncBus(func(event bpf.DropEvent) {
+				if controllerClient != nil {
+					ev := &copsecproto.LogEvent{
+						Source:           "ebpf_xdp",
+						RawLine:          fmt.Sprintf("[XDP_DROP] src_ip=%s src_port=%d proto=%d reason=%s", event.IP().String(), event.SrcPort, event.Protocol, event.DropReason.String()),
+						ClientIp:         event.IP().String(),
+						ThreatScore:      90,
+						RuleId:           fmt.Sprintf("xdp_%s", strings.ToLower(event.DropReason.String())),
+						TimestampMs:      int64(event.TimestampNs / 1000000),
+					}
+					controllerClient.Submit(ev)
+				}
+			}))
+			if err == nil {
+				telemetryProc.Start(ctx)
+				defer telemetryProc.Close()
+				log.Printf("[INFO] ⚡ Zero-Copy Kernel Telemetry RingBuffer processor attached at %s", pinPath)
+				break
+			}
+		}
+	}
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)

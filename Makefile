@@ -14,7 +14,7 @@ PROTO_DIR := proto
 BPF_SOURCES := $(BPF_DIR)/copsec_xdp.bpf.c $(BPF_DIR)/copsec_kprobe.bpf.c $(BPF_DIR)/copsec_ringbuf.bpf.c
 BPF_OBJECTS := $(BPF_DIR)/copsec_xdp.bpf.o $(BPF_DIR)/copsec_kprobe.bpf.o $(BPF_DIR)/copsec_ringbuf.bpf.o
 
-.PHONY: all bpf collector controller cockpit test proto clean help
+.PHONY: all bpf collector controller cockpit test vet proto clean help
 
 all: bpf collector controller cockpit
 
@@ -60,6 +60,10 @@ test:
 	@echo "==> Executing test suites with -race across all packages..."
 	(cd collector && $(GO) test -race ./...)
 	(cd controller && $(GO) test -race ./...)
+
+vet:
+	@echo "==> Running static analysis with go vet..."
+	go vet ./...
 
 clean:
 	@echo "==> Cleaning build artifacts..."

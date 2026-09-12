@@ -22,14 +22,6 @@ struct {
     __type(value, struct ban_entry);
 } banned_ips SEC(".maps");
 
-// Backwards compatibility alias for legacy loader references
-struct {
-    __uint(type, BPF_MAP_TYPE_LRU_HASH);
-    __uint(max_entries, 65536);
-    __type(key, __u32);
-    __type(value, __u64);
-} ban_map SEC(".maps");
-
 // 2. In-Kernel Whitelist Map for line-rate fast bypass (XDP_PASS)
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
@@ -118,16 +110,19 @@ static __always_inline void emit_drop_event(struct iphdr *ip, void *data_end, __
     event->timestamp_ns = now_ns;
 
     __u16 src_port = 0;
-    void *l4 = (void *)(ip + 1);
-    if (ip->protocol == 6) { // IPPROTO_TCP
-        struct tcphdr *tcp = l4;
-        if ((void *)(tcp + 1) <= data_end) {
-            src_port = bpf_ntohs(tcp->source);
-        }
-    } else if (ip->protocol == 17) { // IPPROTO_UDP
-        struct udphdr *udp = l4;
-        if ((void *)(udp + 1) <= data_end) {
-            src_port = bpf_ntohs(udp->source);
+    __u32 ip_hl = ip->ihl * 4;
+    if (ip_hl >= sizeof(struct iphdr)) {
+        void *l4 = (void *)ip + ip_hl;
+        if (ip->protocol == 6) { // IPPROTO_TCP
+            struct tcphdr *tcp = l4;
+            if ((void *)(tcp + 1) <= data_end) {
+                src_port = bpf_ntohs(tcp->source);
+            }
+        } else if (ip->protocol == 17) { // IPPROTO_UDP
+            struct udphdr *udp = l4;
+            if ((void *)(udp + 1) <= data_end) {
+                src_port = bpf_ntohs(udp->source);
+            }
         }
     }
     event->src_port = src_port;
@@ -144,8 +139,7 @@ static __always_inline __u16 csum_fold_helper(__u32 csum) {
         if (csum >> 16)
             csum = (csum & 0xffff) + (csum >> 16);
     }
-    __u16 folded = ~csum;
-    return folded ? folded : 0xffff;
+    return (__u16)(~csum);
 }
 
 static __always_inline __u16 ip_checksum(struct iphdr *iph) {
@@ -232,6 +226,7 @@ static __always_inline int tarpit_process(struct ethhdr *eth, struct iphdr *ip, 
     tcp->window = 0;
 
     // 7. Truncate payload to standard 20-byte TCP header
+    ip->ihl = 5;
     tcp->doff = 5;
     ip->tot_len = bpf_htons(sizeof(struct iphdr) + sizeof(struct tcphdr));
 
@@ -288,6 +283,7 @@ static __always_inline int syn_proxy_process(struct ethhdr *eth, struct iphdr *i
         tcp->urg = 0;
         tcp->window = bpf_htons(65535);
 
+        ip->ihl = 5;
         tcp->doff = 5;
         ip->tot_len = bpf_htons(sizeof(struct iphdr) + sizeof(struct tcphdr));
 
@@ -324,7 +320,9 @@ int copsec_xdp(struct xdp_md *ctx) {
     struct ethhdr* eth = data;
     if ((void *)(eth + 1) > data_end || eth->h_proto != bpf_htons(ETH_P_IP)) return XDP_PASS;
     struct iphdr* ip = (void *)(eth + 1);
-    if ((void *)(ip + 1) > data_end) return XDP_PASS;
+    // Strict bounds check on variable-length IPv4 header
+    __u32 ip_hdr_len = ip->ihl * 4;
+    if (ip_hdr_len < sizeof(struct iphdr) || (void *)ip + ip_hdr_len > data_end) return XDP_PASS;
 
     // 1. In-Kernel Whitelist Fast Bypass: Bypass all ban checks for trusted enterprise IPs
     __u32* is_whitelisted = bpf_map_lookup_elem(&whitelisted_ips, &ip->saddr);
@@ -333,14 +331,7 @@ int copsec_xdp(struct xdp_md *ctx) {
         return XDP_PASS;
     }
 
-    // 2. Asymmetric Zero-Window Tarpit Inspection
-    __u32* is_tarpitted = bpf_map_lookup_elem(&tarpit_ips, &ip->saddr);
-    if (is_tarpitted && *is_tarpitted == 1 && ip->protocol == IPPROTO_TCP) {
-        struct tcphdr *tcp = (void *)(ip + 1);
-        return tarpit_process(eth, ip, tcp, data_end);
-    }
-
-    // 3. Dynamic TTL Banned IPs Evaluation (LRU Hash Map: 131,072 entries)
+    // 2. Dynamic TTL Banned IPs Evaluation (LRU Hash Map: 131,072 entries)
     struct ban_entry* entry = bpf_map_lookup_elem(&banned_ips, &ip->saddr);
     if (entry) {
         __u64 now_ns = bpf_ktime_get_ns();
@@ -348,8 +339,10 @@ int copsec_xdp(struct xdp_md *ctx) {
         if (entry->ttl_ns == 0 || now_ns < (entry->ban_timestamp_ns + entry->ttl_ns)) {
             // Check if entry is specifically marked for active defense tarpitting
             if (entry->reason_code == DROP_REASON_TARPIT && ip->protocol == IPPROTO_TCP) {
-                struct tcphdr *tcp = (void *)(ip + 1);
-                return tarpit_process(eth, ip, tcp, data_end);
+                struct tcphdr *tcp = (void *)ip + ip_hdr_len;
+                if ((void *)(tcp + 1) <= data_end) {
+                    return tarpit_process(eth, ip, tcp, data_end);
+                }
             }
 
             __u8 reason = DROP_REASON_RATE_LIMIT;
@@ -362,24 +355,24 @@ int copsec_xdp(struct xdp_md *ctx) {
         }
     }
 
-    // Fallback check against legacy ban_map
-    __u64* legacy_expiry = bpf_map_lookup_elem(&ban_map, &ip->saddr);
-    if (legacy_expiry && *legacy_expiry > bpf_ktime_get_ns() / 1000000000ULL) {
-        emit_drop_event(ip, data_end, DROP_REASON_RATE_LIMIT, bpf_ktime_get_ns());
-        increment_counter(COPSEC_PACKETS_DROPPED);
-        return XDP_DROP;
-    }
-
-    // 4. In-Kernel Stateful SYN-Proxy Validation (TCP)
+    // 3. TCP-Specific Active Defenses: Asymmetric Zero-Window Tarpit & Stateful SYN-Proxy
     if (ip->protocol == IPPROTO_TCP) {
-        __u32 cfg_key = 0;
-        __u32 *syn_proxy_on = bpf_map_lookup_elem(&syn_proxy_config, &cfg_key);
-        // If config map has key 0 set to 1, or by default when configured
-        if (syn_proxy_on && *syn_proxy_on == 1) {
-            struct tcphdr *tcp = (void *)(ip + 1);
-            int syn_res = syn_proxy_process(eth, ip, tcp, data_end);
-            if (syn_res != XDP_PASS) {
-                return syn_res;
+        struct tcphdr *tcp = (void *)ip + ip_hdr_len;
+        if ((void *)(tcp + 1) <= data_end) {
+            // Check dedicated tarpit map only for TCP traffic
+            __u32* is_tarpitted = bpf_map_lookup_elem(&tarpit_ips, &ip->saddr);
+            if (is_tarpitted && *is_tarpitted == 1) {
+                return tarpit_process(eth, ip, tcp, data_end);
+            }
+
+            // In-Kernel Stateful SYN-Proxy Validation
+            __u32 cfg_key = 0;
+            __u32 *syn_proxy_on = bpf_map_lookup_elem(&syn_proxy_config, &cfg_key);
+            if (syn_proxy_on && *syn_proxy_on == 1) {
+                int syn_res = syn_proxy_process(eth, ip, tcp, data_end);
+                if (syn_res != XDP_PASS) {
+                    return syn_res;
+                }
             }
         }
     }

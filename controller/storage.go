@@ -719,14 +719,27 @@ func (s *StorageEngine) InsertEvent(ev *StoredEvent) error {
 		containmentState = "ACTIVE"
 	}
 
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin storage transaction: %w", err)
+	}
+	defer func() {
+		if tx != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
 	// Insert record to events table
 	query := `INSERT INTO events (node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis, analyst_notes, playbook_progress, triage_status, containment_state, prev_hash, entry_hash)
 	          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	res, err := s.db.Exec(query, ev.NodeID, ev.Source, ev.RawLine, ev.ClientIP, ev.StatusCode, ev.TimestampMs, ev.RuleID, ev.MitreTechniqueID, ev.ThreatScore, ev.AIAnalysis, ev.AnalystNotes, ev.PlaybookProgress, ev.TriageStatus, containmentState, ev.PrevHash, "")
+	res, err := tx.Exec(query, ev.NodeID, ev.Source, ev.RawLine, ev.ClientIP, ev.StatusCode, ev.TimestampMs, ev.RuleID, ev.MitreTechniqueID, ev.ThreatScore, ev.AIAnalysis, ev.AnalystNotes, ev.PlaybookProgress, ev.TriageStatus, containmentState, ev.PrevHash, "")
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to insert event record: %w", err)
 	}
-	id, _ := res.LastInsertId()
+	id, err := res.LastInsertId()
+	if err != nil {
+		return fmt.Errorf("failed to get last insert id: %w", err)
+	}
 	ev.ID = id
 
 	// Calculate deterministic entry hash with assigned ID
@@ -734,10 +747,19 @@ func (s *StorageEngine) InsertEvent(ev *StoredEvent) error {
 	ev.EntryHash = entryH
 
 	// Update calculated hash in events table and insert into telemetry table with hash integrity
-	_, _ = s.db.Exec(`UPDATE events SET entry_hash = ? WHERE id = ?`, entryH, id)
-	_, _ = s.db.Exec(`INSERT INTO telemetry (id, node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis, analyst_notes, playbook_progress, triage_status, containment_state, prev_hash, entry_hash)
+	if _, err := tx.Exec(`UPDATE events SET entry_hash = ? WHERE id = ?`, entryH, id); err != nil {
+		return fmt.Errorf("failed to update event entry_hash: %w", err)
+	}
+	if _, err := tx.Exec(`INSERT INTO telemetry (id, node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis, analyst_notes, playbook_progress, triage_status, containment_state, prev_hash, entry_hash)
 	                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		ev.ID, ev.NodeID, ev.Source, ev.RawLine, ev.ClientIP, ev.StatusCode, ev.TimestampMs, ev.RuleID, ev.MitreTechniqueID, ev.ThreatScore, ev.AIAnalysis, ev.AnalystNotes, ev.PlaybookProgress, ev.TriageStatus, containmentState, ev.PrevHash, entryH)
+		ev.ID, ev.NodeID, ev.Source, ev.RawLine, ev.ClientIP, ev.StatusCode, ev.TimestampMs, ev.RuleID, ev.MitreTechniqueID, ev.ThreatScore, ev.AIAnalysis, ev.AnalystNotes, ev.PlaybookProgress, ev.TriageStatus, containmentState, ev.PrevHash, entryH); err != nil {
+		return fmt.Errorf("failed to insert telemetry record: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit storage transaction: %w", err)
+	}
+	tx = nil
 
 	// Persist last computed hash atomically into memory buffer
 	lastLogHash.Store(entryH)

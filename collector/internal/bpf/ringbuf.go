@@ -100,14 +100,16 @@ type ReaderSource interface {
 
 // TelemetryProcessor manages zero-copy consumption from BPF_MAP_TYPE_RINGBUF.
 type TelemetryProcessor struct {
-	reader   ReaderSource
-	bus      TelemetryBus
-	cancel   context.CancelFunc
-	wg       sync.WaitGroup
-	running  atomic.Bool
-	eventsRx atomic.Uint64
-	bytesRx  atomic.Uint64
-	errCount atomic.Uint64
+	reader    ReaderSource
+	bus       TelemetryBus
+	cancel    context.CancelFunc
+	wg        sync.WaitGroup
+	closeOnce sync.Once
+	closeErr  error
+	running   atomic.Bool
+	eventsRx  atomic.Uint64
+	bytesRx   atomic.Uint64
+	errCount  atomic.Uint64
 }
 
 // NewReader initializes a TelemetryProcessor directly from TelemetryObjects.
@@ -139,6 +141,12 @@ func (p *TelemetryProcessor) Start(ctx context.Context) {
 	runCtx, cancel := context.WithCancel(ctx)
 	p.cancel = cancel
 	p.wg.Add(1)
+
+	// Watcher to unblock ReadInto when ctx is canceled externally
+	go func() {
+		<-runCtx.Done()
+		_ = p.Close()
+	}()
 
 	go p.workerLoop(runCtx)
 }
@@ -191,13 +199,14 @@ func (p *TelemetryProcessor) Metrics() (events uint64, bytes uint64, errors uint
 
 // Close gracefully terminates the worker goroutine and releases ring buffer kernel resources.
 func (p *TelemetryProcessor) Close() error {
-	if p.cancel != nil {
-		p.cancel()
-	}
-	var err error
-	if p.reader != nil {
-		err = p.reader.Close()
-	}
+	p.closeOnce.Do(func() {
+		if p.cancel != nil {
+			p.cancel()
+		}
+		if p.reader != nil {
+			p.closeErr = p.reader.Close()
+		}
+	})
 	p.wg.Wait()
-	return err
+	return p.closeErr
 }

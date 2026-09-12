@@ -19,8 +19,8 @@ import (
 )
 
 func main() {
-	grpcAddrFlag := flag.String("grpc-addr", "", "gRPC listen address (e.g. 0.0.0.0:8443)")
-	grpcPortFlag := flag.Int("grpc-port", 8443, "gRPC listen port")
+	grpcAddrFlag := flag.String("grpc-addr", "", "gRPC listen address (e.g. 0.0.0.0:50051)")
+	grpcPortFlag := flag.Int("grpc-port", 50051, "gRPC listen port")
 	webAddrFlag := flag.String("web-addr", "", "Embedded Web SOC listen address (e.g. 0.0.0.0:8080)")
 	webPortFlag := flag.Int("web-port", 8080, "Embedded Web SOC listen port")
 	allowExternalBind := flag.Bool("allow-external-bind", false, "Allow Web SOC server to bind to external interfaces (0.0.0.0)")
