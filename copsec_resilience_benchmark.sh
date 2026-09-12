@@ -310,7 +310,10 @@ RINGBUF_STATUS=$(remote_exec "${PARDUS1_IP}" "${PARDUS1_USER}" "${PARDUS1_PASS}"
 
 # Verify that collector process suffered zero page faults or OOM signals
 OOM_CHECK=$(remote_exec "${PARDUS1_IP}" "${PARDUS1_USER}" "${PARDUS1_PASS}" \
-  "dmesg 2>/dev/null | grep -iE 'oom|copsec-collector.*killed' | tail -n 1 || echo 'CLEAN'")
+  "echo '${PARDUS1_PASS}' | sudo -S dmesg 2>/dev/null | grep -iE 'oom|copsec-collector.*killed' | tail -n 1 || true")
+if [[ -z "$OOM_CHECK" ]]; then
+  OOM_CHECK="CLEAN"
+fi
 
 log_metric "Ring Buffer Specification" "BPF_MAP_TYPE_RINGBUF (256 KB fixed kernel window)"
 log_metric "Buffer Drainage Model" "cilium/ebpf/ringbuf (Zero Heap Allocations/Sample)"
@@ -333,15 +336,17 @@ log_info "Testing DFA pattern matching against sliced & chunked TCP streams..."
 
 # Vector A: HTTP 1.1 Chunked Transfer Encoding splitting Log4j signature across chunks
 log_info "Transmitting Vector A: Chunked Transfer Encoding splitting eval signature..."
-CHUNKS_RESPONSE=$(python3 - << PY_CHUNKED
-import socket, time
+CHUNKS_RESPONSE=$(python3 - "${PARDUS1_IP}" "${PARDUS1_HTTP_PORT}" << 'PY_CHUNKED'
+import socket, sys, time
+ip = sys.argv[1]
+port = int(sys.argv[2])
 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 s.settimeout(3.0)
 try:
-    s.connect(("${PARDUS1_IP}", int("${PARDUS1_HTTP_PORT}")))
+    s.connect((ip, port))
     headers = (
         "POST /submit HTTP/1.1\r\n"
-        f"Host: ${PARDUS1_IP}\r\n"
+        f"Host: {ip}\r\n"
         "User-Agent: CoPSeC-Bench/2.0\r\n"
         "Transfer-Encoding: chunked\r\n"
         "Content-Type: application/x-www-form-urlencoded\r\n"
@@ -373,12 +378,14 @@ PY_CHUNKED
 
 # Vector B: TCP Segment Boundary Fragmentation (Slow POST splitting pattern)
 log_info "Transmitting Vector B: TCP Window Boundary Fragmentation with inter-frame delay..."
-SEGMENT_RESPONSE=$(python3 - << PY_SEGMENT
-import socket, time
+SEGMENT_RESPONSE=$(python3 - "${PARDUS1_IP}" "${PARDUS1_HTTP_PORT}" << 'PY_SEGMENT'
+import socket, sys, time
+ip = sys.argv[1]
+port = int(sys.argv[2])
 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 s.settimeout(3.0)
 try:
-    s.connect(("${PARDUS1_IP}", int("${PARDUS1_HTTP_PORT}")))
+    s.connect((ip, port))
     # First partial segment
     part1 = b"GET /eval?query=() { :;}; /bin/"
     s.sendall(part1)
