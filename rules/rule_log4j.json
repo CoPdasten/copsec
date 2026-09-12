@@ -1,0 +1,16 @@
+{
+  "id": "RULE-LOG4J-001",
+  "name": "Apache Log4j / Log4Shell JNDI Remote Code Execution",
+  "description": "Detects JNDI injection patterns targeting Log4j via HTTP headers or URI",
+  "severity": "CRITICAL",
+  "threat_score": 95,
+  "mitre_technique_id": "T1190",
+  "enabled": true,
+  "target_field": "raw_payload",
+  "match_type": "regex",
+  "pattern": "(?i)(\\$\\{jndi:(ldap[s]?|rmi|dns|nis)://|\\$\\{base64:|\\%24\\%7bjndi:)",
+  "window_seconds": 60,
+  "hit_threshold": 1,
+  "action": "ban",
+  "ban_duration_sec": 86400
+}

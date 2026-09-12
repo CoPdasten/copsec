@@ -344,6 +344,68 @@ else
   fi
 fi
 
+print_topology_diagram() {
+  echo -e "\n${CLR_CYAN}${CLR_BOLD}--- Active Deployment Architecture Schema ---${CLR_RESET}"
+  if [[ "$ROLE" == "standalone" ]]; then
+    cat << 'TOPOLOGY_EOF'
+  ┌─────────────────────────────────────────────────────────────────────────┐
+  │                    TOPOLOGY 1: STANDALONE ALL-IN-ONE                    │
+  │   [Attacker / Client] ───> [eth0 (eBPF/XDP Line-Rate Drop <10µs)]       │
+  │                                      │ (Local Loopback)                 │
+  │   ┌──────────────────────────────────┴───────────────────────────────┐  │
+  │   │  copsec-collector (:2223 Tarpit, :8088 Honeypot, RAM RingBuffer) │  │
+  │   │     └─> gRPC Telemetry Stream (127.0.0.1:50051)                  │  │
+  │   │  copsec-controller (Otonom SOAR & 72 Kurallı Tehdit Motoru)      │  │
+  │   │     ├─> Değişmez Kasa: /var/lib/copsec/vault.db                  │  │
+  │   │     └─> Web SOC Kokpiti: http://127.0.0.1:8080                   │  │
+  │   └──────────────────────────────────────────────────────────────────┘  │
+  └─────────────────────────────────────────────────────────────────────────┘
+TOPOLOGY_EOF
+  elif [[ "$ROLE" == "controller" || "$ROLE" == "vault-server" || "$ROLE" == "vault" ]]; then
+    cat << 'TOPOLOGY_EOF'
+  ┌─────────────────────────────────────────────────────────────────────────┐
+  │               TOPOLOGY 2/3: CENTRAL VAULT & CONTROLLER HUB              │
+  │   [Edge Sensör 1] ───(gRPC :50051 mTLS)───> [BU DÜĞÜM (Controller)]   │
+  │   [Edge Sensör 2] ───(gRPC :50051 mTLS)───> [BU DÜĞÜM (Controller)]   │
+  │                                                      │                  │
+  │   ┌──────────────────────────────────────────────────┴───────────────┐  │
+  │   │  copsec-controller (:50051 Ingestion Hub & :8080 Web Kokpit)     │  │
+  │   │  ├─ 72 Tespit Kuralı & Otonom SOAR Karar Motoru                  │  │
+  │   │  ├─ Kriptografik SQLite WAL Kasası (SHA-256 Merkle Chain)        │  │
+  │   │  ├─ SIEM Exporter (CEF / RFC 5424 -> Wazuh / Splunk / Elastic)   │  │
+  │   │  └─ Minimalist Web SOC Arayüzü: http://<SERVER_IP>:8080          │  │
+  │   └──────────────────────────────────────────────────────────────────┘  │
+  └─────────────────────────────────────────────────────────────────────────┘
+TOPOLOGY_EOF
+  elif [[ "$ROLE" == "cockpit-proxy" || "$ROLE" == "cockpit" ]]; then
+    cat << 'TOPOLOGY_EOF'
+  ┌─────────────────────────────────────────────────────────────────────────┐
+  │              TOPOLOGY 3: ZERO-STORAGE ANALYST COCKPIT PROXY             │
+  │   [SOC Analisti] ───> [Web Kokpiti :8080] ───> [Uzak Kasa Sunucusu]     │
+  │   (Bu makinede hiçbir yerel veritabanı veya telemetri saklanmaz)         │
+  └─────────────────────────────────────────────────────────────────────────┘
+TOPOLOGY_EOF
+  else
+    cat << 'TOPOLOGY_EOF'
+  ┌─────────────────────────────────────────────────────────────────────────┐
+  │                 TOPOLOGY 2/3: AUTONOMOUS EDGE SENSOR                    │
+  │   [Gelen Ağ Trafiği] ───> [eth0 (eBPF/XDP Line-Rate Drop <10µs)]       │
+  │                                     │                                   │
+  │   ┌─────────────────────────────────┴────────────────────────────────┐  │
+  │   │  copsec-collector (Bu Düğüm)                                     │  │
+  │   │  ├─ TCP Tarpit (:2223) & Shadow Honeypot (:8088)                 │  │
+  │   │  ├─ RAM İçi 30s Uçucu PCAP Halka Tamponu                         │  │
+  │   │  ├─ ⚡ Dedikodu Ağı (:7946 Gossip) <──> Komşu Sensörler          │  │
+  │   │  └─ Çift Yönlü Telemetri Akışı ──(gRPC :50051)─> Controller      │  │
+  │   └──────────────────────────────────────────────────────────────────┘  │
+  └─────────────────────────────────────────────────────────────────────────┘
+TOPOLOGY_EOF
+  fi
+  echo -e "${CLR_CYAN}---------------------------------------------${CLR_RESET}\n"
+}
+
+print_topology_diagram
+
 # ==============================================================================
 # STEP 1: HOST DEPENDENCY PROVISIONING
 # ==============================================================================
@@ -1045,5 +1107,6 @@ else
   echo -e "  • Service Status   : ${CLR_CYAN}${SVC_DISPLAY_COLLECTOR}${CLR_RESET}"
 fi
 echo -e "  • Terminal Support : ${CLR_CYAN}copsec help${CLR_RESET} or ${CLR_CYAN}copsec status${CLR_RESET}"
+echo -e "  • Topology Guide   : ${CLR_CYAN}https://github.com/CoPdasten/copsec/blob/main/docs/DEPLOYMENT_TOPOLOGIES.md${CLR_RESET}"
 echo -e "${CLR_GREEN}${CLR_BOLD}================================================================================${CLR_RESET}"
 exit 0

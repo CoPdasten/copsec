@@ -1,0 +1,19 @@
+title: Cryptomining Daemon and Pool Connection
+id: sigma-linux-cryptominer
+status: production
+level: high
+tags:
+  - attack.impact
+  - attack.t1496
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  selection:
+    CommandLine|contains:
+      - "stratum+tcp://"
+      - "stratum+ssl://"
+      - "xmrig"
+      - "minerd"
+      - "moneroocean"
+  condition: selection

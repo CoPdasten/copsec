@@ -1,0 +1,20 @@
+title: Web Shell Installation and Invocation
+id: sigma-web-webshell-invocation
+status: production
+level: critical
+tags:
+  - attack.persistence
+  - attack.t1505.003
+logsource:
+  category: webserver
+detection:
+  selection:
+    RequestURI|contains:
+      - "c99.php"
+      - "r57.php"
+      - "b374k"
+      - "alfa.php"
+      - "wso.php"
+      - "cmd.php"
+      - "shell.php"
+  condition: selection

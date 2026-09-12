@@ -1,0 +1,18 @@
+title: SUID and SGID Binary Modification
+id: sigma-linux-suid-privesc
+status: production
+level: high
+tags:
+  - attack.privilege_escalation
+  - attack.t1548.001
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  selection:
+    CommandLine|contains:
+      - "chmod +s"
+      - "chmod u+s"
+      - "chmod 4755"
+      - "chmod 4777"
+  condition: selection

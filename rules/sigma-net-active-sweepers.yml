@@ -1,0 +1,18 @@
+title: Network Sweep and Host Discovery Probe
+id: sigma-net-active-sweepers
+status: production
+level: medium
+tags:
+  - attack.discovery
+  - attack.t1018
+logsource:
+  category: network
+detection:
+  selection:
+    raw:
+      - "arp-scan"
+      - "fping "
+      - "zmap "
+      - "netdiscover"
+      - "unicornscan"
+  condition: selection

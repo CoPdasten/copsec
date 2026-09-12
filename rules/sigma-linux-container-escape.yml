@@ -1,0 +1,19 @@
+title: Container Breakout and Docker Socket Abuse
+id: sigma-linux-container-escape
+status: production
+level: critical
+tags:
+  - attack.privilege_escalation
+  - attack.t1611
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  selection:
+    CommandLine|contains:
+      - "/var/run/docker.sock"
+      - "docker.sock"
+      - "--privileged"
+      - "cgroup.procs"
+      - "nsenter --mount"
+  condition: selection

@@ -1,0 +1,17 @@
+title: Cloud Instance Metadata Service SSRF Attack
+id: sigma-web-cloud-metadata-ssrf
+status: production
+level: critical
+tags:
+  - attack.initial_access
+  - attack.t1552.005
+logsource:
+  category: webserver
+detection:
+  selection:
+    RequestURI|contains:
+      - "169.254.169.254"
+      - "metadata.google.internal"
+      - "100.100.100.200"
+      - "latest/meta-data"
+  condition: selection

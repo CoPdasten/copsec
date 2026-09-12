@@ -1,0 +1,16 @@
+{
+  "id": "RULE-WEBSHELL-001",
+  "name": "Web Shell Upload & Interaction",
+  "description": "Detects common web shell filenames and command invocation query strings",
+  "severity": "CRITICAL",
+  "threat_score": 95,
+  "mitre_technique_id": "T1505.003",
+  "enabled": true,
+  "target_field": "uri",
+  "match_type": "regex",
+  "pattern": "(?i)(/(c99|r57|b374k|alfa|wso|cmd|shell|backdoor)\\.php|(passthru|system|shell_exec|eval)\\s*\\((\\$_GET|\\$_POST))",
+  "window_seconds": 60,
+  "hit_threshold": 1,
+  "action": "ban",
+  "ban_duration_sec": 86400
+}

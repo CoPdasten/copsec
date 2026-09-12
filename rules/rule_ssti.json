@@ -1,0 +1,16 @@
+{
+  "id": "RULE-SSTI-001",
+  "name": "Server-Side Template Injection (SSTI)",
+  "description": "Detects template expression evaluation tokens ({{7*7}}, ${7*7}, __subclasses__)",
+  "severity": "CRITICAL",
+  "threat_score": 90,
+  "mitre_technique_id": "T1190",
+  "enabled": true,
+  "target_field": "uri",
+  "match_type": "regex",
+  "pattern": "(?i)(\\{\\{7\\*7\\}\\}|\\$\\{7\\*7\\}|\\#\\{7\\*7\\}|__class__\\.__mro__|__subclasses__|lipsum\\.__globals__)",
+  "window_seconds": 60,
+  "hit_threshold": 1,
+  "action": "ban",
+  "ban_duration_sec": 86400
+}

@@ -1,0 +1,20 @@
+title: Linux Ransomware File Destruction and Encryption
+id: sigma-linux-ransomware
+status: production
+level: critical
+tags:
+  - attack.impact
+  - attack.t1486
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  selection:
+    CommandLine|contains:
+      - "shred -u"
+      - "shred -z"
+      - "srm "
+      - ".locked"
+      - ".deadbolt"
+      - ".crypted"
+  condition: selection

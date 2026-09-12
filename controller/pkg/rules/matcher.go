@@ -745,6 +745,406 @@ detection:
       - "port scan"
   condition: selection
 `,
+		`title: Sudoers Manipulation and Privilege Escalation
+id: sigma-linux-sudo-abuse
+status: production
+level: critical
+tags:
+  - attack.privilege_escalation
+  - attack.t1548.003
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  selection:
+    CommandLine|contains:
+      - "/etc/sudoers"
+      - "NOPASSWD: ALL"
+      - "visudo"
+      - "/etc/sudoers.d/"
+  condition: selection
+`,
+		`title: SUID and SGID Binary Modification
+id: sigma-linux-suid-privesc
+status: production
+level: high
+tags:
+  - attack.privilege_escalation
+  - attack.t1548.001
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  selection:
+    CommandLine|contains:
+      - "chmod +s"
+      - "chmod u+s"
+      - "chmod 4755"
+      - "chmod 4777"
+  condition: selection
+`,
+		`title: Unauthorized Linux Kernel Module Insertion
+id: sigma-linux-kernel-module
+status: production
+level: critical
+tags:
+  - attack.persistence
+  - attack.t1547.006
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  selection:
+    CommandLine|contains:
+      - "insmod "
+      - "modprobe "
+      - "rmmod "
+      - "/lib/modules/"
+  condition: selection
+`,
+		`title: Container Breakout and Docker Socket Abuse
+id: sigma-linux-container-escape
+status: production
+level: critical
+tags:
+  - attack.privilege_escalation
+  - attack.t1611
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  selection:
+    CommandLine|contains:
+      - "/var/run/docker.sock"
+      - "docker.sock"
+      - "--privileged"
+      - "cgroup.procs"
+      - "nsenter --mount"
+  condition: selection
+`,
+		`title: OS Credential Dumping via Process Memory
+id: sigma-linux-proc-mem-dump
+status: production
+level: critical
+tags:
+  - attack.credential_access
+  - attack.t1003.007
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  selection:
+    CommandLine|contains:
+      - "/proc/kcore"
+      - "mimipenguin"
+      - "gcore "
+      - "secretsdump"
+      - "/etc/shadow"
+  condition: selection
+`,
+		`title: Unauthorized SSH Authorized Keys Backdoor
+id: sigma-linux-ssh-keys
+status: production
+level: high
+tags:
+  - attack.persistence
+  - attack.t1098.004
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  selection:
+    CommandLine|contains:
+      - ".ssh/authorized_keys"
+      - "/root/.ssh/authorized_keys"
+  condition: selection
+`,
+		`title: Malicious Systemd Service and Timer Backdoor
+id: sigma-linux-systemd-backdoor
+status: production
+level: high
+tags:
+  - attack.persistence
+  - attack.t1543.002
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  selection:
+    CommandLine|contains:
+      - "/etc/systemd/system/"
+      - "systemctl enable"
+      - "systemctl start"
+  condition: selection
+`,
+		`title: Cryptomining Daemon and Pool Connection
+id: sigma-linux-cryptominer
+status: production
+level: high
+tags:
+  - attack.impact
+  - attack.t1496
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  selection:
+    CommandLine|contains:
+      - "stratum+tcp://"
+      - "stratum+ssl://"
+      - "xmrig"
+      - "minerd"
+      - "moneroocean"
+  condition: selection
+`,
+		`title: Linux Ransomware File Destruction and Encryption
+id: sigma-linux-ransomware
+status: production
+level: critical
+tags:
+  - attack.impact
+  - attack.t1486
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  selection:
+    CommandLine|contains:
+      - "shred -u"
+      - "shred -z"
+      - "srm "
+      - ".locked"
+      - ".deadbolt"
+      - ".crypted"
+  condition: selection
+`,
+		`title: Anti-Forensics Timestamp Spoofing Timestomp
+id: sigma-linux-timestomp
+status: production
+level: medium
+tags:
+  - attack.defense_evasion
+  - attack.t1070.006
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  selection:
+    CommandLine|contains:
+      - "touch -r"
+      - "touch -t"
+      - "touch -d"
+  condition: selection
+`,
+		`title: Anti-Forensics Log File Truncation and History Wipe
+id: sigma-linux-log-wipe
+status: production
+level: high
+tags:
+  - attack.defense_evasion
+  - attack.t1070.002
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  selection:
+    CommandLine|contains:
+      - "history -c"
+      - "unset HISTFILE"
+      - "HISTSIZE=0"
+      - "truncate -s 0 /var/log"
+      - "rm -rf /var/log"
+  condition: selection
+`,
+		`title: Apache Log4j / Log4Shell JNDI Remote Code Execution
+id: sigma-web-log4j-jndi
+status: production
+level: critical
+tags:
+  - attack.initial_access
+  - attack.t1190
+logsource:
+  category: webserver
+detection:
+  selection:
+    RequestURI|contains:
+      - "${jndi:"
+      - "%24%7bjndi:"
+      - "jndi:ldap:"
+      - "jndi:rmi:"
+      - "jndi:dns:"
+  condition: selection
+`,
+		`title: Cloud Instance Metadata Service SSRF Attack
+id: sigma-web-cloud-metadata-ssrf
+status: production
+level: critical
+tags:
+  - attack.initial_access
+  - attack.t1552.005
+logsource:
+  category: webserver
+detection:
+  selection:
+    RequestURI|contains:
+      - "169.254.169.254"
+      - "metadata.google.internal"
+      - "100.100.100.200"
+      - "latest/meta-data"
+  condition: selection
+`,
+		`title: Server-Side Template Injection Execution
+id: sigma-web-ssti-template
+status: production
+level: critical
+tags:
+  - attack.initial_access
+  - attack.t1190
+logsource:
+  category: webserver
+detection:
+  selection:
+    RequestURI|contains:
+      - "{{7*7}}"
+      - "${7*7}"
+      - "#{7*7}"
+      - "__class__.__mro__"
+      - "__subclasses__"
+  condition: selection
+`,
+		`title: XML External Entity Injection XXE
+id: sigma-web-xxe-injection
+status: production
+level: high
+tags:
+  - attack.initial_access
+  - attack.t1190
+logsource:
+  category: webserver
+detection:
+  selection:
+    raw:
+      - "<!DOCTYPE"
+      - "<!ENTITY"
+      - "SYSTEM \"file:"
+      - "SYSTEM \"http:"
+  condition: selection
+`,
+		`title: Web Shell Installation and Invocation
+id: sigma-web-webshell-invocation
+status: production
+level: critical
+tags:
+  - attack.persistence
+  - attack.t1505.003
+logsource:
+  category: webserver
+detection:
+  selection:
+    RequestURI|contains:
+      - "c99.php"
+      - "r57.php"
+      - "b374k"
+      - "alfa.php"
+      - "wso.php"
+      - "cmd.php"
+      - "shell.php"
+  condition: selection
+`,
+		`title: Insecure Object Deserialization Remote Code Execution
+id: sigma-web-deserialization-rce
+status: production
+level: critical
+tags:
+  - attack.initial_access
+  - attack.t1190
+logsource:
+  category: webserver
+detection:
+  selection:
+    raw:
+      - "rO0AB"
+      - "cos\nsystem"
+      - "BinaryFormatter"
+  condition: selection
+`,
+		`title: Sensitive Configuration and Key File Probing
+id: sigma-web-secrets-exposure
+status: production
+level: high
+tags:
+  - attack.credential_access
+  - attack.t1552.001
+logsource:
+  category: webserver
+detection:
+  selection:
+    RequestURI|contains:
+      - "/.env"
+      - "/.git/config"
+      - "/.git/HEAD"
+      - "/wp-config.php"
+      - "/id_rsa"
+      - "/.aws/credentials"
+  condition: selection
+`,
+		`title: Cross-Site Scripting Injection Attack
+id: sigma-web-xss-injection
+status: production
+level: medium
+tags:
+  - attack.initial_access
+  - attack.t1189
+logsource:
+  category: webserver
+detection:
+  selection:
+    RequestURI|contains:
+      - "<script"
+      - "%3cscript"
+      - "javascript:"
+      - "<svg/onload="
+      - "<img src=x onerror="
+  condition: selection
+`,
+		`title: Network Sweep and Host Discovery Probe
+id: sigma-net-active-sweepers
+status: production
+level: medium
+tags:
+  - attack.discovery
+  - attack.t1018
+logsource:
+  category: network
+detection:
+  selection:
+    raw:
+      - "arp-scan"
+      - "fping "
+      - "zmap "
+      - "netdiscover"
+      - "unicornscan"
+  condition: selection
+`,
+		`title: Out-of-Band Application Security Testing Callback
+id: sigma-net-oast-callbacks
+status: production
+level: high
+tags:
+  - attack.initial_access
+  - attack.t1595.002
+logsource:
+  category: network
+detection:
+  selection:
+    RequestURI|contains:
+      - "interact.sh"
+      - "oastify.com"
+      - "burpcollaborator.net"
+      - "dnslog.cn"
+      - "oast.fun"
+  condition: selection
+`,
 	}
 
 	for _, y := range builtinRules {

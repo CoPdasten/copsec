@@ -1,0 +1,18 @@
+title: Cross-Site Scripting Injection Attack
+id: sigma-web-xss-injection
+status: production
+level: medium
+tags:
+  - attack.initial_access
+  - attack.t1189
+logsource:
+  category: webserver
+detection:
+  selection:
+    RequestURI|contains:
+      - "<script"
+      - "%3cscript"
+      - "javascript:"
+      - "<svg/onload="
+      - "<img src=x onerror="
+  condition: selection

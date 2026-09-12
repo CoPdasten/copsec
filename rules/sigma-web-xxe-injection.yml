@@ -1,0 +1,17 @@
+title: XML External Entity Injection XXE
+id: sigma-web-xxe-injection
+status: production
+level: high
+tags:
+  - attack.initial_access
+  - attack.t1190
+logsource:
+  category: webserver
+detection:
+  selection:
+    raw:
+      - "<!DOCTYPE"
+      - "<!ENTITY"
+      - "SYSTEM \"file:"
+      - "SYSTEM \"http:"
+  condition: selection

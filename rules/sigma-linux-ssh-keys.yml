@@ -1,0 +1,16 @@
+title: Unauthorized SSH Authorized Keys Backdoor
+id: sigma-linux-ssh-keys
+status: production
+level: high
+tags:
+  - attack.persistence
+  - attack.t1098.004
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  selection:
+    CommandLine|contains:
+      - ".ssh/authorized_keys"
+      - "/root/.ssh/authorized_keys"
+  condition: selection

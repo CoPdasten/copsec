@@ -1,0 +1,16 @@
+title: Insecure Object Deserialization Remote Code Execution
+id: sigma-web-deserialization-rce
+status: production
+level: critical
+tags:
+  - attack.initial_access
+  - attack.t1190
+logsource:
+  category: webserver
+detection:
+  selection:
+    raw:
+      - "rO0AB"
+      - "cos\nsystem"
+      - "BinaryFormatter"
+  condition: selection

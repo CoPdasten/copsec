@@ -1,0 +1,17 @@
+title: Anti-Forensics Timestamp Spoofing Timestomp
+id: sigma-linux-timestomp
+status: production
+level: medium
+tags:
+  - attack.defense_evasion
+  - attack.t1070.006
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  selection:
+    CommandLine|contains:
+      - "touch -r"
+      - "touch -t"
+      - "touch -d"
+  condition: selection

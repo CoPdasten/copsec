@@ -167,8 +167,8 @@ func TestCuratedSigmaRulePackDetections(t *testing.T) {
 			name:       "Sudoers NOPASSWD Modification",
 			log:        "echo 'attacker ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers",
 			fields:     map[string]string{"CommandLine": "echo 'attacker ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers"},
-			expectedID: "sigma-linux-persistence",
-			mitreID:    "T1053",
+			expectedID: "SIGMA-LNX-SUDO-001",
+			mitreID:    "T1548",
 		},
 		{
 			name:       "Cronjob Persistence Directory Access",
@@ -181,8 +181,8 @@ func TestCuratedSigmaRulePackDetections(t *testing.T) {
 			name:       "SUID Bit Set on Binary",
 			log:        "chmod u+s /usr/bin/python3",
 			fields:     map[string]string{"CommandLine": "chmod u+s /usr/bin/python3"},
-			expectedID: "sigma-linux-persistence",
-			mitreID:    "T1053",
+			expectedID: "SIGMA-LNX-SUID-001",
+			mitreID:    "T1548",
 		},
 
 		// 4. Advanced Web Exploits & Modern Injection
@@ -204,8 +204,8 @@ func TestCuratedSigmaRulePackDetections(t *testing.T) {
 			name:       "Out-of-Band OAST Exfiltration Probe",
 			log:        `GET /search?q=test.oastify.com HTTP/1.1`,
 			fields:     map[string]string{"RequestURI": "/search?q=test.oastify.com"},
-			expectedID: "sigma-web-advanced",
-			mitreID:    "T1190",
+			expectedID: "SIGMA-NET-OAST-001",
+			mitreID:    "T1595",
 		},
 		{
 			name:       "NoSQL Injection Operator",

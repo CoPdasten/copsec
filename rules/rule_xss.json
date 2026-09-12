@@ -1,0 +1,16 @@
+{
+  "id": "RULE-XSS-001",
+  "name": "Cross-Site Scripting (XSS) Injection",
+  "description": "Detects script tags, javascript scheme, and event handler injection in HTTP parameters",
+  "severity": "MEDIUM",
+  "threat_score": 70,
+  "mitre_technique_id": "T1189",
+  "enabled": true,
+  "target_field": "uri",
+  "match_type": "regex",
+  "pattern": "(?i)(<script.*?>|javascript:[a-z0-9_]+|<svg.*?onload=|<img.*?onerror=)",
+  "window_seconds": 60,
+  "hit_threshold": 3,
+  "action": "ban",
+  "ban_duration_sec": 3600
+}

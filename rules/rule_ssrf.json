@@ -1,0 +1,16 @@
+{
+  "id": "RULE-SSRF-001",
+  "name": "Cloud Metadata SSRF Exfiltration",
+  "description": "Detects Server-Side Request Forgery targeting AWS, Azure, and GCP instance metadata services",
+  "severity": "CRITICAL",
+  "threat_score": 95,
+  "mitre_technique_id": "T1552.005",
+  "enabled": true,
+  "target_field": "uri",
+  "match_type": "regex",
+  "pattern": "(?i)(169\\.254\\.169\\.254|metadata\\.google\\.internal|100\\.100\\.100\\.200|latest/meta-data|instance/service-accounts)",
+  "window_seconds": 60,
+  "hit_threshold": 1,
+  "action": "ban",
+  "ban_duration_sec": 86400
+}

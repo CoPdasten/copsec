@@ -1,0 +1,18 @@
+title: Sudoers Manipulation and Privilege Escalation
+id: sigma-linux-sudo-abuse
+status: production
+level: critical
+tags:
+  - attack.privilege_escalation
+  - attack.t1548.003
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  selection:
+    CommandLine|contains:
+      - "/etc/sudoers"
+      - "NOPASSWD: ALL"
+      - "visudo"
+      - "/etc/sudoers.d/"
+  condition: selection

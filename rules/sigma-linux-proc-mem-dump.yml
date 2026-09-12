@@ -1,0 +1,19 @@
+title: OS Credential Dumping via Process Memory
+id: sigma-linux-proc-mem-dump
+status: production
+level: critical
+tags:
+  - attack.credential_access
+  - attack.t1003.007
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  selection:
+    CommandLine|contains:
+      - "/proc/kcore"
+      - "mimipenguin"
+      - "gcore "
+      - "secretsdump"
+      - "/etc/shadow"
+  condition: selection

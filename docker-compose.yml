@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  controller:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: copsec-controller:latest
+    container_name: copsec-controller
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+      - "50051:50051"
+    environment:
+      - COPSEC_CONF_DIR=/etc/copsec
+    volumes:
+      - copsec_vault:/var/lib/copsec
+      - copsec_rules:/etc/copsec/rules
+      - copsec_logs:/var/log/copsec
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  copsec_vault:
+    driver: local
+  copsec_rules:
+    driver: local
+  copsec_logs:
+    driver: local

@@ -1,0 +1,18 @@
+title: Apache Log4j / Log4Shell JNDI Remote Code Execution
+id: sigma-web-log4j-jndi
+status: production
+level: critical
+tags:
+  - attack.initial_access
+  - attack.t1190
+logsource:
+  category: webserver
+detection:
+  selection:
+    RequestURI|contains:
+      - "${jndi:"
+      - "%24%7bjndi:"
+      - "jndi:ldap:"
+      - "jndi:rmi:"
+      - "jndi:dns:"
+  condition: selection

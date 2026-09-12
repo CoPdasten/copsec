@@ -257,6 +257,177 @@ func (r *RuleRegistry) ProvisionDefaults() {
 		}
 		r.writeRuleJSON(filepath.Join(dir, "rule_fuzzing_gobuster_ffuf.json"), fuzzerRule)
 
+		// 7. rule_log4j.json
+		log4jRule := DetectionRule{
+			ID:               "RULE-LOG4J-001",
+			Name:             "Apache Log4j / Log4Shell JNDI Remote Code Execution",
+			Description:      "Detects JNDI injection patterns targeting Log4j via HTTP headers or URI",
+			Severity:         "CRITICAL",
+			ThreatScore:      95,
+			MitreTechniqueID: "T1190",
+			Enabled:          true,
+			TargetField:      "raw_payload",
+			MatchType:        "regex",
+			Pattern:          `(?i)(\$\{jndi:(ldap[s]?|rmi|dns|nis)://|\$\{base64:|\%24\%7bjndi:)`,
+			WindowSeconds:    60,
+			HitThreshold:     1,
+			Action:           ActionBan,
+			BanDurationSec:   86400,
+		}
+		r.writeRuleJSON(filepath.Join(dir, "rule_log4j.json"), log4jRule)
+
+		// 8. rule_ssrf.json
+		ssrfRule := DetectionRule{
+			ID:               "RULE-SSRF-001",
+			Name:             "Cloud Metadata SSRF Exfiltration",
+			Description:      "Detects Server-Side Request Forgery targeting AWS, Azure, and GCP instance metadata services",
+			Severity:         "CRITICAL",
+			ThreatScore:      95,
+			MitreTechniqueID: "T1552.005",
+			Enabled:          true,
+			TargetField:      "uri",
+			MatchType:        "regex",
+			Pattern:          `(?i)(169\.254\.169\.254|metadata\.google\.internal|100\.100\.100\.200|latest/meta-data|instance/service-accounts)`,
+			WindowSeconds:    60,
+			HitThreshold:     1,
+			Action:           ActionBan,
+			BanDurationSec:   86400,
+		}
+		r.writeRuleJSON(filepath.Join(dir, "rule_ssrf.json"), ssrfRule)
+
+		// 9. rule_ssti.json
+		sstiRule := DetectionRule{
+			ID:               "RULE-SSTI-001",
+			Name:             "Server-Side Template Injection (SSTI)",
+			Description:      "Detects template expression evaluation tokens ({{7*7}}, ${7*7}, __subclasses__)",
+			Severity:         "CRITICAL",
+			ThreatScore:      90,
+			MitreTechniqueID: "T1190",
+			Enabled:          true,
+			TargetField:      "uri",
+			MatchType:        "regex",
+			Pattern:          `(?i)(\{\{7\*7\}\}|\$\{7\*7\}|\#\{7\*7\}|__class__\.__mro__|__subclasses__|lipsum\.__globals__)`,
+			WindowSeconds:    60,
+			HitThreshold:     1,
+			Action:           ActionBan,
+			BanDurationSec:   86400,
+		}
+		r.writeRuleJSON(filepath.Join(dir, "rule_ssti.json"), sstiRule)
+
+		// 10. rule_xxe.json
+		xxeRule := DetectionRule{
+			ID:               "RULE-XXE-001",
+			Name:             "XML External Entity (XXE) Injection",
+			Description:      "Detects XML external entity DOCTYPE declarations targeting local file disclosure",
+			Severity:         "HIGH",
+			ThreatScore:      85,
+			MitreTechniqueID: "T1190",
+			Enabled:          true,
+			TargetField:      "raw_payload",
+			MatchType:        "regex",
+			Pattern:          `(?i)(<!doctype.*<!entity|<!entity\s+.*system\s+["'](file|http)://)`,
+			WindowSeconds:    60,
+			HitThreshold:     1,
+			Action:           ActionBan,
+			BanDurationSec:   86400,
+		}
+		r.writeRuleJSON(filepath.Join(dir, "rule_xxe.json"), xxeRule)
+
+		// 11. rule_webshell.json
+		webshellRule := DetectionRule{
+			ID:               "RULE-WEBSHELL-001",
+			Name:             "Web Shell Upload & Interaction",
+			Description:      "Detects common web shell filenames and command invocation query strings",
+			Severity:         "CRITICAL",
+			ThreatScore:      95,
+			MitreTechniqueID: "T1505.003",
+			Enabled:          true,
+			TargetField:      "uri",
+			MatchType:        "regex",
+			Pattern:          `(?i)(/(c99|r57|b374k|alfa|wso|cmd|shell|backdoor)\.php|(passthru|system|shell_exec|eval)\s*\((\$_GET|\$_POST))`,
+			WindowSeconds:    60,
+			HitThreshold:     1,
+			Action:           ActionBan,
+			BanDurationSec:   86400,
+		}
+		r.writeRuleJSON(filepath.Join(dir, "rule_webshell.json"), webshellRule)
+
+		// 12. rule_cryptominer.json
+		minerRule := DetectionRule{
+			ID:               "RULE-MINER-001",
+			Name:             "Cryptomining Stratum Protocol & Pool Connection",
+			Description:      "Detects Stratum mining protocol signatures and known mining pool endpoints",
+			Severity:         "HIGH",
+			ThreatScore:      85,
+			MitreTechniqueID: "T1496",
+			Enabled:          true,
+			TargetField:      "raw_payload",
+			MatchType:        "regex",
+			Pattern:          `(?i)(stratum\+(tcp|ssl)://|xmrig|minerd|moneroocean|crypto-pool\.fr|nanopool\.org)`,
+			WindowSeconds:    60,
+			HitThreshold:     1,
+			Action:           ActionBan,
+			BanDurationSec:   86400,
+		}
+		r.writeRuleJSON(filepath.Join(dir, "rule_cryptominer.json"), minerRule)
+
+		// 13. rule_secrets.json
+		secretsRule := DetectionRule{
+			ID:               "RULE-SECRETS-001",
+			Name:             "Sensitive Configuration & Key File Probing",
+			Description:      "Detects reconnaissance against .env, .git, config files, and private keys",
+			Severity:         "HIGH",
+			ThreatScore:      80,
+			MitreTechniqueID: "T1552.001",
+			Enabled:          true,
+			TargetField:      "uri",
+			MatchType:        "regex",
+			Pattern:          `(?i)(/\.env|/\.git/config|/\.git/HEAD|/wp-config\.php|/\.aws/credentials|/\.kube/config|/id_rsa|/dump\.sql|/backup\.sql)`,
+			WindowSeconds:    60,
+			HitThreshold:     2,
+			Action:           ActionBan,
+			BanDurationSec:   3600,
+		}
+		r.writeRuleJSON(filepath.Join(dir, "rule_secrets.json"), secretsRule)
+
+		// 14. rule_xss.json
+		xssRule := DetectionRule{
+			ID:               "RULE-XSS-001",
+			Name:             "Cross-Site Scripting (XSS) Injection",
+			Description:      "Detects script tags, javascript scheme, and event handler injection in HTTP parameters",
+			Severity:         "MEDIUM",
+			ThreatScore:      70,
+			MitreTechniqueID: "T1189",
+			Enabled:          true,
+			TargetField:      "uri",
+			MatchType:        "regex",
+			Pattern:          `(?i)(<script.*?>|javascript:[a-z0-9_]+|<svg.*?onload=|<img.*?onerror=)`,
+			WindowSeconds:    60,
+			HitThreshold:     3,
+			Action:           ActionBan,
+			BanDurationSec:   3600,
+		}
+		r.writeRuleJSON(filepath.Join(dir, "rule_xss.json"), xssRule)
+
+		// 15. rule_oast.json
+		oastRule := DetectionRule{
+			ID:               "RULE-OAST-001",
+			Name:             "Out-of-Band Exfiltration Callbacks",
+			Description:      "Detects OAST callbacks to interact.sh, oastify, and burpcollaborator",
+			Severity:         "HIGH",
+			ThreatScore:      85,
+			MitreTechniqueID: "T1595.002",
+			Enabled:          true,
+			TargetField:      "uri",
+			MatchType:        "regex",
+			Pattern:          `(?i)(interact\.sh|oastify\.com|burpcollaborator\.net|dnslog\.cn|oast\.fun)`,
+			WindowSeconds:    60,
+			HitThreshold:     1,
+			Action:           ActionBan,
+			BanDurationSec:   86400,
+		}
+		r.writeRuleJSON(filepath.Join(dir, "rule_oast.json"), oastRule)
+
 		log.Printf("[INFO] Auto-provisioned default detection rules in %s", dir)
 	}
 }

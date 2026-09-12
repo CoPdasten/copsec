@@ -300,12 +300,67 @@ CoPSeC Pro features a unified, idempotent, zero-touch installer (`scripts/instal
 
 ## ⚡ Deployment & Ignition Topologies
 
-CoPSeC Pro scales seamlessly from single-host development environments to enterprise-grade, multi-tiered security operations centers. Select the deployment model suited to your infrastructure:
+CoPSeC Pro scales seamlessly from single-host development environments to enterprise-grade, multi-tiered security operations centers. Select the deployment model suited to your infrastructure.
+
+> 📘 **Full Architecture & Deployment Guide**: Detailed port matrices, multi-datacenter replication, and firewall configuration examples are documented in [docs/DEPLOYMENT_TOPOLOGIES.md](docs/DEPLOYMENT_TOPOLOGIES.md).
 
 ---
 
 ### Option 1: Standalone All-in-One (Single Host / Dev & Edge)
 Runs the entire stack on a single machine or VPS. Deploys the SQLite WAL vault, gRPC receiver, eBPF/XDP engine, and Web SOC Cockpit locally.
+
+```mermaid
+flowchart TD
+    subgraph External ["🌐 External Network"]
+        ATTACKER["Attacker / Scanner"]
+        USER["Legitimate User"]
+    end
+
+    subgraph Host ["💻 Standalone Host"]
+        NIC["Interface (eth0)"]
+
+        subgraph KernelSpace ["🐧 Linux Kernel Space"]
+            XDP["eBPF / XDP Hook"]
+            BPF_MAP["banned_ips (Hash Map)"]
+            XDP_DROP["XDP_DROP (<10µs Line-Rate)"]
+            PASS["XDP_PASS (Legit Traffic)"]
+        end
+
+        subgraph UserSpace ["⚙️ User Space Daemons"]
+            subgraph CollectorSvc ["copsec-collector.service"]
+                TARPIT["TCP Tarpit (:2223)"]
+                HONEY["Shadow Honeypot (:8088)"]
+                PCAP["RAM PCAP Ring Buffer"]
+            end
+
+            subgraph ControllerSvc ["copsec-controller.service"]
+                GRPC["gRPC Hub (127.0.0.1:50051)"]
+                SOAR["Autonomous SOAR Engine"]
+                DB[("SQLite Immutable Vault\n/var/lib/copsec/vault.db")]
+                WEBSOC["Web SOC Cockpit (:8080)"]
+            end
+
+            CLI["copsec CLI"]
+        end
+    end
+
+    ATTACKER -->|DDoS / Exploit| NIC
+    USER -->|Legit Traffic| NIC
+    NIC --> XDP
+    XDP -->|Banned IP| BPF_MAP
+    BPF_MAP -->|Drop| XDP_DROP
+    XDP -->|Clean Traffic| PASS
+    PASS --> TARPIT
+    PASS --> HONEY
+    PASS --> PCAP
+
+    CollectorSvc -->|Loopback gRPC (127.0.0.1:50051)| GRPC
+    GRPC --> SOAR
+    SOAR -->|Quarantine Ban| BPF_MAP
+    SOAR -->|Append-Only| DB
+    WEBSOC <-->|Query / WS| DB
+    CLI <-->|Local Admin| ControllerSvc
+```
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/CoPdasten/copsec/main/scripts/install.sh \
@@ -317,7 +372,57 @@ curl -fsSL https://raw.githubusercontent.com/CoPdasten/copsec/main/scripts/insta
 ---
 
 ### Option 2: Standard Distributed (Central Management PC + Edge Sensors)
-Your primary workstation functions as the cluster brain, log repository, and visual cockpit, while remote edge servers stream telemetry directly to your IP.
+Your primary workstation or central server functions as the cluster brain, log repository, and visual cockpit, while remote edge servers stream telemetry directly and synchronize bans across a peer-to-peer Gossip mesh.
+
+```mermaid
+flowchart TD
+    subgraph Traffic ["🌍 Incoming Internet Traffic"]
+        ATTACK["Attack & Recon Traffic"]
+    end
+
+    subgraph EdgeNodes ["🛡️ Edge Sensor Fleet"]
+        subgraph Node1 ["Sensor 1 (Edge Server A)"]
+            XDP1["eBPF/XDP Fast-Drop"]
+            COLL1["Collector Service"]
+            TARPIT1["TCP Tarpit (:2223)"]
+        end
+
+        subgraph Node2 ["Sensor 2 (Edge Server B)"]
+            XDP2["eBPF/XDP Fast-Drop"]
+            COLL2["Collector Service"]
+            TARPIT2["TCP Tarpit (:2223)"]
+        end
+
+        subgraph NodeN ["Sensor N (Edge Server N)"]
+            XDPN["eBPF/XDP Fast-Drop"]
+            COLLN["Collector Service"]
+        end
+    end
+
+    subgraph Central ["🧠 Central Management & Vault (Controller Node)"]
+        GRPC_HUB["gRPC Fleet Ingestion Hub (:50051)"]
+        SOAR_ENGINE["Autonomous SOAR & Correlation"]
+        SQLITE_VAULT[("Immutable Cryptographic Vault\nSHA-256 Hash Chain")]
+        SIEM_EXPORT["SIEM Exporter (CEF / RFC 5424)"]
+        WEB_COCKPIT["Web SOC Cockpit (:8080)"]
+    end
+
+    ATTACK --> Node1
+    ATTACK --> Node2
+    ATTACK --> NodeN
+
+    COLL1 <-->|⚡ Gossip Mesh (:7946)\nLine-Rate Ban Sync| COLL2
+    COLL2 <-->|⚡ Gossip Mesh (:7946)| COLLN
+
+    COLL1 -->|mTLS gRPC Stream (:50051)| GRPC_HUB
+    COLL2 -->|mTLS gRPC Stream (:50051)| GRPC_HUB
+    COLLN -->|mTLS gRPC Stream (:50051)| GRPC_HUB
+
+    GRPC_HUB --> SOAR_ENGINE
+    SOAR_ENGINE --> SQLITE_VAULT
+    SOAR_ENGINE --> SIEM_EXPORT
+    WEB_COCKPIT <--> SQLITE_VAULT
+```
 
 **Step 1: On Your Central PC / Controller:**
 ```bash
@@ -327,15 +432,67 @@ curl -fsSL https://raw.githubusercontent.com/CoPdasten/copsec/main/scripts/insta
 
 **Step 2: On Remote Servers to Protect (Edge Sensors):**
 ```bash
+# Node 1:
 curl -fsSL https://raw.githubusercontent.com/CoPdasten/copsec/main/scripts/install.sh \
   | sudo bash -s -- --role=collector \
   --controller-ip=<CENTRAL_PC_IP> --interface=eth0
+
+# Node 2+ (joining Gossip mesh for zero-latency peer ban propagation):
+curl -fsSL https://raw.githubusercontent.com/CoPdasten/copsec/main/scripts/install.sh \
+  | sudo bash -s -- --role=collector \
+  --controller-ip=<CENTRAL_PC_IP> --interface=eth0 \
+  --gossip-join=<FIRST_SENSOR_IP>:7946
 ```
 
 ---
 
 ### Option 3: Enterprise Tiered SOC (Dedicated Database Hub + Frontline Sensors + Analyst UI)
-Complete physical separation of duties. Keeps database operations isolated from network attacks and allows zero-storage analyst dashboards.
+Complete physical and logical separation of duties. Keeps database operations strictly isolated from network attacks, while analysts connect via secure SSH/WireGuard tunnels.
+
+```mermaid
+flowchart TD
+    subgraph Tier1 ["🛡️ TIER 1: DMZ Edge Sensors (Stateless Frontline)"]
+        DMZ_NIC["External Interface"]
+        DMZ_XDP["eBPF / XDP Line-Rate Drop"]
+        DMZ_TARPIT["TCP Tarpit (:2223)"]
+        DMZ_HONEY["Honeypot (:8088)"]
+        DMZ_BUFF["RAM-Only PCAP Ring Buffer"]
+    end
+
+    subgraph Firewall1 ["🔥 Firewall: Allow Port 50051 (mTLS) Only"]
+    end
+
+    subgraph Tier2 ["🏛️ TIER 2: Isolated Vault & SOAR Engine (Management VLAN)"]
+        VAULT_GRPC["gRPC Receiver (:50051)"]
+        SOAR_CORE["SOAR & Threat Intelligence"]
+        VAULT_DB[("Cryptographic SQLite Vault\nSHA-256 Merkle Chain")]
+        FIM["FIM & Kernel Integrity Audit"]
+    end
+
+    subgraph Firewall2 ["🔥 Firewall: Inbound Denied / Local Tunnel Only"]
+    end
+
+    subgraph Tier3 ["💻 TIER 3: Zero-Storage Analyst Workstation (SOC Cockpit)"]
+        ANALYST["Analyst Browser (127.0.0.1:8080)"]
+        SSH_TUNNEL["SSH Port Forwarding / WireGuard\n(127.0.0.1:8080 -> Vault:8080)"]
+    end
+
+    DMZ_NIC --> DMZ_XDP
+    DMZ_XDP --> DMZ_TARPIT
+    DMZ_XDP --> DMZ_HONEY
+    DMZ_XDP --> DMZ_BUFF
+
+    DMZ_BUFF -->|Encrypted mTLS Stream| Firewall1
+    Firewall1 --> VAULT_GRPC
+
+    VAULT_GRPC --> SOAR_CORE
+    SOAR_CORE --> VAULT_DB
+    SOAR_CORE --> FIM
+
+    VAULT_DB <-->|Vault API| Firewall2
+    Firewall2 <--> SSH_TUNNEL
+    SSH_TUNNEL <--> ANALYST
+```
 
 **Step 1: Dedicated Vault Server (Isolated Database Hub):**
 ```bash
@@ -352,9 +509,9 @@ curl -fsSL https://raw.githubusercontent.com/CoPdasten/copsec/main/scripts/insta
 
 **Step 3: Analyst Cockpit (Zero-Storage Web SOC):**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/CoPdasten/copsec/main/scripts/install.sh \
-  | sudo bash -s -- --role=cockpit-proxy \
-  --vault-ip=<VAULT_SERVER_IP>
+# From analyst workstation, establish secure encrypted tunnel:
+ssh -N -L 8080:127.0.0.1:8080 copdasten@<VAULT_SERVER_IP>
+# Open Cockpit in local browser: http://127.0.0.1:8080
 ```
 
 ---
@@ -376,6 +533,24 @@ wget -qO- https://raw.githubusercontent.com/CoPdasten/copsec/main/scripts/instal
   ```
 * **Log Inspection:** `/var/log/copsec/collector.log` and `/var/log/copsec/collector.err`
 * **Docker Appliance:** `docker build -f Dockerfile.alpine -t copsec-alpine:latest .`
+
+---
+
+### Option 5: Containerized Turnkey Deployment (Docker & Docker Compose)
+Launch the complete CoPSeC Controller, Autonomous SOAR engine, and Web SOC Cockpit in an isolated container within seconds:
+
+```bash
+# Clone and spin up with Docker Compose
+git clone https://github.com/CoPdasten/copsec.git
+cd copsec
+docker compose up -d
+
+# Check service logs and status
+docker compose logs -f
+```
+* **Web Cockpit:** `http://localhost:8080/?token=copsec-super-secret-master-api-key-2026`
+* **Telemetry Hub:** `localhost:50051` (gRPC)
+* **Persistent Volumes:** `./data` (SQLite Vault ledger) and `./rules` (Detection rule catalog)
 
 ---
 

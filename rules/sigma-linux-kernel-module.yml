@@ -1,0 +1,18 @@
+title: Unauthorized Linux Kernel Module Insertion
+id: sigma-linux-kernel-module
+status: production
+level: critical
+tags:
+  - attack.persistence
+  - attack.t1547.006
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  selection:
+    CommandLine|contains:
+      - "insmod "
+      - "modprobe "
+      - "rmmod "
+      - "/lib/modules/"
+  condition: selection

@@ -1,0 +1,18 @@
+title: Out-of-Band Application Security Testing Callback
+id: sigma-net-oast-callbacks
+status: production
+level: high
+tags:
+  - attack.initial_access
+  - attack.t1595.002
+logsource:
+  category: network
+detection:
+  selection:
+    RequestURI|contains:
+      - "interact.sh"
+      - "oastify.com"
+      - "burpcollaborator.net"
+      - "dnslog.cn"
+      - "oast.fun"
+  condition: selection

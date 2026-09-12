@@ -1,0 +1,18 @@
+title: Server-Side Template Injection Execution
+id: sigma-web-ssti-template
+status: production
+level: critical
+tags:
+  - attack.initial_access
+  - attack.t1190
+logsource:
+  category: webserver
+detection:
+  selection:
+    RequestURI|contains:
+      - "{{7*7}}"
+      - "${7*7}"
+      - "#{7*7}"
+      - "__class__.__mro__"
+      - "__subclasses__"
+  condition: selection

@@ -64,7 +64,7 @@ func InitAPIKey() string {
 			for _, target := range []string{"/etc/copsec/api_key", "/var/lib/copsec/api_key", "./data/api_key"} {
 				dir := filepath.Dir(target)
 				if err := os.MkdirAll(dir, 0755); err == nil {
-					if err := os.WriteFile(target, []byte(globalAPIKey+"\n"), 0600); err == nil {
+					if err := os.WriteFile(target, []byte(globalAPIKey+"\n"), 0644); err == nil {
 						persistedPath = target
 						break
 					}

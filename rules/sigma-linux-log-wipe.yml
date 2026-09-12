@@ -1,0 +1,19 @@
+title: Anti-Forensics Log File Truncation and History Wipe
+id: sigma-linux-log-wipe
+status: production
+level: high
+tags:
+  - attack.defense_evasion
+  - attack.t1070.002
+logsource:
+  category: process_creation
+  product: linux
+detection:
+  selection:
+    CommandLine|contains:
+      - "history -c"
+      - "unset HISTFILE"
+      - "HISTSIZE=0"
+      - "truncate -s 0 /var/log"
+      - "rm -rf /var/log"
+  condition: selection
