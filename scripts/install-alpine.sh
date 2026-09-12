@@ -71,6 +71,7 @@ Options:
   --grpc-port=<port>            gRPC server port for Controller / Vault (Default: 50051)
   --web-port=<port>             Web SOC Cockpit HTTP port (Default: 8080)
   --db-path=<path>              SQLite WAL ledger database path (Default: /var/lib/copsec/vault.db)
+  --api-key=<key>               Master API key for Web SOC authentication (Default: auto-generated/persisted)
   --xdp-mode=<native|generic>   eBPF driver attachment mode (Default: native)
   --ban-reaper-interval=<dur>   Dynamic ban TTL eviction interval (Default: 15s)
 HELP_EOF
@@ -96,6 +97,7 @@ CONTROLLER_ADDR=""
 GRPC_PORT="50051"
 WEB_PORT="8080"
 DB_PATH="/var/lib/copsec/vault.db"
+API_KEY="${COPSEC_API_KEY:-}"
 GOSSIP_PORT="7946"
 GOSSIP_JOIN=""
 BAN_REAPER_INTERVAL="15s"
@@ -105,6 +107,14 @@ MIRROR_SOCK="/run/copsec/mirror.sock"
 # Parse CLI arguments (POSIX compatible)
 while [ $# -gt 0 ]; do
   case "$1" in
+    --api-key=*)
+      API_KEY="${1#*=}"
+      shift
+      ;;
+    --api-key)
+      API_KEY="$2"
+      shift 2
+      ;;
     --role=*)
       ROLE="${1#*=}"
       shift
@@ -257,6 +267,18 @@ if [ "$ROLE" = "collector" ] || [ "$ROLE" = "standalone" ]; then
   fi
 fi
 
+# Resolve Master API Key
+if [ -z "$API_KEY" ]; then
+  if [ -f "/etc/copsec/api_key" ]; then
+    API_KEY="$(cat /etc/copsec/api_key 2>/dev/null | tr -d ' \r\n' || true)"
+  elif [ -f "/etc/copsec/copsec.env" ]; then
+    API_KEY="$(grep -E '^COPSEC_API_KEY=' /etc/copsec/copsec.env 2>/dev/null | cut -d'=' -f2- | tr -d ' "\x27\r\n' || true)"
+  fi
+fi
+if [ -z "$API_KEY" ]; then
+  API_KEY="$(openssl rand -hex 32 2>/dev/null || head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+fi
+
 log_info "Active Alpine Configuration Profile:"
 log_metric "Assigned Node Role" "${ROLE}"
 log_metric "Operating System" "Alpine Linux ($(cat /etc/alpine-release 2>/dev/null || echo 'generic'))"
@@ -266,15 +288,18 @@ if [ "$ROLE" = "controller" ] || [ "$ROLE" = "vault-server" ] || [ "$ROLE" = "va
   log_metric "gRPC Ingestion Bind" "0.0.0.0:${GRPC_PORT}"
   log_metric "Web SOC Cockpit Bind" "0.0.0.0:${WEB_PORT}"
   log_metric "SQLite Immutable Ledger" "${DB_PATH}"
+  log_metric "Master API Key" "${API_KEY:0:8}********************************"
 elif [ "$ROLE" = "cockpit-proxy" ] || [ "$ROLE" = "cockpit" ]; then
   log_metric "Target Remote Vault" "${CONTROLLER_ADDR}"
   log_metric "Web SOC Cockpit Bind" "0.0.0.0:${WEB_PORT}"
   log_metric "Storage Model" "Zero-Storage Analyst Proxy"
+  log_metric "Master API Key" "${API_KEY:0:8}********************************"
 elif [ "$ROLE" = "standalone" ]; then
   log_metric "Web SOC Cockpit Bind" "0.0.0.0:${WEB_PORT}"
   log_metric "Local Ingestion gRPC" "127.0.0.1:50051"
   log_metric "eBPF/XDP Network Device" "${INTERFACE} (Mode: ${XDP_MODE})"
   log_metric "SQLite Immutable Ledger" "${DB_PATH}"
+  log_metric "Master API Key" "${API_KEY:0:8}********************************"
 else
   log_metric "Target Controller gRPC" "${CONTROLLER_ADDR}"
   log_metric "eBPF/XDP Network Device" "${INTERFACE} (Mode: ${XDP_MODE})"
@@ -357,7 +382,16 @@ chmod 750 "$LOG_DIR"
 chmod 700 "$FORENSICS_DIR"
 chmod 755 "$RUN_DIR"
 
-log_success "Directories ready at /opt/copsec, /etc/copsec, /var/lib/copsec, /var/log/copsec."
+# Persist Master API Key
+echo "$API_KEY" > "${CONF_DIR}/api_key"
+chmod 600 "${CONF_DIR}/api_key"
+
+cat << ENV_EOF > "${CONF_DIR}/copsec.env"
+COPSEC_API_KEY="${API_KEY}"
+ENV_EOF
+chmod 600 "${CONF_DIR}/copsec.env"
+
+log_success "Directory hierarchy and credentials ready at /opt/copsec, /etc/copsec, /var/lib/copsec, /var/log/copsec."
 
 # ==============================================================================
 # STEP 4: PRE-FLIGHT CLEANUP & XDP DETACHMENT
@@ -441,6 +475,10 @@ elif [ "$ROLE" = "vault-server" ] || [ "$ROLE" = "vault" ] || [ "$ROLE" = "contr
 elif [ "$ROLE" = "collector" ]; then
   install_binary "copsec-collector" "collector"
 fi
+
+# Always install unified copsec CLI utility
+install_binary "copsec" "cmd/copsec"
+ln -sf "/usr/local/bin/copsec" "/usr/bin/copsec" 2>/dev/null || true
 
 # Compile / copy eBPF Bytecode if role requires XDP packet mitigation
 if [ "$ROLE" = "collector" ] || [ "$ROLE" = "standalone" ]; then
@@ -562,6 +600,10 @@ create_openrc_service() {
 name="${svc_name}"
 description="${svc_desc}"
 
+if [ -f /etc/copsec/copsec.env ]; then
+    export \$(grep -E '^[A-Za-z0-9_]+=' /etc/copsec/copsec.env | xargs 2>/dev/null || true)
+fi
+
 command="${svc_bin}"
 command_args="${svc_args}"
 command_background=true
@@ -595,7 +637,7 @@ if [ "$ROLE" = "controller" ] || [ "$ROLE" = "vault-server" ] || [ "$ROLE" = "va
   create_openrc_service "copsec-controller" \
     "CoPSeC Tier 2 Primary Vault & Security Controller" \
     "${BIN_DIR}/copsec-controller" \
-    "--db-path=${DB_PATH} --grpc-port=${GRPC_PORT} --port=${WEB_PORT} --allow-external-bind=true"
+    "--db-path=${DB_PATH} --grpc-port=${GRPC_PORT} --port=${WEB_PORT} --api-key=${API_KEY} --allow-external-bind=true"
 
   rc-update add copsec-controller default
   rc-service copsec-controller restart 2>/dev/null || rc-service copsec-controller start
@@ -605,7 +647,7 @@ elif [ "$ROLE" = "cockpit-proxy" ] || [ "$ROLE" = "cockpit" ]; then
   create_openrc_service "copsec-cockpit" \
     "CoPSeC Tier 3 Central SOC Cockpit Analyst Proxy" \
     "${BIN_DIR}/copsec-cockpit" \
-    "--remote-vault=${CONTROLLER_ADDR} --web-port=${WEB_PORT} --allow-external-bind=true"
+    "--remote-vault=${CONTROLLER_ADDR} --web-port=${WEB_PORT} --api-key=${API_KEY} --allow-external-bind=true"
 
   rc-update add copsec-cockpit default
   rc-service copsec-cockpit restart 2>/dev/null || rc-service copsec-cockpit start
@@ -637,7 +679,7 @@ elif [ "$ROLE" = "standalone" ]; then
   create_openrc_service "copsec-controller" \
     "CoPSeC Standalone Vault & Security Controller" \
     "${BIN_DIR}/copsec-controller" \
-    "--db-path=${DB_PATH} --grpc-port=${GRPC_PORT} --port=${WEB_PORT} --allow-external-bind=true"
+    "--db-path=${DB_PATH} --grpc-port=${GRPC_PORT} --port=${WEB_PORT} --api-key=${API_KEY} --allow-external-bind=true"
 
   STANDALONE_COLL_ARGS="--controller=127.0.0.1:${GRPC_PORT} --interface=${INTERFACE} --xdp-mode=${XDP_MODE} --whitelist-yaml=${WHITELIST_YAML} --node-identity=${NODE_ID_FILE} --ban-reaper-interval=${BAN_REAPER_INTERVAL} --mirror-sock=${MIRROR_SOCK} --enable-tarpit=true --enable-syn-proxy=true"
 
@@ -698,25 +740,42 @@ elif [ "$ROLE" = "collector" ]; then
   fi
 fi
 
+SERVER_IP="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{print $7}' | head -n1 || hostname -i 2>/dev/null | awk '{print $1}' || echo '127.0.0.1')"
+
 echo ""
 printf "${CLR_GREEN}${CLR_BOLD}================================================================================${CLR_RESET}\n"
 printf "${CLR_GREEN}${CLR_BOLD} CoPSeC Pro Alpine Provisioning Complete! Node Role: %s${CLR_RESET}\n" "${ROLE}"
 printf "${CLR_GREEN}${CLR_BOLD}================================================================================${CLR_RESET}\n"
 if [ "$ROLE" = "standalone" ]; then
-  printf "  • Web SOC Cockpit  : ${CLR_WHITE}http://127.0.0.1:%s${CLR_RESET}\n" "${WEB_PORT}"
+  printf "  • Web SOC Cockpit  : ${CLR_WHITE}http://%s:%s${CLR_RESET}\n" "${SERVER_IP}" "${WEB_PORT}"
   printf "  • Local Ingestion  : ${CLR_WHITE}127.0.0.1:%s (gRPC)${CLR_RESET}\n" "${GRPC_PORT}"
   printf "  • eBPF/XDP Device  : ${CLR_WHITE}%s (%s)${CLR_RESET}\n" "${INTERFACE}" "${XDP_MODE}"
   printf "  • SQLite Ledger    : ${CLR_WHITE}%s${CLR_RESET}\n" "${DB_PATH}"
+  printf "  • Master API Key   : ${CLR_YELLOW}${CLR_BOLD}%s${CLR_RESET}\n" "${API_KEY}"
+  printf "  • Direct Login URL : ${CLR_CYAN}http://%s:%s/?token=%s${CLR_RESET}\n" "${SERVER_IP}" "${WEB_PORT}" "${API_KEY}"
+  printf "  • Credential File  : ${CLR_WHITE}/etc/copsec/api_key${CLR_RESET}\n"
   printf "  • Service Status   : ${CLR_CYAN}rc-service copsec-controller status && rc-service copsec-collector status${CLR_RESET}\n"
 elif [ "$ROLE" = "cockpit-proxy" ] || [ "$ROLE" = "cockpit" ]; then
-  printf "  • Analyst Cockpit  : ${CLR_WHITE}http://0.0.0.0:%s${CLR_RESET}\n" "${WEB_PORT}"
+  printf "  • Analyst Cockpit  : ${CLR_WHITE}http://%s:%s${CLR_RESET}\n" "${SERVER_IP}" "${WEB_PORT}"
   printf "  • Remote Vault Hub : ${CLR_WHITE}%s${CLR_RESET}\n" "${CONTROLLER_ADDR}"
   printf "  • Storage Model    : ${CLR_WHITE}Zero-Storage Pure Analyst Mode${CLR_RESET}\n"
+  printf "  • Master API Key   : ${CLR_YELLOW}${CLR_BOLD}%s${CLR_RESET}\n" "${API_KEY}"
+  printf "  • Direct Login URL : ${CLR_CYAN}http://%s:%s/?token=%s${CLR_RESET}\n" "${SERVER_IP}" "${WEB_PORT}" "${API_KEY}"
+  printf "  • Credential File  : ${CLR_WHITE}/etc/copsec/api_key${CLR_RESET}\n"
   printf "  • Service Status   : ${CLR_CYAN}rc-service copsec-cockpit status${CLR_RESET}\n"
-elif [ "$ROLE" = "vault-server" ] || [ "$ROLE" = "vault" ] || [ "$ROLE" = "controller" ]; then
-  printf "  • Web SOC Cockpit  : ${CLR_WHITE}http://0.0.0.0:%s${CLR_RESET}\n" "${WEB_PORT}"
+elif [ "$ROLE" = "vault-server" ] || [ "$ROLE" = "vault" ]; then
+  printf "  • Dedicated Vault  : ${CLR_WHITE}gRPC :%s / REST :%s${CLR_RESET}\n" "${GRPC_PORT}" "${WEB_PORT}"
+  printf "  • SQLite Ledger    : ${CLR_WHITE}%s${CLR_RESET}\n" "${DB_PATH}"
+  printf "  • Master API Key   : ${CLR_YELLOW}${CLR_BOLD}%s${CLR_RESET}\n" "${API_KEY}"
+  printf "  • Credential File  : ${CLR_WHITE}/etc/copsec/api_key${CLR_RESET}\n"
+  printf "  • Service Status   : ${CLR_CYAN}rc-service copsec-controller status${CLR_RESET}\n"
+elif [ "$ROLE" = "controller" ]; then
+  printf "  • Web SOC Cockpit  : ${CLR_WHITE}http://%s:%s${CLR_RESET}\n" "${SERVER_IP}" "${WEB_PORT}"
   printf "  • Fleet Ingestion  : ${CLR_WHITE}gRPC :%s${CLR_RESET}\n" "${GRPC_PORT}"
   printf "  • SQLite Ledger    : ${CLR_WHITE}%s${CLR_RESET}\n" "${DB_PATH}"
+  printf "  • Master API Key   : ${CLR_YELLOW}${CLR_BOLD}%s${CLR_RESET}\n" "${API_KEY}"
+  printf "  • Direct Login URL : ${CLR_CYAN}http://%s:%s/?token=%s${CLR_RESET}\n" "${SERVER_IP}" "${WEB_PORT}" "${API_KEY}"
+  printf "  • Credential File  : ${CLR_WHITE}/etc/copsec/api_key${CLR_RESET}\n"
   printf "  • Service Status   : ${CLR_CYAN}rc-service copsec-controller status${CLR_RESET}\n"
 else
   printf "  • Connected Hub    : ${CLR_WHITE}%s${CLR_RESET}\n" "${CONTROLLER_ADDR}"
@@ -724,5 +783,6 @@ else
   printf "  • Gossip Mesh Port : ${CLR_WHITE}:%s${CLR_RESET}\n" "${GOSSIP_PORT}"
   printf "  • Service Status   : ${CLR_CYAN}rc-service copsec-collector status${CLR_RESET}\n"
 fi
+printf "  • Terminal Support : ${CLR_CYAN}copsec help${CLR_RESET} or ${CLR_CYAN}copsec status${CLR_RESET}\n"
 printf "${CLR_GREEN}${CLR_BOLD}================================================================================${CLR_RESET}\n"
 exit 0

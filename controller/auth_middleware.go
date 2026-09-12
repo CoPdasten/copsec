@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -21,26 +22,64 @@ var (
 )
 
 // InitAPIKey initializes and returns the active API key.
-// Reads COPSEC_API_KEY from the environment.
-// If empty, generates a cryptographically secure 32-byte (64 hex char) fallback key,
-// logs a prominent security warning, but NEVER fails open.
+// Checks COPSEC_API_KEY from environment, then persistent key files (/etc/copsec/api_key, /var/lib/copsec/api_key).
+// If empty, generates a cryptographically secure 32-byte key, attempts to persist it,
+// and logs a prominent security notice with direct single-click login URL.
 func InitAPIKey() string {
 	globalAPIKeyOnce.Do(func() {
 		envKey := strings.TrimSpace(os.Getenv("COPSEC_API_KEY"))
+
+		// If environment variable is empty, check standard persistent key files
+		if envKey == "" {
+			candidates := []string{
+				"/etc/copsec/api_key",
+				"/var/lib/copsec/api_key",
+				"./controller/data/api_key",
+				"./data/api_key",
+			}
+			for _, path := range candidates {
+				if data, err := os.ReadFile(path); err == nil {
+					trimmed := strings.TrimSpace(string(data))
+					if trimmed != "" {
+						envKey = trimmed
+						log.Printf("[AUTH] 🔐 Master API key loaded from persistent file: %s", path)
+						break
+					}
+				}
+			}
+		}
+
 		if envKey != "" {
 			globalAPIKey = envKey
-			log.Printf("[AUTH] 🔐 COPSEC_API_KEY loaded from environment (length: %d chars)", len(envKey))
+			log.Printf("[AUTH] 🔐 Active API Key configured (length: %d chars)", len(envKey))
 		} else {
 			buf := make([]byte, 32)
 			if _, err := rand.Read(buf); err != nil {
 				log.Fatalf("[FATAL] 💥 Failed to generate secure fallback API key: %v", err)
 			}
 			globalAPIKey = hex.EncodeToString(buf)
+
+			// Attempt to persist generated key so restarts do not invalidate credentials
+			persistedPath := ""
+			for _, target := range []string{"/etc/copsec/api_key", "/var/lib/copsec/api_key", "./data/api_key"} {
+				dir := filepath.Dir(target)
+				if err := os.MkdirAll(dir, 0755); err == nil {
+					if err := os.WriteFile(target, []byte(globalAPIKey+"\n"), 0600); err == nil {
+						persistedPath = target
+						break
+					}
+				}
+			}
+
 			log.Printf("================================================================================")
-			log.Printf("[SECURITY WARNING] ⚠️  COPSEC_API_KEY environment variable is not configured!")
-			log.Printf("[SECURITY WARNING] 🔑 Generated ephemeral 32-byte fallback API key:")
-			log.Printf("[SECURITY WARNING]     %s", globalAPIKey)
-			log.Printf("[SECURITY WARNING] Set COPSEC_API_KEY in environment/service to persist credentials.")
+			log.Printf("[SECURITY NOTICE] 🔑 Active Master API key:")
+			log.Printf("[SECURITY NOTICE]     %s", globalAPIKey)
+			if persistedPath != "" {
+				log.Printf("[SECURITY NOTICE] 💾 Persisted to %s for cross-restart continuity", persistedPath)
+			} else {
+				log.Printf("[SECURITY WARNING] ⚠️ Could not write to disk; set COPSEC_API_KEY in environment.")
+			}
+			log.Printf("[SECURITY NOTICE] 🌐 Direct Web SOC URL: http://<SERVER_IP>:8080/?token=%s", globalAPIKey)
 			log.Printf("================================================================================")
 		}
 	})

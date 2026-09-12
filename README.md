@@ -397,6 +397,51 @@ The unified installers accept both `--flag=value` and `--flag value` syntaxes:
 | `--grpc-port=<port>` | `50051` | Controller / Vault | Central gRPC ingestion port |
 | `--port=<port>` | `8080` | Controller / Vault / Cockpit | Web SOC Cockpit HTTP port |
 | `--db-path=<path>` | `/var/lib/copsec/vault.db`| Controller / Vault / Standalone | Immutable SQLite WAL ledger database path |
+| `--api-key=<key>` | Auto-generated (32-byte hex) | Controller / Vault / Standalone | Master API Key for Web SOC & CLI authentication |
+
+---
+
+## ⌨️ Unified CLI Management (`copsec`) & Seamless OTA Updates
+
+CoPSeC installs a standalone, high-performance command-line utility (`/usr/local/bin/copsec`) across all host nodes:
+
+```bash
+# Check cluster status, EPS, active bans, and health
+copsec status
+
+# Show Master API key and one-click Web SOC login URL (prompts for sudo authentication)
+copsec apikey
+
+# Change Master API key (prompts for sudo authentication)
+copsec apikey set <new-secret-key>
+
+# Generate a fresh 32-byte Master API key (prompts for sudo authentication)
+copsec apikey generate
+
+# Seamlessly pull latest GitHub release, recompile & reload daemons
+copsec update
+
+# Check for new upstream releases without applying
+copsec update --check
+
+# Instantly quarantine an attacker IP in kernel XDP/eBPF
+copsec ban 198.51.100.4 1h "DDoS / Port scan anomaly"
+
+# List active kernel bans and remaining TTLs
+copsec bans
+
+# Evict an IP from quarantine
+copsec unban 198.51.100.4
+
+# List active security alerts
+copsec alerts 10
+
+# Inspect connected sensor fleet
+copsec fleet
+
+# Tail service logs
+copsec logs controller -f
+```
 
 ---
 

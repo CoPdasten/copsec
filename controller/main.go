@@ -37,7 +37,13 @@ func main() {
 	autoBan := flag.Bool("auto-ban", true, "Enable autonomous SOAR auto-ban")
 	autoBanThreshold := flag.Int("auto-ban-threshold", 80, "Threat score threshold for auto-ban")
 	remoteVaultFlag := flag.String("remote-vault", "", "Remote Vault / Controller address to proxy telemetry from (e.g. 192.168.1.11:50051 or 192.168.1.11:8080)")
+	apiKeyFlag := flag.String("api-key", "", "Master API Key for Web SOC authentication (or set COPSEC_API_KEY)")
 	flag.Parse()
+
+	if *apiKeyFlag != "" {
+		_ = os.Setenv("COPSEC_API_KEY", *apiKeyFlag)
+		SetActiveAPIKey(*apiKeyFlag)
+	}
 
 	isStandalone := *standaloneFlag || *pcFlag || strings.EqualFold(strings.TrimSpace(*modeFlag), "standalone")
 
