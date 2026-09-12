@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="banner.png" alt="CoPSeC Banner" width="100%" />
+</p>
+
 # CoPSeC — Enterprise Autonomous XDR & Kernel-Level Threat Prevention Platform
 
 > Autonomous, kernel-native intrusion detection, deception honey-tokens, pre-attack PCAP forensics, cryptographic audit chaining, eBPF EDR, and real-time multi-node SOC triage ecosystem built with Go, eBPF/XDP, C++, and SQLite.
