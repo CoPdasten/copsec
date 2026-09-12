@@ -1,0 +1,31 @@
+#!/sbin/openrc-run
+# ==============================================================================
+#  CoPSeC Pro - OpenRC Service: Primary Vault & Controller
+#  Alpine Linux / OpenRC Service Definition
+# ==============================================================================
+
+name="copsec-controller"
+description="CoPSeC Pro Tier 2 Primary Vault & SOC Controller"
+
+: ${COPSEC_BIN:="/opt/copsec/bin/copsec-controller"}
+: ${COPSEC_DB:="/var/lib/copsec/vault.db"}
+: ${COPSEC_GRPC_PORT:="50051"}
+: ${COPSEC_WEB_PORT:="8080"}
+
+command="${COPSEC_BIN}"
+command_args="--db-path=${COPSEC_DB} --grpc-port=${COPSEC_GRPC_PORT} --port=${COPSEC_WEB_PORT} --allow-external-bind=true"
+command_background=true
+pidfile="/run/${RC_SVCNAME}.pid"
+output_log="/var/log/copsec/controller.log"
+error_log="/var/log/copsec/controller.err"
+
+depend() {
+    need net
+    after firewall
+}
+
+start_pre() {
+    checkpath -d -m 0755 -o root:root /var/log/copsec
+    checkpath -d -m 0700 -o root:root /var/lib/copsec
+    checkpath -d -m 0755 -o root:root /run/copsec
+}

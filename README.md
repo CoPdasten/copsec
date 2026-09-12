@@ -359,13 +359,33 @@ curl -fsSL https://raw.githubusercontent.com/CoPdasten/copsec/main/scripts/insta
 
 ---
 
-### ⚙️ Autonomous Installer Options (`scripts/install.sh`)
+### Option 4: Alpine Linux Edge Deployment (Minimal Musl Appliance & OpenRC)
+Engineered for ultra-lightweight edge routers, micro-VMs, Proxmox LXC containers, and Alpine appliances. Runs on musl libc with native OpenRC init scripts, automatic `bpffs` mount persistence, and pure static Go binaries.
 
-The unified installer accepts both `--flag=value` and `--flag value` syntaxes:
+```bash
+# Pure POSIX /bin/sh installer (No bash pre-requisite, BusyBox ash compliant)
+wget -qO- https://raw.githubusercontent.com/CoPdasten/copsec/main/scripts/install-alpine.sh \
+  | sh -s -- --role=collector --controller-ip=<CENTRAL_IP> --interface=eth0
+```
+
+* **Service Management (OpenRC):**
+  ```bash
+  rc-service copsec-collector status
+  rc-service copsec-collector restart
+  rc-update add copsec-collector default
+  ```
+* **Log Inspection:** `/var/log/copsec/collector.log` and `/var/log/copsec/collector.err`
+* **Docker Appliance:** `docker build -f Dockerfile.alpine -t copsec-alpine:latest .`
+
+---
+
+### ⚙️ Autonomous Installer Options (`scripts/install.sh` & `scripts/install-alpine.sh`)
+
+The unified installers accept both `--flag=value` and `--flag value` syntaxes:
 
 | CLI Option | Default | Target Role | Description |
 | :--- | :--- | :--- | :--- |
-| `--role=<standalone\|controller\|collector\|vault-server\|cockpit-proxy>` | `collector` | All | Node role to provision and bind to systemd |
+| `--role=<standalone\|controller\|collector\|vault-server\|cockpit-proxy>` | `collector` | All | Node role to provision and bind to systemd/OpenRC |
 | `--controller-ip=<ip>` | `192.168.1.10` | Collector | Central controller IP address (auto-configures gRPC) |
 | `--vault-ip=<ip>` | `192.168.1.10` | Cockpit Proxy / Collector | Dedicated Vault server IP address |
 | `--controller=<ip:port>` | `<controller-ip>:50051` | Collector | Explicit gRPC server address |

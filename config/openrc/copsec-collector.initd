@@ -1,0 +1,44 @@
+#!/sbin/openrc-run
+# ==============================================================================
+#  CoPSeC Pro - OpenRC Service: Edge Sensor & XDP Collector
+#  Alpine Linux / OpenRC Service Definition
+# ==============================================================================
+
+name="copsec-collector"
+description="CoPSeC Pro Tier 1 Edge Sensor & L7 DPI Collector"
+
+: ${COPSEC_BIN:="/opt/copsec/bin/copsec-collector"}
+: ${COPSEC_CONTROLLER:="127.0.0.1:50051"}
+: ${COPSEC_IFACE:="eth0"}
+: ${COPSEC_XDP_MODE:="native"}
+: ${COPSEC_WHITELIST:="/etc/copsec/whitelist.yaml"}
+: ${COPSEC_NODE_ID:="/etc/copsec/node.json"}
+: ${COPSEC_BAN_REAPER:="15s"}
+: ${COPSEC_MIRROR_SOCK:="/run/copsec/mirror.sock"}
+: ${COPSEC_EXTRA_ARGS:=""}
+
+command="${COPSEC_BIN}"
+command_args="--controller=${COPSEC_CONTROLLER} --interface=${COPSEC_IFACE} --xdp-mode=${COPSEC_XDP_MODE} --whitelist-yaml=${COPSEC_WHITELIST} --node-identity=${COPSEC_NODE_ID} --ban-reaper-interval=${COPSEC_BAN_REAPER} --mirror-sock=${COPSEC_MIRROR_SOCK} --enable-tarpit=true --enable-syn-proxy=true ${COPSEC_EXTRA_ARGS}"
+command_background=true
+pidfile="/run/${RC_SVCNAME}.pid"
+output_log="/var/log/copsec/collector.log"
+error_log="/var/log/copsec/collector.err"
+
+depend() {
+    need net
+    after firewall
+}
+
+start_pre() {
+    checkpath -d -m 0755 -o root:root /var/log/copsec
+    checkpath -d -m 0700 -o root:root /var/lib/copsec
+    checkpath -d -m 0755 -o root:root /run/copsec
+
+    # Ensure bpffs is mounted for kernel telemetry and pin maps
+    if [ ! -d /sys/fs/bpf ]; then
+        mkdir -p /sys/fs/bpf
+    fi
+    if ! mountpoint -q /sys/fs/bpf 2>/dev/null; then
+        mount -t bpf bpf /sys/fs/bpf 2>/dev/null || true
+    fi
+}

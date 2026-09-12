@@ -1,0 +1,27 @@
+#!/sbin/openrc-run
+# ==============================================================================
+#  CoPSeC Pro - OpenRC Service: SOC Cockpit Proxy
+#  Alpine Linux / OpenRC Service Definition
+# ==============================================================================
+
+name="copsec-cockpit"
+description="CoPSeC Pro Tier 3 SOC Cockpit Analyst Proxy"
+
+: ${COPSEC_BIN:="/opt/copsec/bin/copsec-cockpit"}
+: ${COPSEC_REMOTE_VAULT:="192.168.1.10:50051"}
+: ${COPSEC_WEB_PORT:="8080"}
+
+command="${COPSEC_BIN}"
+command_args="--remote-vault=${COPSEC_REMOTE_VAULT} --web-port=${COPSEC_WEB_PORT} --allow-external-bind=true"
+command_background=true
+pidfile="/run/${RC_SVCNAME}.pid"
+output_log="/var/log/copsec/cockpit.log"
+error_log="/var/log/copsec/cockpit.err"
+
+depend() {
+    need net
+}
+
+start_pre() {
+    checkpath -d -m 0755 -o root:root /var/log/copsec
+}

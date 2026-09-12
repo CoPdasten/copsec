@@ -1,0 +1,74 @@
+# ==============================================================================
+#  CoPSeC Pro - Ultra-Lightweight Alpine Linux Container Build
+#  Multi-Stage Musl & eBPF/XDP Appliance (~35 MB Final Image)
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# Stage 1: Build Environment (eBPF LLVM/Clang & Musl-Static Go)
+# ------------------------------------------------------------------------------
+FROM alpine:3.20 AS builder
+
+RUN apk add --no-cache \
+    build-base \
+    clang \
+    llvm \
+    libbpf-dev \
+    linux-headers \
+    elfutils-dev \
+    make \
+    git \
+    go
+
+WORKDIR /src
+COPY . .
+
+# Compile eBPF Bytecode
+RUN mkdir -p /build/bpf /build/bin && \
+    clang -target bpf -O2 -g -Wall -c bpf/copsec_xdp.bpf.c -o /build/bpf/copsec_xdp.bpf.o
+
+# Compile Go Binaries with Pure Static Linkage (CGO_ENABLED=0)
+ENV CGO_ENABLED=0
+RUN cd /src/controller && go build -ldflags="-s -w" -o /build/bin/copsec-controller . && \
+    cp /build/bin/copsec-controller /build/bin/copsec-cockpit && \
+    cd /src/collector && go build -ldflags="-s -w" -o /build/bin/copsec-collector .
+
+# ------------------------------------------------------------------------------
+# Stage 2: Production Minimal Appliance Runtime
+# ------------------------------------------------------------------------------
+FROM alpine:3.20 AS runtime
+
+RUN apk add --no-cache \
+    iproute2 \
+    iptables \
+    sqlite \
+    ca-certificates \
+    curl \
+    openrc
+
+# Production directory structure
+RUN mkdir -p /opt/copsec/bin /etc/copsec /var/lib/copsec /var/log/copsec /run/copsec /sys/fs/bpf && \
+    chmod 755 /opt/copsec/bin /etc/copsec /run/copsec && \
+    chmod 700 /var/lib/copsec && \
+    chmod 750 /var/log/copsec
+
+# Copy compiled binaries and bytecode from builder
+COPY --from=builder /build/bin/copsec-controller /opt/copsec/bin/copsec-controller
+COPY --from=builder /build/bin/copsec-collector /opt/copsec/bin/copsec-collector
+COPY --from=builder /build/bin/copsec-cockpit /opt/copsec/bin/copsec-cockpit
+COPY --from=builder /build/bpf/copsec_xdp.bpf.o /etc/copsec/copsec_xdp.bpf.o
+COPY config/openrc/ /etc/init.d/
+
+RUN chmod +x /etc/init.d/copsec-* && \
+    ln -sf /opt/copsec/bin/copsec-controller /usr/local/bin/copsec-controller && \
+    ln -sf /opt/copsec/bin/copsec-collector /usr/local/bin/copsec-collector && \
+    ln -sf /opt/copsec/bin/copsec-cockpit /usr/local/bin/copsec-cockpit
+
+# Default ports:
+# 8080: Embedded Web SOC Cockpit
+# 50051: gRPC Telemetry Ingestion Hub
+# 7946: Memberlist Gossip Threat Replication
+EXPOSE 8080 50051 7946
+
+# Default entrypoint runs standalone controller
+ENTRYPOINT ["/opt/copsec/bin/copsec-controller"]
+CMD ["--db-path=/var/lib/copsec/vault.db", "--grpc-port=50051", "--port=8080", "--allow-external-bind=true"]

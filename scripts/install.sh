@@ -280,8 +280,22 @@ if [[ ("$ROLE" == "collector" || "$ROLE" == "standalone") && -z "$INTERFACE" ]];
   INTERFACE="${INTERFACE:-eth0}"
 fi
 
+# Detect Operating System & Init System
+OS_FAMILY="linux"
+INIT_SYSTEM="systemd"
+
+if [[ -f /etc/alpine-release ]] || command -v apk &>/dev/null; then
+  OS_FAMILY="alpine"
+  INIT_SYSTEM="openrc"
+elif command -v rc-service &>/dev/null || command -v rc-update &>/dev/null; then
+  INIT_SYSTEM="openrc"
+elif ! command -v systemctl &>/dev/null && [[ -d /etc/init.d ]]; then
+  INIT_SYSTEM="openrc"
+fi
+
 log_info "Active Configuration Profile:"
 log_metric "Assigned Node Role" "${ROLE}"
+log_metric "Host OS / Init Engine" "${OS_FAMILY} (${INIT_SYSTEM})"
 if [[ "$ROLE" == "controller" || "$ROLE" == "vault-server" || "$ROLE" == "vault" ]]; then
   log_metric "gRPC Ingestion Bind" "0.0.0.0:${GRPC_PORT}"
   log_metric "Web SOC Cockpit Bind" "0.0.0.0:${WEB_PORT}"
@@ -333,6 +347,13 @@ elif command -v dnf &>/dev/null; then
   dnf install -y -q clang llvm libbpf-devel elfutils-libelf-devel sqlite iproute iptables openssl git make gcc 2>/dev/null || true
 elif command -v pacman &>/dev/null; then
   pacman -Sy --noconfirm clang llvm libbpf libelf sqlite iproute2 iptables openssl git base-devel 2>/dev/null || true
+elif command -v apk &>/dev/null; then
+  log_info "Alpine Linux detected (apk package manager)..."
+  apk update
+  apk add --no-cache clang llvm libbpf-dev linux-headers elfutils-dev make gcc musl-dev iproute2 iptables openssl git curl bash sqlite
+  if ! command -v go &>/dev/null; then
+    apk add --no-cache go
+  fi
 fi
 
 # Ensure Go toolchain is present for compilation if needed
@@ -360,7 +381,7 @@ log_success "Host dependencies verified."
 # ==============================================================================
 # STEP 2: DIRECTORY HIERARCHY & HARDENING
 # ==============================================================================
-log_step "Step 2: Configuring Production Directory Hierarchy"
+log_step "Step 2: Configuring Production Directory Hierarchy & bpffs"
 BIN_DIR="/opt/copsec/bin"
 CONF_DIR="/etc/copsec"
 DATA_DIR="/var/lib/copsec"
@@ -375,6 +396,17 @@ chmod 700 "$DATA_DIR"
 chmod 750 "$LOG_DIR"
 chmod 700 "$FORENSICS_DIR"
 chmod 755 "$RUN_DIR"
+
+# Ensure eBPF bpffs virtual filesystem is mounted
+mkdir -p /sys/fs/bpf
+if ! mountpoint -q /sys/fs/bpf 2>/dev/null; then
+  log_info "Mounting bpffs at /sys/fs/bpf..."
+  mount -t bpf bpf /sys/fs/bpf 2>/dev/null || true
+fi
+if [[ "$INIT_SYSTEM" == "openrc" ]] && ! grep -q "bpf /sys/fs/bpf" /etc/fstab 2>/dev/null; then
+  log_info "Persisting bpffs in /etc/fstab for OpenRC..."
+  echo "bpf /sys/fs/bpf bpf defaults 0 0" >> /etc/fstab
+fi
 
 log_success "Directory hierarchy ready at /opt/copsec, /etc/copsec, /var/lib/copsec, /var/log/copsec."
 
@@ -391,6 +423,11 @@ fi
 
 # Terminate orphan service processes prior to ignition
 log_info "Evicting previous service instances..."
+if command -v rc-service &>/dev/null; then
+  rc-service copsec-controller stop 2>/dev/null || true
+  rc-service copsec-collector stop 2>/dev/null || true
+  rc-service copsec-cockpit stop 2>/dev/null || true
+fi
 systemctl stop copsec-controller 2>/dev/null || true
 systemctl stop copsec-collector 2>/dev/null || true
 systemctl stop copsec-cockpit 2>/dev/null || true
@@ -435,8 +472,8 @@ install_binary() {
     log_info "Utilizing pre-compiled controller binary for cockpit: ${SRC_ROOT}/bin/copsec-controller"
     cp -f "${SRC_ROOT}/bin/copsec-controller" "$dest_path"
   elif [[ -d "${SRC_ROOT}/${src_subdir}" ]]; then
-    log_info "Compiling ${bin_name} from source (${SRC_ROOT}/${src_subdir})..."
-    export CGO_ENABLED=1
+    log_info "Compiling ${bin_name} from source (${SRC_ROOT}/${src_subdir}) with static CGO_ENABLED=0..."
+    export CGO_ENABLED=0
     (cd "${SRC_ROOT}/${src_subdir}" && go build -ldflags="-s -w" -o "$dest_path" .)
   else
     log_error "Source directory not found: ${SRC_ROOT}/${src_subdir}"
@@ -588,10 +625,63 @@ NODE_EOF
   fi
 }
 
+create_openrc_service() {
+  local svc_name="$1"
+  local svc_desc="$2"
+  local svc_bin="$3"
+  local svc_args="$4"
+
+  cat << OPENRC_EOF > "/etc/init.d/${svc_name}"
+#!/sbin/openrc-run
+
+name="${svc_name}"
+description="${svc_desc}"
+
+command="${svc_bin}"
+command_args="${svc_args}"
+command_background=true
+pidfile="/run/\${RC_SVCNAME}.pid"
+output_log="/var/log/copsec/${svc_name}.log"
+error_log="/var/log/copsec/${svc_name}.err"
+
+depend() {
+    need net
+    after firewall
+}
+
+start_pre() {
+    checkpath -d -m 0755 -o root:root /var/log/copsec
+    checkpath -d -m 0700 -o root:root /var/lib/copsec
+    checkpath -d -m 0755 -o root:root /run/copsec
+
+    if [ ! -d /sys/fs/bpf ]; then
+        mkdir -p /sys/fs/bpf
+    fi
+    if ! mountpoint -q /sys/fs/bpf 2>/dev/null; then
+        mount -t bpf bpf /sys/fs/bpf 2>/dev/null || true
+    fi
+}
+OPENRC_EOF
+  chmod 755 "/etc/init.d/${svc_name}"
+}
+
 if [[ "$ROLE" == "controller" || "$ROLE" == "vault-server" || "$ROLE" == "vault" ]]; then
   init_sqlite_ledger "$DB_PATH"
 
-  cat << SYSTEMD_EOF > /etc/systemd/system/copsec-controller.service
+  if [[ "$INIT_SYSTEM" == "openrc" ]]; then
+    create_openrc_service "copsec-controller" \
+      "CoPSeC Tier 2 Primary Vault & Security Controller" \
+      "${BIN_DIR}/copsec-controller" \
+      "--db-path=${DB_PATH} --grpc-port=${GRPC_PORT} --port=${WEB_PORT} --allow-external-bind=true"
+
+    rc-update add copsec-controller default
+    rc-service copsec-controller restart 2>/dev/null || rc-service copsec-controller start
+    if [[ "$ROLE" == "vault-server" || "$ROLE" == "vault" ]]; then
+      ln -sf /etc/init.d/copsec-controller /etc/init.d/copsec-vault
+    fi
+    log_success "Registered and started OpenRC copsec-controller service."
+  else
+    cat << SYSTEMD_EOF > /etc/systemd/system/copsec-controller.service
 [Unit]
 Description=CoPSeC Tier 2 Primary Vault & Security Controller
 Documentation=https://github.com/CoPdasten/copsec
@@ -617,15 +707,26 @@ StandardError=journal
 WantedBy=multi-user.target
 SYSTEMD_EOF
 
-  systemctl daemon-reload
-  systemctl enable --now copsec-controller.service
-  if [[ "$ROLE" == "vault-server" || "$ROLE" == "vault" ]]; then
-    ln -sf /etc/systemd/system/copsec-controller.service /etc/systemd/system/copsec-vault.service
+    systemctl daemon-reload
+    systemctl enable --now copsec-controller.service
+    if [[ "$ROLE" == "vault-server" || "$ROLE" == "vault" ]]; then
+      ln -sf /etc/systemd/system/copsec-controller.service /etc/systemd/system/copsec-vault.service
+    fi
+    log_success "Registered and started copsec-controller.service."
   fi
-  log_success "Registered and started copsec-controller.service."
 
 elif [[ "$ROLE" == "cockpit-proxy" || "$ROLE" == "cockpit" ]]; then
-  cat << SYSTEMD_EOF > /etc/systemd/system/copsec-cockpit.service
+  if [[ "$INIT_SYSTEM" == "openrc" ]]; then
+    create_openrc_service "copsec-cockpit" \
+      "CoPSeC Tier 3 Central SOC Cockpit Analyst Proxy" \
+      "${BIN_DIR}/copsec-cockpit" \
+      "--remote-vault=${CONTROLLER_ADDR} --web-port=${WEB_PORT} --allow-external-bind=true"
+
+    rc-update add copsec-cockpit default
+    rc-service copsec-cockpit restart 2>/dev/null || rc-service copsec-cockpit start
+    log_success "Registered and started OpenRC copsec-cockpit service."
+  else
+    cat << SYSTEMD_EOF > /etc/systemd/system/copsec-cockpit.service
 [Unit]
 Description=CoPSeC Tier 3 Central SOC Cockpit Analyst Proxy
 Documentation=https://github.com/CoPdasten/copsec
@@ -650,9 +751,10 @@ StandardError=journal
 WantedBy=multi-user.target
 SYSTEMD_EOF
 
-  systemctl daemon-reload
-  systemctl enable --now copsec-cockpit.service
-  log_success "Registered and started copsec-cockpit.service connected to ${CONTROLLER_ADDR}."
+    systemctl daemon-reload
+    systemctl enable --now copsec-cockpit.service
+    log_success "Registered and started copsec-cockpit.service connected to ${CONTROLLER_ADDR}."
+  fi
 
 elif [[ "$ROLE" == "collector" ]]; then
   provision_collector_configs
@@ -662,7 +764,19 @@ elif [[ "$ROLE" == "collector" ]]; then
     GOSSIP_ARGS="${GOSSIP_ARGS} --gossip-join=${GOSSIP_JOIN}"
   fi
 
-  cat << SYSTEMD_EOF > /etc/systemd/system/copsec-collector.service
+  COLL_ARGS="--controller=${CONTROLLER_ADDR} --interface=${INTERFACE} --xdp-mode=${XDP_MODE} --whitelist-yaml=${WHITELIST_YAML} --node-identity=${NODE_ID_FILE} --ban-reaper-interval=${BAN_REAPER_INTERVAL} --mirror-sock=${MIRROR_SOCK} --enable-tarpit=true --enable-syn-proxy=true ${GOSSIP_ARGS}"
+
+  if [[ "$INIT_SYSTEM" == "openrc" ]]; then
+    create_openrc_service "copsec-collector" \
+      "CoPSeC Tier 1 Edge Sensor & L7 DPI Collector" \
+      "${BIN_DIR}/copsec-collector" \
+      "${COLL_ARGS}"
+
+    rc-update add copsec-collector default
+    rc-service copsec-collector restart 2>/dev/null || rc-service copsec-collector start
+    log_success "Registered and started OpenRC copsec-collector service on ${INTERFACE}."
+  else
+    cat << SYSTEMD_EOF > /etc/systemd/system/copsec-collector.service
 [Unit]
 Description=CoPSeC Tier 1 Edge Sensor & L7 DPI Collector
 Documentation=https://github.com/CoPdasten/copsec
@@ -696,16 +810,36 @@ StandardError=journal
 WantedBy=multi-user.target
 SYSTEMD_EOF
 
-  systemctl daemon-reload
-  systemctl enable --now copsec-collector.service
-  log_success "Registered and started copsec-collector.service on ${INTERFACE}."
+    systemctl daemon-reload
+    systemctl enable --now copsec-collector.service
+    log_success "Registered and started copsec-collector.service on ${INTERFACE}."
+  fi
 
 elif [[ "$ROLE" == "standalone" ]]; then
   init_sqlite_ledger "$DB_PATH"
   provision_collector_configs
 
-  # Controller service unit
-  cat << SYSTEMD_EOF > /etc/systemd/system/copsec-controller.service
+  STANDALONE_COLL_ARGS="--controller=127.0.0.1:${GRPC_PORT} --interface=${INTERFACE} --xdp-mode=${XDP_MODE} --whitelist-yaml=${WHITELIST_YAML} --node-identity=${NODE_ID_FILE} --ban-reaper-interval=${BAN_REAPER_INTERVAL} --mirror-sock=${MIRROR_SOCK} --enable-tarpit=true --enable-syn-proxy=true"
+
+  if [[ "$INIT_SYSTEM" == "openrc" ]]; then
+    create_openrc_service "copsec-controller" \
+      "CoPSeC Standalone Vault & Security Controller" \
+      "${BIN_DIR}/copsec-controller" \
+      "--db-path=${DB_PATH} --grpc-port=${GRPC_PORT} --port=${WEB_PORT} --allow-external-bind=true"
+
+    create_openrc_service "copsec-collector" \
+      "CoPSeC Standalone Edge Sensor & L7 DPI Collector" \
+      "${BIN_DIR}/copsec-collector" \
+      "${STANDALONE_COLL_ARGS}"
+
+    rc-update add copsec-controller default
+    rc-update add copsec-collector default
+    rc-service copsec-controller restart 2>/dev/null || rc-service copsec-controller start
+    rc-service copsec-collector restart 2>/dev/null || rc-service copsec-collector start
+    log_success "Registered and started standalone OpenRC copsec-controller and copsec-collector services on ${INTERFACE}."
+  else
+    # Controller service unit
+    cat << SYSTEMD_EOF > /etc/systemd/system/copsec-controller.service
 [Unit]
 Description=CoPSeC Standalone Vault & Security Controller
 Documentation=https://github.com/CoPdasten/copsec
@@ -731,8 +865,8 @@ StandardError=journal
 WantedBy=multi-user.target
 SYSTEMD_EOF
 
-  # Collector service unit pointing to local controller
-  cat << SYSTEMD_EOF > /etc/systemd/system/copsec-collector.service
+    # Collector service unit pointing to local controller
+    cat << SYSTEMD_EOF > /etc/systemd/system/copsec-collector.service
 [Unit]
 Description=CoPSeC Standalone Edge Sensor & L7 DPI Collector
 Documentation=https://github.com/CoPdasten/copsec
@@ -765,9 +899,10 @@ StandardError=journal
 WantedBy=multi-user.target
 SYSTEMD_EOF
 
-  systemctl daemon-reload
-  systemctl enable --now copsec-controller.service copsec-collector.service
-  log_success "Registered and started standalone copsec-controller and copsec-collector services on ${INTERFACE}."
+    systemctl daemon-reload
+    systemctl enable --now copsec-controller.service copsec-collector.service
+    log_success "Registered and started standalone copsec-controller and copsec-collector services on ${INTERFACE}."
+  fi
 fi
 
 # Cleanup temporary checkout if created
@@ -781,67 +916,78 @@ fi
 log_step "Step 6: Verifying Local Service Health"
 sleep 1.5
 
-if [[ "$ROLE" == "standalone" ]]; then
-  for svc in copsec-controller copsec-collector; do
+check_service_health() {
+  local svc="$1"
+  if [[ "$INIT_SYSTEM" == "openrc" ]]; then
+    if rc-service "$svc" status >/dev/null 2>&1; then
+      log_success "OpenRC service ${svc} is ACTIVE and running."
+    else
+      log_warn "OpenRC service ${svc} status check returned non-zero. Recent log entries:"
+      tail -n 10 "/var/log/copsec/${svc}.log" 2>/dev/null || true
+    fi
+  else
     if systemctl is-active --quiet "${svc}.service"; then
       log_success "Unit ${svc}.service is ACTIVE and running."
     else
       log_warn "Unit ${svc}.service status pending. Recent journal entries:"
       journalctl -u "${svc}.service" -n 10 --no-pager || true
     fi
-  done
+  fi
+}
+
+if [[ "$ROLE" == "standalone" ]]; then
+  check_service_health "copsec-controller"
+  check_service_health "copsec-collector"
 elif [[ "$ROLE" == "cockpit-proxy" || "$ROLE" == "cockpit" ]]; then
-  if systemctl is-active --quiet "copsec-cockpit.service"; then
-    log_success "Unit copsec-cockpit.service is ACTIVE and running."
-  else
-    log_warn "Unit copsec-cockpit.service status pending. Recent journal entries:"
-    journalctl -u "copsec-cockpit.service" -n 10 --no-pager || true
-  fi
+  check_service_health "copsec-cockpit"
 elif [[ "$ROLE" == "vault-server" || "$ROLE" == "vault" || "$ROLE" == "controller" ]]; then
-  if systemctl is-active --quiet "copsec-controller.service"; then
-    log_success "Unit copsec-controller.service is ACTIVE and running."
-  else
-    log_warn "Unit copsec-controller.service status pending. Recent journal entries:"
-    journalctl -u "copsec-controller.service" -n 10 --no-pager || true
-  fi
+  check_service_health "copsec-controller"
 elif [[ "$ROLE" == "collector" ]]; then
-  if systemctl is-active --quiet "copsec-collector.service"; then
-    log_success "Unit copsec-collector.service is ACTIVE and running."
-  else
-    log_warn "Unit copsec-collector.service status pending. Recent journal entries:"
-    journalctl -u "copsec-collector.service" -n 10 --no-pager || true
-  fi
+  check_service_health "copsec-collector"
 fi
 
 echo ""
 echo -e "${CLR_GREEN}${CLR_BOLD}================================================================================${CLR_RESET}"
 echo -e "${CLR_GREEN}${CLR_BOLD} CoPSeC Pro Provisioning Complete! Node Role: ${ROLE}${CLR_RESET}"
 echo -e "${CLR_GREEN}${CLR_BOLD}================================================================================${CLR_RESET}"
+
+if [[ "$INIT_SYSTEM" == "openrc" ]]; then
+  SVC_DISPLAY_STANDALONE="rc-service copsec-controller status && rc-service copsec-collector status"
+  SVC_DISPLAY_COCKPIT="rc-service copsec-cockpit status"
+  SVC_DISPLAY_CONTROLLER="rc-service copsec-controller status"
+  SVC_DISPLAY_COLLECTOR="rc-service copsec-collector status"
+else
+  SVC_DISPLAY_STANDALONE="systemctl status copsec-controller copsec-collector"
+  SVC_DISPLAY_COCKPIT="systemctl status copsec-cockpit"
+  SVC_DISPLAY_CONTROLLER="systemctl status copsec-controller"
+  SVC_DISPLAY_COLLECTOR="systemctl status copsec-collector"
+fi
+
 if [[ "$ROLE" == "standalone" ]]; then
   echo -e "  • Web SOC Cockpit  : ${CLR_WHITE}http://127.0.0.1:${WEB_PORT}${CLR_RESET}"
   echo -e "  • Local Ingestion  : ${CLR_WHITE}127.0.0.1:${GRPC_PORT} (gRPC)${CLR_RESET}"
   echo -e "  • eBPF/XDP Device  : ${CLR_WHITE}${INTERFACE} (${XDP_MODE})${CLR_RESET}"
   echo -e "  • SQLite Ledger    : ${CLR_WHITE}${DB_PATH}${CLR_RESET}"
-  echo -e "  • Service Units    : ${CLR_CYAN}systemctl status copsec-controller copsec-collector${CLR_RESET}"
+  echo -e "  • Service Status   : ${CLR_CYAN}${SVC_DISPLAY_STANDALONE}${CLR_RESET}"
 elif [[ "$ROLE" == "cockpit-proxy" || "$ROLE" == "cockpit" ]]; then
   echo -e "  • Analyst Cockpit  : ${CLR_WHITE}http://0.0.0.0:${WEB_PORT}${CLR_RESET}"
   echo -e "  • Remote Vault Hub : ${CLR_WHITE}${CONTROLLER_ADDR}${CLR_RESET}"
   echo -e "  • Storage Model    : ${CLR_WHITE}Zero-Storage Pure Analyst Mode${CLR_RESET}"
-  echo -e "  • Service Unit     : ${CLR_CYAN}systemctl status copsec-cockpit${CLR_RESET}"
+  echo -e "  • Service Status   : ${CLR_CYAN}${SVC_DISPLAY_COCKPIT}${CLR_RESET}"
 elif [[ "$ROLE" == "vault-server" || "$ROLE" == "vault" ]]; then
   echo -e "  • Dedicated Vault  : ${CLR_WHITE}gRPC :${GRPC_PORT} / REST :${WEB_PORT}${CLR_RESET}"
   echo -e "  • SQLite Ledger    : ${CLR_WHITE}${DB_PATH}${CLR_RESET}"
-  echo -e "  • Service Unit     : ${CLR_CYAN}systemctl status copsec-controller${CLR_RESET}"
+  echo -e "  • Service Status   : ${CLR_CYAN}${SVC_DISPLAY_CONTROLLER}${CLR_RESET}"
 elif [[ "$ROLE" == "controller" ]]; then
   echo -e "  • Web SOC Cockpit  : ${CLR_WHITE}http://0.0.0.0:${WEB_PORT}${CLR_RESET}"
   echo -e "  • Fleet Ingestion  : ${CLR_WHITE}gRPC :${GRPC_PORT}${CLR_RESET}"
   echo -e "  • SQLite Ledger    : ${CLR_WHITE}${DB_PATH}${CLR_RESET}"
-  echo -e "  • Service Unit     : ${CLR_CYAN}systemctl status copsec-controller${CLR_RESET}"
+  echo -e "  • Service Status   : ${CLR_CYAN}${SVC_DISPLAY_CONTROLLER}${CLR_RESET}"
 else
   echo -e "  • Connected Hub    : ${CLR_WHITE}${CONTROLLER_ADDR}${CLR_RESET}"
   echo -e "  • eBPF Fast-Path   : ${CLR_WHITE}${INTERFACE} (${XDP_MODE})${CLR_RESET}"
   echo -e "  • Gossip Mesh Port : ${CLR_WHITE}:${GOSSIP_PORT}${CLR_RESET}"
-  echo -e "  • Service Unit     : ${CLR_CYAN}systemctl status copsec-collector${CLR_RESET}"
+  echo -e "  • Service Status   : ${CLR_CYAN}${SVC_DISPLAY_COLLECTOR}${CLR_RESET}"
 fi
 echo -e "${CLR_GREEN}${CLR_BOLD}================================================================================${CLR_RESET}"
 exit 0
