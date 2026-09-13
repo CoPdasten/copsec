@@ -33,10 +33,18 @@ type BanEntry struct {
 }
 
 const (
-	// MaxBannedIPsLRU is the capacity of the kernel BPF_MAP_TYPE_LRU_HASH
+	// MaxBannedIPsLRU is the capacity of the IPv4 kernel BPF_MAP_TYPE_LRU_HASH
 	MaxBannedIPsLRU = 131072
-	// MaxTarpitIPsLRU is the capacity of the kernel tarpit map
+	// MaxBannedIPsV6LRU is the capacity of the IPv6 kernel BPF_MAP_TYPE_LRU_HASH
+	MaxBannedIPsV6LRU = 65536
+	// MaxTarpitIPsLRU is the capacity of the IPv4 kernel tarpit map
 	MaxTarpitIPsLRU = 32768
+	// MaxTarpitIPsV6LRU is the capacity of the IPv6 kernel tarpit map
+	MaxTarpitIPsV6LRU = 16384
+	// MaxWhitelistIPs is the capacity of the IPv4 whitelist map
+	MaxWhitelistIPs = 16384
+	// MaxWhitelistIPsV6 is the capacity of the IPv6 whitelist map
+	MaxWhitelistIPsV6 = 4096
 	// DefaultBPFPinPath defines the standard BPF filesystem pinning root
 	DefaultBPFPinPath = "/sys/fs/bpf/copsec"
 )
@@ -55,10 +63,15 @@ type XDPMitigationEngine struct {
 	active         bool
 	isEmulated     bool
 
-	// cilium/ebpf kernel map handles
-	bpfBannedMap   *ebpf.Map
-	bpfTarpitMap   *ebpf.Map
-	bpfSynProxyMap *ebpf.Map
+	// cilium/ebpf kernel map handles (Dual-Stack IPv4 & IPv6 + RingBufs)
+	bpfBannedMap        *ebpf.Map
+	bpfBannedMapV6      *ebpf.Map
+	bpfTarpitMap        *ebpf.Map
+	bpfTarpitMapV6      *ebpf.Map
+	bpfWhitelistedMap   *ebpf.Map
+	bpfWhitelistedMapV6 *ebpf.Map
+	bpfSynProxyMap      *ebpf.Map
+	bpfRawPacketMap     *ebpf.Map
 }
 
 var (
@@ -120,7 +133,7 @@ func NewXDPMitigationEngine(iface string) *XDPMitigationEngine {
 
 // initKernelMaps attempts to open pinned BPF maps or create them via cilium/ebpf.
 func (x *XDPMitigationEngine) initKernelMaps() {
-	// 1. Try loading pinned banned_ips map
+	// 1. Try loading pinned banned_ips map (IPv4)
 	pinCandidatePaths := []string{
 		filepath.Join(DefaultBPFPinPath, "banned_ips"),
 		"/sys/fs/bpf/banned_ips",
@@ -151,7 +164,34 @@ func (x *XDPMitigationEngine) initKernelMaps() {
 		}
 	}
 
-	// 2. Try loading pinned tarpit map
+	// 1b. Try loading pinned banned_ips_v6 map (IPv6)
+	pinV6CandidatePaths := []string{
+		filepath.Join(DefaultBPFPinPath, "banned_ips_v6"),
+		"/sys/fs/bpf/banned_ips_v6",
+	}
+	for _, p := range pinV6CandidatePaths {
+		if m, err := ebpf.LoadPinnedMap(p, nil); err == nil {
+			x.bpfBannedMapV6 = m
+			log.Printf("[XDP_EBPF] Attached to pinned kernel banned_ips_v6 LRU map at %s", p)
+			break
+		}
+	}
+
+	if x.bpfBannedMapV6 == nil && x.bpfBannedMap != nil {
+		m, err := ebpf.NewMap(&ebpf.MapSpec{
+			Name:       "banned_ips_v6",
+			Type:       ebpf.LRUHash,
+			KeySize:    16,
+			ValueSize:  20,
+			MaxEntries: MaxBannedIPsV6LRU,
+		})
+		if err == nil {
+			x.bpfBannedMapV6 = m
+			log.Printf("[XDP_EBPF] Created standalone in-kernel BPF_MAP_TYPE_LRU_HASH for banned_ips_v6")
+		}
+	}
+
+	// 2. Try loading pinned tarpit map (IPv4)
 	tarpitPins := []string{
 		filepath.Join(DefaultBPFPinPath, "tarpit_ips"),
 		"/sys/fs/bpf/tarpit_ips",
@@ -176,6 +216,105 @@ func (x *XDPMitigationEngine) initKernelMaps() {
 			x.bpfTarpitMap = m
 		}
 	}
+
+	// 2b. Try loading pinned tarpit_ips_v6 map (IPv6)
+	tarpitV6Pins := []string{
+		filepath.Join(DefaultBPFPinPath, "tarpit_ips_v6"),
+		"/sys/fs/bpf/tarpit_ips_v6",
+	}
+	for _, p := range tarpitV6Pins {
+		if m, err := ebpf.LoadPinnedMap(p, nil); err == nil {
+			x.bpfTarpitMapV6 = m
+			log.Printf("[XDP_EBPF] Attached to pinned kernel tarpit_ips_v6 LRU map at %s", p)
+			break
+		}
+	}
+
+	if x.bpfTarpitMapV6 == nil && x.bpfBannedMap != nil {
+		m, err := ebpf.NewMap(&ebpf.MapSpec{
+			Name:       "tarpit_ips_v6",
+			Type:       ebpf.LRUHash,
+			KeySize:    16,
+			ValueSize:  4,
+			MaxEntries: MaxTarpitIPsV6LRU,
+		})
+		if err == nil {
+			x.bpfTarpitMapV6 = m
+		}
+	}
+
+	// 3. Try loading pinned whitelisted_ips map (IPv4)
+	whitelistPins := []string{
+		filepath.Join(DefaultBPFPinPath, "whitelisted_ips"),
+		"/sys/fs/bpf/whitelisted_ips",
+	}
+	for _, p := range whitelistPins {
+		if m, err := ebpf.LoadPinnedMap(p, nil); err == nil {
+			x.bpfWhitelistedMap = m
+			log.Printf("[XDP_EBPF] Attached to pinned kernel whitelisted_ips map at %s", p)
+			break
+		}
+	}
+
+	if x.bpfWhitelistedMap == nil && x.bpfBannedMap != nil {
+		m, err := ebpf.NewMap(&ebpf.MapSpec{
+			Name:       "whitelisted_ips",
+			Type:       ebpf.Hash,
+			KeySize:    4,
+			ValueSize:  4,
+			MaxEntries: MaxWhitelistIPs,
+		})
+		if err == nil {
+			x.bpfWhitelistedMap = m
+		}
+	}
+
+	// 3b. Try loading pinned whitelisted_ips_v6 map (IPv6)
+	whitelistV6Pins := []string{
+		filepath.Join(DefaultBPFPinPath, "whitelisted_ips_v6"),
+		"/sys/fs/bpf/whitelisted_ips_v6",
+	}
+	for _, p := range whitelistV6Pins {
+		if m, err := ebpf.LoadPinnedMap(p, nil); err == nil {
+			x.bpfWhitelistedMapV6 = m
+			log.Printf("[XDP_EBPF] Attached to pinned kernel whitelisted_ips_v6 map at %s", p)
+			break
+		}
+	}
+
+	if x.bpfWhitelistedMapV6 == nil && x.bpfBannedMap != nil {
+		m, err := ebpf.NewMap(&ebpf.MapSpec{
+			Name:       "whitelisted_ips_v6",
+			Type:       ebpf.Hash,
+			KeySize:    16,
+			ValueSize:  4,
+			MaxEntries: MaxWhitelistIPsV6,
+		})
+		if err == nil {
+			x.bpfWhitelistedMapV6 = m
+		}
+	}
+
+	// 4. Try loading pinned raw_packet_ringbuf
+	rawPacketPins := []string{
+		filepath.Join(DefaultBPFPinPath, "raw_packet_ringbuf"),
+		"/sys/fs/bpf/raw_packet_ringbuf",
+	}
+	for _, p := range rawPacketPins {
+		if m, err := ebpf.LoadPinnedMap(p, nil); err == nil {
+			x.bpfRawPacketMap = m
+			log.Printf("[XDP_EBPF] Attached to pinned kernel raw_packet_ringbuf at %s", p)
+			break
+		}
+	}
+}
+
+func isIPv6(ipStr string) bool {
+	parsed := net.ParseIP(strings.TrimSpace(ipStr))
+	if parsed == nil {
+		return false
+	}
+	return parsed.To4() == nil && parsed.To16() != nil
 }
 
 func ipToUint32(ipStr string) (uint32, error) {
@@ -186,19 +325,42 @@ func ipToUint32(ipStr string) (uint32, error) {
 	return binary.NativeEndian.Uint32(parsed), nil
 }
 
-// AddBan injects an IPv4 address directly into the eBPF xdp_drop_map with default permanent/indefinite TTL.
+func ipToV6Key(ipStr string) ([16]byte, error) {
+	parsed := net.ParseIP(strings.TrimSpace(ipStr))
+	if parsed == nil {
+		return [16]byte{}, fmt.Errorf("invalid IP address: %s", ipStr)
+	}
+	v6 := parsed.To16()
+	if v6 == nil || parsed.To4() != nil {
+		return [16]byte{}, fmt.Errorf("invalid IPv6 address: %s", ipStr)
+	}
+	var key [16]byte
+	copy(key[:], v6)
+	return key, nil
+}
+
+// AddBan injects an IPv4 or IPv6 address directly into the eBPF drop map with default permanent/indefinite TTL.
 func (x *XDPMitigationEngine) AddBan(ipStr string) error {
 	return x.AddBanWithTTL(ipStr, 0, 0, "L7/L4 Fast-Path Quarantine")
 }
 
-// AddBanWithTTL injects an IP into the eBPF banned_ips LRU map with dynamic TTL and reason metadata.
+// AddBanWithTTL injects an IP into the eBPF banned_ips or banned_ips_v6 LRU map with dynamic TTL and reason metadata.
 func (x *XDPMitigationEngine) AddBanWithTTL(ipStr string, ttl time.Duration, reasonCode uint32, reason string) error {
-	ipStr = strings.TrimSpace(ipStr)
-	if ipStr == "" {
+	cleanIP := strings.TrimSpace(ipStr)
+	if cleanIP == "" {
 		return fmt.Errorf("empty IP address")
 	}
 
-	ipKey, err := ipToUint32(ipStr)
+	isV6 := isIPv6(cleanIP)
+	var v4Key uint32
+	var v6Key [16]byte
+	var err error
+
+	if isV6 {
+		v6Key, err = ipToV6Key(cleanIP)
+	} else {
+		v4Key, err = ipToUint32(cleanIP)
+	}
 	if err != nil {
 		return err
 	}
@@ -219,14 +381,22 @@ func (x *XDPMitigationEngine) AddBanWithTTL(ipStr string, ttl time.Duration, rea
 	}
 
 	// In-kernel BPF LRU map insertion
-	if x.bpfBannedMap != nil {
-		if err := x.bpfBannedMap.Put(ipKey, kEntry); err != nil {
-			log.Printf("[WARN][XDP_EBPF] Failed to update in-kernel banned_ips map: %v", err)
+	if isV6 {
+		if x.bpfBannedMapV6 != nil {
+			if err := x.bpfBannedMapV6.Put(v6Key, kEntry); err != nil {
+				log.Printf("[WARN][XDP_EBPF] Failed to update in-kernel banned_ips_v6 map: %v", err)
+			}
+		}
+	} else {
+		if x.bpfBannedMap != nil {
+			if err := x.bpfBannedMap.Put(v4Key, kEntry); err != nil {
+				log.Printf("[WARN][XDP_EBPF] Failed to update in-kernel banned_ips map: %v", err)
+			}
 		}
 	}
 
 	entry := BanEntry{
-		IP:             ipStr,
+		IP:             cleanIP,
 		BanTimestampNs: nowNs,
 		TTLNs:          ttlNs,
 		ReasonCode:     reasonCode,
@@ -242,18 +412,31 @@ func (x *XDPMitigationEngine) AddBanWithTTL(ipStr string, ttl time.Duration, rea
 		}
 	}
 
-	x.bannedIPs[ipStr] = true
-	x.banEntries[ipStr] = entry
+	x.bannedIPs[cleanIP] = true
+	x.banEntries[cleanIP] = entry
 	atomic.AddUint64(&x.droppedPackets, 1)
 
-	log.Printf("[XDP_EBPF] ⚡ Injected IP %s into BPF banned_ips LRU map (TTL: %v, Reason: %q)", ipStr, ttl, reason)
+	log.Printf("[XDP_EBPF] ⚡ Injected IP %s into BPF banned_ips LRU map (TTL: %v, Reason: %q)", cleanIP, ttl, reason)
 	return nil
 }
 
-// RemoveBan purges an IP from the eBPF drop map.
+// RemoveBan purges an IP from the eBPF drop maps.
 func (x *XDPMitigationEngine) RemoveBan(ipStr string) error {
-	ipStr = strings.TrimSpace(ipStr)
-	ipKey, err := ipToUint32(ipStr)
+	cleanIP := strings.TrimSpace(ipStr)
+	if cleanIP == "" {
+		return fmt.Errorf("empty IP address")
+	}
+
+	isV6 := isIPv6(cleanIP)
+	var v4Key uint32
+	var v6Key [16]byte
+	var err error
+
+	if isV6 {
+		v6Key, err = ipToV6Key(cleanIP)
+	} else {
+		v4Key, err = ipToUint32(cleanIP)
+	}
 	if err != nil {
 		return err
 	}
@@ -261,36 +444,50 @@ func (x *XDPMitigationEngine) RemoveBan(ipStr string) error {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 
-	if x.bpfBannedMap != nil {
-		_ = x.bpfBannedMap.Delete(ipKey)
+	if isV6 {
+		if x.bpfBannedMapV6 != nil {
+			_ = x.bpfBannedMapV6.Delete(v6Key)
+		}
+	} else {
+		if x.bpfBannedMap != nil {
+			_ = x.bpfBannedMap.Delete(v4Key)
+		}
 	}
 
-	if !x.bannedIPs[ipStr] {
+	if !x.bannedIPs[cleanIP] {
 		return nil
 	}
 
-	delete(x.bannedIPs, ipStr)
-	delete(x.banEntries, ipStr)
-	log.Printf("[XDP_EBPF] 🟢 Purged IP %s from BPF banned_ips map", ipStr)
+	delete(x.bannedIPs, cleanIP)
+	delete(x.banEntries, cleanIP)
+	log.Printf("[XDP_EBPF] 🟢 Purged IP %s from BPF banned_ips map", cleanIP)
 	return nil
 }
 
-// Flush clears all banned addresses from the eBPF drop map.
+// Flush clears all banned addresses from the eBPF drop maps.
 func (x *XDPMitigationEngine) Flush() error {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 
-	if x.bpfBannedMap != nil {
-		for ipStr := range x.bannedIPs {
-			if ipKey, err := ipToUint32(ipStr); err == nil {
-				_ = x.bpfBannedMap.Delete(ipKey)
+	for ipStr := range x.bannedIPs {
+		if isIPv6(ipStr) {
+			if x.bpfBannedMapV6 != nil {
+				if v6Key, err := ipToV6Key(ipStr); err == nil {
+					_ = x.bpfBannedMapV6.Delete(v6Key)
+				}
+			}
+		} else {
+			if x.bpfBannedMap != nil {
+				if v4Key, err := ipToUint32(ipStr); err == nil {
+					_ = x.bpfBannedMap.Delete(v4Key)
+				}
 			}
 		}
 	}
 
 	x.bannedIPs = make(map[string]bool)
 	x.banEntries = make(map[string]BanEntry)
-	log.Println("[XDP_EBPF] 🧹 Flushed all entries from BPF banned_ips map")
+	log.Println("[XDP_EBPF] 🧹 Flushed all entries from BPF banned_ips maps")
 	return nil
 }
 
@@ -314,9 +511,17 @@ func (x *XDPMitigationEngine) IsBanned(ipStr string) bool {
 			x.mu.Lock()
 			delete(x.bannedIPs, cleanIP)
 			delete(x.banEntries, cleanIP)
-			if x.bpfBannedMap != nil {
-				if ipKey, err := ipToUint32(cleanIP); err == nil {
-					_ = x.bpfBannedMap.Delete(ipKey)
+			if isIPv6(cleanIP) {
+				if x.bpfBannedMapV6 != nil {
+					if v6Key, err := ipToV6Key(cleanIP); err == nil {
+						_ = x.bpfBannedMapV6.Delete(v6Key)
+					}
+				}
+			} else {
+				if x.bpfBannedMap != nil {
+					if v4Key, err := ipToUint32(cleanIP); err == nil {
+						_ = x.bpfBannedMap.Delete(v4Key)
+					}
 				}
 			}
 			x.mu.Unlock()
@@ -330,7 +535,16 @@ func (x *XDPMitigationEngine) IsBanned(ipStr string) bool {
 // AddTarpit marks an IP for asymmetric Zero-Window Tarpit defense (XDP_TX win=0).
 func (x *XDPMitigationEngine) AddTarpit(ipStr string) error {
 	cleanIP := strings.TrimSpace(ipStr)
-	ipKey, err := ipToUint32(cleanIP)
+	isV6 := isIPv6(cleanIP)
+	var v4Key uint32
+	var v6Key [16]byte
+	var err error
+
+	if isV6 {
+		v6Key, err = ipToV6Key(cleanIP)
+	} else {
+		v4Key, err = ipToUint32(cleanIP)
+	}
 	if err != nil {
 		return err
 	}
@@ -338,9 +552,15 @@ func (x *XDPMitigationEngine) AddTarpit(ipStr string) error {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 
-	if x.bpfTarpitMap != nil {
-		var activeVal uint32 = 1
-		_ = x.bpfTarpitMap.Put(ipKey, activeVal)
+	var activeVal uint32 = 1
+	if isV6 {
+		if x.bpfTarpitMapV6 != nil {
+			_ = x.bpfTarpitMapV6.Put(v6Key, activeVal)
+		}
+	} else {
+		if x.bpfTarpitMap != nil {
+			_ = x.bpfTarpitMap.Put(v4Key, activeVal)
+		}
 	}
 
 	x.tarpitIPs[cleanIP] = true
@@ -352,7 +572,16 @@ func (x *XDPMitigationEngine) AddTarpit(ipStr string) error {
 // RemoveTarpit removes an IP from the active tarpit registry.
 func (x *XDPMitigationEngine) RemoveTarpit(ipStr string) error {
 	cleanIP := strings.TrimSpace(ipStr)
-	ipKey, err := ipToUint32(cleanIP)
+	isV6 := isIPv6(cleanIP)
+	var v4Key uint32
+	var v6Key [16]byte
+	var err error
+
+	if isV6 {
+		v6Key, err = ipToV6Key(cleanIP)
+	} else {
+		v4Key, err = ipToUint32(cleanIP)
+	}
 	if err != nil {
 		return err
 	}
@@ -360,8 +589,14 @@ func (x *XDPMitigationEngine) RemoveTarpit(ipStr string) error {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 
-	if x.bpfTarpitMap != nil {
-		_ = x.bpfTarpitMap.Delete(ipKey)
+	if isV6 {
+		if x.bpfTarpitMapV6 != nil {
+			_ = x.bpfTarpitMapV6.Delete(v6Key)
+		}
+	} else {
+		if x.bpfTarpitMap != nil {
+			_ = x.bpfTarpitMap.Delete(v4Key)
+		}
 	}
 
 	delete(x.tarpitIPs, cleanIP)
@@ -382,10 +617,18 @@ func (x *XDPMitigationEngine) FlushTarpit() error {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 
-	if x.bpfTarpitMap != nil {
-		for ipStr := range x.tarpitIPs {
-			if ipKey, err := ipToUint32(ipStr); err == nil {
-				_ = x.bpfTarpitMap.Delete(ipKey)
+	for ipStr := range x.tarpitIPs {
+		if isIPv6(ipStr) {
+			if x.bpfTarpitMapV6 != nil {
+				if v6Key, err := ipToV6Key(ipStr); err == nil {
+					_ = x.bpfTarpitMapV6.Delete(v6Key)
+				}
+			}
+		} else {
+			if x.bpfTarpitMap != nil {
+				if v4Key, err := ipToUint32(ipStr); err == nil {
+					_ = x.bpfTarpitMap.Delete(v4Key)
+				}
 			}
 		}
 	}
@@ -453,8 +696,34 @@ func (x *XDPMitigationEngine) AddWhitelistIP(ipStr string) error {
 		return fmt.Errorf("invalid IP format: %s", cleanIP)
 	}
 
+	isV6 := isIPv6(cleanIP)
+	var v4Key uint32
+	var v6Key [16]byte
+	var err error
+
+	if isV6 {
+		v6Key, err = ipToV6Key(cleanIP)
+	} else {
+		v4Key, err = ipToUint32(cleanIP)
+	}
+	if err != nil {
+		return err
+	}
+
 	x.mu.Lock()
 	defer x.mu.Unlock()
+
+	var bypassVal uint32 = 1
+	if isV6 {
+		if x.bpfWhitelistedMapV6 != nil {
+			_ = x.bpfWhitelistedMapV6.Put(v6Key, bypassVal)
+		}
+	} else {
+		if x.bpfWhitelistedMap != nil {
+			_ = x.bpfWhitelistedMap.Put(v4Key, bypassVal)
+		}
+	}
+
 	x.whitelistedIPs[cleanIP] = true
 	log.Printf("[XDP_EBPF] 🛡️ Injected IP %s into BPF whitelisted_ips fast-bypass map", cleanIP)
 	return nil
@@ -463,8 +732,37 @@ func (x *XDPMitigationEngine) AddWhitelistIP(ipStr string) error {
 // RemoveWhitelistIP removes an IP from the eBPF whitelisted_ips map.
 func (x *XDPMitigationEngine) RemoveWhitelistIP(ipStr string) error {
 	cleanIP := strings.TrimSpace(ipStr)
+	if net.ParseIP(cleanIP) == nil {
+		return fmt.Errorf("invalid IP format: %s", cleanIP)
+	}
+
+	isV6 := isIPv6(cleanIP)
+	var v4Key uint32
+	var v6Key [16]byte
+	var err error
+
+	if isV6 {
+		v6Key, err = ipToV6Key(cleanIP)
+	} else {
+		v4Key, err = ipToUint32(cleanIP)
+	}
+	if err != nil {
+		return err
+	}
+
 	x.mu.Lock()
 	defer x.mu.Unlock()
+
+	if isV6 {
+		if x.bpfWhitelistedMapV6 != nil {
+			_ = x.bpfWhitelistedMapV6.Delete(v6Key)
+		}
+	} else {
+		if x.bpfWhitelistedMap != nil {
+			_ = x.bpfWhitelistedMap.Delete(v4Key)
+		}
+	}
+
 	delete(x.whitelistedIPs, cleanIP)
 	log.Printf("[XDP_EBPF] Purged IP %s from BPF whitelisted_ips map", cleanIP)
 	return nil
@@ -495,6 +793,13 @@ func (x *XDPMitigationEngine) GetActiveBansCount() int {
 	return len(x.bannedIPs)
 }
 
+// GetRawPacketMap returns the auxiliary raw packet ring buffer map if available.
+func (x *XDPMitigationEngine) GetRawPacketMap() *ebpf.Map {
+	x.mu.RLock()
+	defer x.mu.RUnlock()
+	return x.bpfRawPacketMap
+}
+
 // Close detaches the XDP program and releases BPF map resources.
 func (x *XDPMitigationEngine) Close() error {
 	x.mu.Lock()
@@ -502,18 +807,39 @@ func (x *XDPMitigationEngine) Close() error {
 	x.active = false
 	x.bannedIPs = make(map[string]bool)
 	x.tarpitIPs = make(map[string]bool)
+	x.whitelistedIPs = make(map[string]bool)
 
 	if x.bpfBannedMap != nil {
 		_ = x.bpfBannedMap.Close()
 		x.bpfBannedMap = nil
 	}
+	if x.bpfBannedMapV6 != nil {
+		_ = x.bpfBannedMapV6.Close()
+		x.bpfBannedMapV6 = nil
+	}
 	if x.bpfTarpitMap != nil {
 		_ = x.bpfTarpitMap.Close()
 		x.bpfTarpitMap = nil
 	}
+	if x.bpfTarpitMapV6 != nil {
+		_ = x.bpfTarpitMapV6.Close()
+		x.bpfTarpitMapV6 = nil
+	}
+	if x.bpfWhitelistedMap != nil {
+		_ = x.bpfWhitelistedMap.Close()
+		x.bpfWhitelistedMap = nil
+	}
+	if x.bpfWhitelistedMapV6 != nil {
+		_ = x.bpfWhitelistedMapV6.Close()
+		x.bpfWhitelistedMapV6 = nil
+	}
 	if x.bpfSynProxyMap != nil {
 		_ = x.bpfSynProxyMap.Close()
 		x.bpfSynProxyMap = nil
+	}
+	if x.bpfRawPacketMap != nil {
+		_ = x.bpfRawPacketMap.Close()
+		x.bpfRawPacketMap = nil
 	}
 
 	log.Println("[XDP_EBPF] Detached XDP mitigation program and closed kernel maps")

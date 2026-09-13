@@ -1635,6 +1635,119 @@ func TestWhitelistAPICRUD(t *testing.T) {
 	}
 }
 
+func TestPcapSamplesAPI(t *testing.T) {
+	tmpDir := t.TempDir()
+	store, err := NewStorageEngine(filepath.Join(tmpDir, "test_pcap.db"))
+	if err != nil {
+		t.Fatalf("Failed to init storage: %v", err)
+	}
+	defer store.Close()
+
+	analyzer := NewRuleEngine("")
+	server := NewCentralServer(store, analyzer)
+	ttlMgr := NewTTLBanManager(store, server)
+	defer ttlMgr.Stop()
+	wsHub := NewWSHub()
+	webSoc := NewWebSOCServer(":0", server, store, ttlMgr, nil, wsHub)
+
+	// 1. Insert dual-stack raw packet samples
+	v4Sample := &StoredEvent{
+		NodeID:      "node-edge-1",
+		Source:      "ebpf_pcap",
+		ClientIP:    "198.51.100.42",
+		RawLine:     "[PCAP_SAMPLE] src_ip=198.51.100.42 src_port=44332 proto=6 reason=SYN_FLOOD cap_len=16 wire_len=64 hex=474554202f20485454502f312e310d0a",
+		TimestampMs: time.Now().UnixMilli(),
+		RuleID:      "pcap_syn_flood",
+		ThreatScore: 85,
+	}
+	v6Sample := &StoredEvent{
+		NodeID:      "node-edge-1",
+		Source:      "ebpf_pcap",
+		ClientIP:    "fd00::12",
+		RawLine:     "[PCAP_SAMPLE] src_ip=fd00::12 src_port=55123 proto=17 reason=ENTROPY_ANOMALY cap_len=8 wire_len=128 hex=deadbeefcafebabe",
+		TimestampMs: time.Now().UnixMilli(),
+		RuleID:      "pcap_entropy_anomaly",
+		ThreatScore: 90,
+	}
+
+	if err := store.InsertEvent(v4Sample); err != nil {
+		t.Fatalf("Failed to insert v4 pcap sample: %v", err)
+	}
+	if err := store.InsertEvent(v6Sample); err != nil {
+		t.Fatalf("Failed to insert v6 pcap sample: %v", err)
+	}
+
+	// 2. Query GET /api/pcap/samples
+	req := httptest.NewRequest("GET", "/api/pcap/samples?limit=10", nil)
+	rec := httptest.NewRecorder()
+	webSoc.handlePcapSamples(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK from /api/pcap/samples, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp struct {
+		Success bool `json:"success"`
+		Count   int  `json:"count"`
+		Samples []struct {
+			SourceIP   string `json:"source_ip"`
+			SourcePort int    `json:"source_port"`
+			Protocol   string `json:"protocol"`
+			DropReason string `json:"drop_reason"`
+			IPVersion  string `json:"ip_version"`
+			CaptureLen int    `json:"capture_len"`
+			WireLen    int    `json:"wire_len"`
+			HexData    string `json:"hex_data"`
+			HexDump    string `json:"hex_dump"`
+		} `json:"samples"`
+	}
+
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("Failed to parse /api/pcap/samples response: %v", err)
+	}
+
+	if !resp.Success || resp.Count != 2 {
+		t.Fatalf("Expected 2 samples, got count=%d, success=%v", resp.Count, resp.Success)
+	}
+
+	// Verify sample fields
+	foundV6 := false
+	foundV4 := false
+	for _, s := range resp.Samples {
+		if s.SourceIP == "fd00::12" {
+			foundV6 = true
+			if s.IPVersion != "IPv6" {
+				t.Errorf("Expected IPv6, got %s", s.IPVersion)
+			}
+			if s.Protocol != "UDP" {
+				t.Errorf("Expected UDP, got %s", s.Protocol)
+			}
+			if s.DropReason != "ENTROPY_ANOMALY" {
+				t.Errorf("Expected ENTROPY_ANOMALY, got %s", s.DropReason)
+			}
+			if !strings.Contains(s.HexDump, "de ad be ef") {
+				t.Errorf("Expected hex dump to contain formatted bytes, got:\n%s", s.HexDump)
+			}
+		}
+		if s.SourceIP == "198.51.100.42" {
+			foundV4 = true
+			if s.IPVersion != "IPv4" {
+				t.Errorf("Expected IPv4, got %s", s.IPVersion)
+			}
+			if s.Protocol != "TCP" {
+				t.Errorf("Expected TCP, got %s", s.Protocol)
+			}
+			if s.DropReason != "SYN_FLOOD" {
+				t.Errorf("Expected SYN_FLOOD, got %s", s.DropReason)
+			}
+		}
+	}
+
+	if !foundV6 || !foundV4 {
+		t.Errorf("Dual-stack samples not properly parsed: v4=%v, v6=%v", foundV4, foundV6)
+	}
+}
+
 
 
 

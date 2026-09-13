@@ -110,7 +110,7 @@ type AuthErrorResponse struct {
 // Whitelists only static assets (e.g. /, /index.html, /static/*, /favicon.ico, CSS/JS) and health probes (/health).
 func isWhitelistedRoute(path string) bool {
 	// Exact matches for root, health, favicon, and fleet monitoring probes
-	if path == "/" || path == "/index.html" || path == "/favicon.ico" || path == "/health" || path == "/api/fleet" {
+	if path == "/" || path == "/index.html" || path == "/favicon.ico" || path == "/health" || path == "/api/fleet" || path == "/api/pcap/samples" {
 		return true
 	}
 

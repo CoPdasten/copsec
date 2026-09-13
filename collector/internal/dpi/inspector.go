@@ -274,7 +274,11 @@ func (insp *DPIInspector) triggerDropReactions(res InspectionResult) {
 
 	// 1. Immediate eBPF/XDP Fast-Path Drop (NIC Driver Ring Buffer)
 	if insp.config.EnableeBPFBan && insp.xdpEngine != nil && srcIP != "" {
-		_ = insp.xdpEngine.AddBan(srcIP)
+		ruleDesc := res.Reason
+		if res.MatchedRule != nil && res.MatchedRule.Name != "" {
+			ruleDesc = res.MatchedRule.Name
+		}
+		_ = insp.xdpEngine.AddBanWithTTL(srcIP, 1*time.Hour, 2, "L7 DPI: "+ruleDesc)
 	}
 
 	// 2. Asynchronous RAM Ring Buffer Dump to /var/log/copsec/forensics/incident_<IP>_<TIMESTAMP>.pcap

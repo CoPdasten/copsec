@@ -590,6 +590,85 @@
     }
     input:checked + .slider { background-color: #f4f4f5; border-color: #ffffff; }
     input:checked + .slider:before { transform: translateX(14px); background-color: #000000; }
+
+    /* Wireshark Hex & ASCII Layer Inspector */
+    .layer-l2 {
+      color: #94a3b8;
+    }
+    .layer-l3 {
+      color: #60a5fa;
+    }
+    .layer-l4 {
+      color: #34d399;
+    }
+    .layer-l7 {
+      color: #fbbf24;
+    }
+    .hex-byte, .ascii-char {
+      display: inline-block;
+      cursor: pointer;
+      border-radius: 2px;
+      transition: background 0.05s ease, color 0.05s ease;
+      user-select: text;
+    }
+    .hex-byte {
+      width: 2.1ch;
+      text-align: center;
+      margin-right: 0.5ch;
+    }
+    .ascii-char {
+      width: 1ch;
+      text-align: center;
+    }
+    .byte-highlight {
+      background-color: #ffffff !important;
+      color: #000000 !important;
+      font-weight: 700;
+      box-shadow: 0 0 6px #ffffff;
+    }
+    .pcap-filter-bar {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      background: #09090b;
+      padding: 8px 12px;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      margin-top: 12px;
+      margin-bottom: 8px;
+      flex-wrap: wrap;
+    }
+    .pcap-filter-input {
+      flex: 1;
+      min-width: 280px;
+      background: #000000;
+      border: 1px solid var(--border);
+      color: #00d9ff;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      padding: 6px 10px;
+      border-radius: 3px;
+    }
+    .pcap-filter-input:focus {
+      outline: none;
+      border-color: #00d9ff;
+      box-shadow: 0 0 8px rgba(0, 217, 255, 0.3);
+    }
+    .preset-btn {
+      background: #18181b;
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      font-size: 10px;
+      padding: 3px 8px;
+      cursor: pointer;
+      border-radius: 2px;
+      transition: all 0.15s ease;
+    }
+    .preset-btn:hover, .preset-btn.active {
+      color: #ffffff;
+      border-color: #ffffff;
+      background: #27272a;
+    }
   </style>
 </head>
 <body>
@@ -1125,6 +1204,95 @@
             <tr><td colspan="6" style="text-align: center; color: var(--text-muted); padding: 18px;">No pre-attack PCAP snapshots captured yet</td></tr>
           </tbody>
         </table>
+      </div>
+
+      <!-- Live eBPF Forensics Raw Packet Stream -->
+      <div class="toolbar" style="margin-top: 24px;">
+        <div class="toolbar-left">
+          <span style="font-weight: 600; color: var(--accent); font-size: 13px;">⚡ LIVE eBPF RAW PACKET STREAM (512KB RingBuffer)</span>
+          <span style="color: var(--text-muted); font-size: 11px; margin-left: 12px;">Real-time dual-stack packet sampling (first 128 bytes) intercepted by kernel fast-path</span>
+        </div>
+        <div class="toolbar-right">
+          <span class="badge" id="pcapStreamStatusBadge" style="background: rgba(0, 255, 157, 0.15); color: #00ff9d; border: 1px solid #00ff9d;">[LIVE STREAMING]</span>
+          <span class="badge" id="pcapStreamCountBadge" style="background: rgba(0, 217, 255, 0.15); color: #00d9ff; border: 1px solid #00d9ff;">0 SAMPLES</span>
+          <button class="btn" style="background: #18181b; border-color: #38bdf8; color: #38bdf8;" onclick="exportFilteredAsPcap()">[EXPORT FILTERED (.PCAP)]</button>
+          <button class="btn" id="btnTogglePcapStream" onclick="togglePcapStream()">[PAUSE STREAM]</button>
+          <button class="btn" onclick="clearPcapStream()">[CLEAR STREAM]</button>
+        </div>
+      </div>
+
+      <!-- Wireshark Display Filter Bar -->
+      <div class="pcap-filter-bar">
+        <span style="font-weight: 700; color: #00d9ff; font-family: 'JetBrains Mono', monospace; font-size: 11px;">WIRESHARK FILTER:</span>
+        <input type="text" id="pcapFilterInput" class="pcap-filter-input" placeholder="Filter packets: proto == tcp &amp;&amp; ip.version == 6 || ip.entropy &gt;= 6.5 || port == 2223 || reason == BAN" oninput="onPcapFilterChange()" />
+        <span id="pcapFilterBadge" class="badge" style="background: rgba(0, 255, 157, 0.15); color: #00ff9d; border: 1px solid #00ff9d;">ALL (NO FILTER)</span>
+        <span id="pcapFilteredCountBadge" style="color: var(--text-muted); font-size: 11px; margin-left: 4px;">0 MATCHED</span>
+        <div style="display: flex; gap: 4px; margin-left: auto;">
+          <button class="preset-btn active" id="btnPresetAll" onclick="setPcapPresetFilter('')">ALL</button>
+          <button class="preset-btn" id="btnPresetTcp" onclick="setPcapPresetFilter('proto == tcp')">TCP</button>
+          <button class="preset-btn" id="btnPresetUdp" onclick="setPcapPresetFilter('proto == udp')">UDP</button>
+          <button class="preset-btn" id="btnPresetIpv6" onclick="setPcapPresetFilter('ip.version == 6')">IPv6</button>
+          <button class="preset-btn" id="btnPresetEntropy" onclick="setPcapPresetFilter('ip.entropy &gt;= 6.5')">HIGH ENTROPY</button>
+          <button class="preset-btn" id="btnPresetTarpit" onclick="setPcapPresetFilter('reason == TARPIT || reason == BAN')">TARPIT/BAN</button>
+        </div>
+      </div>
+
+      <div class="card table-container" style="max-height: 480px; overflow-y: auto;">
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 105px;">TIMESTAMP</th>
+              <th style="width: 65px;">STACK</th>
+              <th style="width: 160px;">SOURCE ADDR</th>
+              <th style="width: 75px;">PROTO</th>
+              <th style="width: 95px;">ENTROPY</th>
+              <th style="width: 140px;">DROP REASON</th>
+              <th style="width: 95px;">WIRE / CAP</th>
+              <th style="text-align: right; width: 140px;">ACTION</th>
+            </tr>
+          </thead>
+          <tbody id="rawPacketTableBody">
+            <tr><td colspan="8" style="text-align: center; color: var(--text-muted); padding: 18px;">Waiting for intercepted packet samples from eBPF ring buffer...</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Hex Dump Modal / Wireshark Inspector Drawer -->
+      <div id="pcapHexModal" class="modal" style="display: none; position: fixed; z-index: 10000; left: 0; top: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); align-items: center; justify-content: center; backdrop-filter: blur(2px);">
+        <div class="modal-content" style="max-width: 960px; width: 95%; background: #09090b; border: 1px solid var(--border-accent); border-radius: 8px; padding: 20px; box-shadow: 0 16px 40px rgba(0,0,0,0.95); display: flex; flex-direction: column; max-height: 90vh;">
+          <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 12px; margin-bottom: 12px;">
+            <div>
+              <h3 style="margin: 0; color: var(--accent); font-size: 15px; font-family: 'JetBrains Mono', monospace; display: flex; align-items: center; gap: 8px;">
+                <span>🔬 WIRE FORENSICS: WIRESHARK PACKET INSPECTOR</span>
+                <span id="pcapInspectorEntropyBadge" class="badge" style="font-size: 10px;"></span>
+              </h3>
+              <div id="pcapHexSubtitle" style="font-size: 11px; color: var(--text-muted); margin-top: 4px;"></div>
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <button class="btn" style="background: #0284c7; border-color: #38bdf8; color: #ffffff;" onclick="exportCurrentSamplePcap()">[EXPORT .PCAP]</button>
+              <button class="btn" onclick="copyHexDumpPayload()">[COPY HEX]</button>
+              <button class="btn" onclick="closeHexDumpModal()">[CLOSE]</button>
+            </div>
+          </div>
+
+          <!-- Protocol Layer Legend -->
+          <div style="display: flex; gap: 16px; align-items: center; font-size: 11px; font-family: 'JetBrains Mono', monospace; background: #000000; padding: 6px 12px; border: 1px solid var(--border); border-radius: 4px; margin-bottom: 8px;">
+            <span style="color: var(--text-muted); font-weight: 600;">PROTOCOL LAYERS:</span>
+            <span style="color: #94a3b8;"><span style="display: inline-block; width: 8px; height: 8px; background: #94a3b8; border-radius: 2px; margin-right: 4px;"></span>L2: Ethernet (14B)</span>
+            <span style="color: #60a5fa;"><span style="display: inline-block; width: 8px; height: 8px; background: #60a5fa; border-radius: 2px; margin-right: 4px;"></span>L3: IP Header</span>
+            <span style="color: #34d399;"><span style="display: inline-block; width: 8px; height: 8px; background: #34d399; border-radius: 2px; margin-right: 4px;"></span>L4: Transport (TCP/UDP)</span>
+            <span style="color: #fbbf24;"><span style="display: inline-block; width: 8px; height: 8px; background: #fbbf24; border-radius: 2px; margin-right: 4px;"></span>L7: Raw Payload</span>
+          </div>
+
+          <!-- Live Byte Inspection Status Bar -->
+          <div id="pcapInspectorStatusBar" style="font-family: 'JetBrains Mono', monospace; font-size: 11px; padding: 6px 12px; background: #18181b; border: 1px solid var(--border); border-radius: 4px; margin-bottom: 12px; color: #a1a1aa;">
+            Hover over any byte or character to inspect protocol layer and raw values...
+          </div>
+
+          <!-- Hex & ASCII Viewer with Hover Highlight -->
+          <div style="background: #000000; border: 1px solid var(--border); border-radius: 6px; padding: 14px; font-family: 'JetBrains Mono', 'Courier New', monospace; font-size: 11px; line-height: 1.6; overflow-y: auto; flex: 1; min-height: 260px; user-select: text;" id="pcapHexContainer">
+          </div>
+        </div>
       </div>
     </div>
 
@@ -1811,6 +1979,11 @@
       // If stream is paused and not currently replaying from queue, buffer it
       if (window.isStreamPaused && !isFromQueue) {
         window.pausedEventQueue.push(data);
+        return;
+      }
+
+      if (type === 'raw_packet' || (type === 'event' && payload && payload.source === 'ebpf_pcap')) {
+        handleIncomingRawPacket(payload);
         return;
       }
 
@@ -4088,6 +4261,616 @@ ${notes}
       await _origFetchQuarantineBans();
       appendPcapBadgeToQuarantineRows();
     };
+
+    // ============================================
+    // LIVE eBPF RAW PACKET STREAM & WIRESHARK FORENSICS
+    // ============================================
+    let rawPacketSamples = [];
+    let filteredRawPacketSamples = [];
+    let isPcapStreamPaused = false;
+    let selectedHexSample = null;
+    let currentPcapFilterText = '';
+    let pcapRenderScheduled = false;
+    const MAX_RAW_PACKET_SAMPLES = 250;
+
+    // Fast Shannon entropy calculation in bits per byte (0.00 to 8.00)
+    function calcHexEntropy(hexString) {
+      if (!hexString || hexString.length < 2) return 0.0;
+      const numBytes = Math.floor(hexString.length / 2);
+      if (numBytes === 0) return 0.0;
+      const freq = new Uint32Array(256);
+      for (let i = 0; i < numBytes; i++) {
+        const b = parseInt(hexString.substr(i * 2, 2), 16);
+        freq[b]++;
+      }
+      let entropy = 0.0;
+      for (let i = 0; i < 256; i++) {
+        if (freq[i] > 0) {
+          const p = freq[i] / numBytes;
+          entropy -= p * Math.log2(p);
+        }
+      }
+      return parseFloat(entropy.toFixed(3));
+    }
+
+    function schedulePcapRender() {
+      if (pcapRenderScheduled) return;
+      pcapRenderScheduled = true;
+      requestAnimationFrame(() => {
+        pcapRenderScheduled = false;
+        renderRawPacketStreamTable();
+      });
+    }
+
+    function handleIncomingRawPacket(payload) {
+      if (isPcapStreamPaused) return;
+
+      let sample = {
+        timestamp_ms: payload.timestamp_ms || Date.now(),
+        source_ip: payload.client_ip || payload.source_ip || '-',
+        source_port: payload.source_port || 0,
+        protocol: payload.protocol || 'IP',
+        drop_reason: payload.rule_id ? payload.rule_id.replace(/^pcap_/, '').toUpperCase() : 'DROP',
+        capture_len: 0,
+        wire_len: 0,
+        hex_data: '',
+        entropy: 0.0,
+        ip_version: (payload.client_ip && payload.client_ip.includes(':')) ? 'IPv6' : 'IPv4',
+      };
+
+      if (payload.raw_line && payload.raw_line.includes('[PCAP_SAMPLE]')) {
+        const line = payload.raw_line;
+        const srcIpM = line.match(/src_ip=([^\s]+)/);
+        if (srcIpM) sample.source_ip = srcIpM[1];
+        const srcPortM = line.match(/src_port=(\d+)/);
+        if (srcPortM) sample.source_port = parseInt(srcPortM[1], 10);
+        const protoM = line.match(/proto=(\d+)/);
+        if (protoM) {
+          const p = parseInt(protoM[1], 10);
+          sample.protocol = p === 6 ? 'TCP' : (p === 17 ? 'UDP' : (p === 1 ? 'ICMP' : (p === 58 ? 'ICMPv6' : `IP-${p}`)));
+        }
+        const reasonM = line.match(/reason=([^\s]+)/);
+        if (reasonM) sample.drop_reason = reasonM[1];
+        const capLenM = line.match(/cap_len=(\d+)/);
+        if (capLenM) sample.capture_len = parseInt(capLenM[1], 10);
+        const wireLenM = line.match(/wire_len=(\d+)/);
+        if (wireLenM) sample.wire_len = parseInt(wireLenM[1], 10);
+        const hexM = line.match(/hex=([0-9a-fA-F]+)/);
+        if (hexM) sample.hex_data = hexM[1];
+
+        if (sample.source_ip.includes(':')) sample.ip_version = 'IPv6';
+      }
+
+      sample.entropy = calcHexEntropy(sample.hex_data);
+
+      rawPacketSamples.unshift(sample);
+      if (rawPacketSamples.length > MAX_RAW_PACKET_SAMPLES) {
+        rawPacketSamples.pop();
+      }
+
+      schedulePcapRender();
+    }
+
+    // Wireshark Filter Engine: Compiles expression into predicate function
+    function compilePcapFilterPredicate(filterStr) {
+      const trimmed = (filterStr || '').trim();
+      if (!trimmed) {
+        return { fn: () => true, valid: true, desc: 'ALL (NO FILTER)' };
+      }
+
+      try {
+        // Replace Wireshark-style keywords with JS accessors
+        let jsExpr = trimmed
+          // logical operators
+          .replace(/\band\b/gi, '&&')
+          .replace(/\bor\b/gi, '||')
+          .replace(/\bnot\b/gi, '!')
+          // ip.version
+          .replace(/\bip\.version\s*==\s*6\b/gi, "(s.ip_version === 'IPv6')")
+          .replace(/\bip\.version\s*==\s*4\b/gi, "(s.ip_version === 'IPv4')")
+          .replace(/\bstack\s*==\s*['"]?ipv6['"]?/gi, "(s.ip_version === 'IPv6')")
+          .replace(/\bstack\s*==\s*['"]?ipv4['"]?/gi, "(s.ip_version === 'IPv4')")
+          // proto
+          .replace(/\bproto\s*==\s*['"]?tcp['"]?/gi, "(s.protocol === 'TCP')")
+          .replace(/\bproto\s*==\s*['"]?udp['"]?/gi, "(s.protocol === 'UDP')")
+          .replace(/\bproto\s*==\s*['"]?icmp['"]?/gi, "(s.protocol === 'ICMP')")
+          .replace(/\bproto\s*==\s*['"]?icmpv6['"]?/gi, "(s.protocol === 'ICMPv6')")
+          // entropy
+          .replace(/\b(?:ip\.)?entropy\s*(>=|<=|>|<|==)\s*([0-9.]+)/gi, '(s.entropy $1 $2)')
+          // port
+          .replace(/\b(?:src_)?port\s*==\s*(\d+)/gi, '(s.source_port === $1)')
+          .replace(/\b(?:src_)?port\s*(!=)\s*(\d+)/gi, '(s.source_port !== $2)')
+          // reason
+          .replace(/\breason\s*==\s*['"]?([a-zA-Z0-9_-]+)['"]?/gi, "s.drop_reason.toLowerCase().includes('$1'.toLowerCase())")
+          // ip / src_ip
+          .replace(/\b(?:ip\.src|src_ip|ip)\s*==\s*['"]?([a-fA-F0-9:.]+)['"]?/gi, "s.source_ip.toLowerCase().includes('$1'.toLowerCase())")
+          // wire / cap len
+          .replace(/\bwire_len\s*(>=|<=|>|<|==)\s*(\d+)/gi, '(s.wire_len $1 $2)')
+          .replace(/\bcap_len\s*(>=|<=|>|<|==)\s*(\d+)/gi, '(s.capture_len $1 $2)');
+
+        // If no replacement occurred and user just typed a plain word (e.g. "syn" or "192.168"),
+        // perform a forgiving search on IP, proto, and drop_reason.
+        if (jsExpr === trimmed && !/[=<>!]/.test(trimmed)) {
+          const q = trimmed.toLowerCase();
+          return {
+            fn: (s) => s.source_ip.toLowerCase().includes(q) || s.protocol.toLowerCase().includes(q) || s.drop_reason.toLowerCase().includes(q),
+            valid: true,
+            desc: `SEARCH: "${trimmed}"`
+          };
+        }
+
+        // Test compilation with a dummy sample
+        const testFn = new Function('s', `return Boolean(${jsExpr});`);
+        testFn({ ip_version: 'IPv4', protocol: 'TCP', source_port: 80, drop_reason: 'TARPIT', source_ip: '127.0.0.1', entropy: 4.5, wire_len: 64, capture_len: 64 });
+
+        return { fn: testFn, valid: true, desc: 'FILTER ACTIVE' };
+      } catch (err) {
+        return {
+          fn: (s) => {
+            const q = trimmed.toLowerCase();
+            return s.source_ip.toLowerCase().includes(q) || s.protocol.toLowerCase().includes(q) || s.drop_reason.toLowerCase().includes(q);
+          },
+          valid: false,
+          desc: 'SYNTAX ERROR (FALLBACK SEARCH)'
+        };
+      }
+    }
+
+    function onPcapFilterChange() {
+      const input = document.getElementById('pcapFilterInput');
+      if (!input) return;
+      currentPcapFilterText = input.value;
+      updatePresetButtonStates(currentPcapFilterText);
+      renderRawPacketStreamTable();
+    }
+
+    function setPcapPresetFilter(filterText) {
+      const input = document.getElementById('pcapFilterInput');
+      if (input) input.value = filterText;
+      currentPcapFilterText = filterText;
+      updatePresetButtonStates(filterText);
+      renderRawPacketStreamTable();
+    }
+
+    function updatePresetButtonStates(activeFilter) {
+      const btnAll = document.getElementById('btnPresetAll');
+      const btnTcp = document.getElementById('btnPresetTcp');
+      const btnUdp = document.getElementById('btnPresetUdp');
+      const btnIpv6 = document.getElementById('btnPresetIpv6');
+      const btnEntropy = document.getElementById('btnPresetEntropy');
+      const btnTarpit = document.getElementById('btnPresetTarpit');
+
+      const presets = [
+        { btn: btnAll, val: '' },
+        { btn: btnTcp, val: 'proto == tcp' },
+        { btn: btnUdp, val: 'proto == udp' },
+        { btn: btnIpv6, val: 'ip.version == 6' },
+        { btn: btnEntropy, val: 'ip.entropy >= 6.5' },
+        { btn: btnTarpit, val: 'reason == TARPIT || reason == BAN' },
+      ];
+
+      presets.forEach(p => {
+        if (!p.btn) return;
+        if (p.val === activeFilter) {
+          p.btn.classList.add('active');
+        } else {
+          p.btn.classList.remove('active');
+        }
+      });
+    }
+
+    function renderRawPacketStreamTable() {
+      const tbody = document.getElementById('rawPacketTableBody');
+      if (!tbody) return;
+
+      const countBadge = document.getElementById('pcapStreamCountBadge');
+      if (countBadge) countBadge.textContent = `${rawPacketSamples.length} SAMPLES`;
+
+      const filterInfo = compilePcapFilterPredicate(currentPcapFilterText);
+      const filterBadge = document.getElementById('pcapFilterBadge');
+      if (filterBadge) {
+        if (!currentPcapFilterText.trim()) {
+          filterBadge.textContent = 'ALL (NO FILTER)';
+          filterBadge.style.background = 'rgba(0, 255, 157, 0.15)';
+          filterBadge.style.color = '#00ff9d';
+          filterBadge.style.borderColor = '#00ff9d';
+        } else if (filterInfo.valid) {
+          filterBadge.textContent = '[FILTER: VALID]';
+          filterBadge.style.background = 'rgba(0, 217, 255, 0.15)';
+          filterBadge.style.color = '#00d9ff';
+          filterBadge.style.borderColor = '#00d9ff';
+        } else {
+          filterBadge.textContent = '[FILTER: SYNTAX ERROR]';
+          filterBadge.style.background = 'rgba(255, 68, 68, 0.15)';
+          filterBadge.style.color = '#ff4444';
+          filterBadge.style.borderColor = '#ff4444';
+        }
+      }
+
+      // Filter active samples
+      filteredRawPacketSamples = rawPacketSamples.filter(s => {
+        try {
+          return filterInfo.fn(s);
+        } catch {
+          return true;
+        }
+      });
+
+      const matchedCountBadge = document.getElementById('pcapFilteredCountBadge');
+      if (matchedCountBadge) {
+        matchedCountBadge.textContent = `${filteredRawPacketSamples.length} / ${rawPacketSamples.length} MATCHED`;
+      }
+
+      if (filteredRawPacketSamples.length === 0) {
+        const msg = rawPacketSamples.length === 0
+          ? 'Waiting for intercepted packet samples from eBPF ring buffer...'
+          : 'No packet samples matched the active display filter.';
+        tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-muted); padding: 18px;">${msg}</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = '';
+      filteredRawPacketSamples.forEach((s, idx) => {
+        const tr = document.createElement('tr');
+        const ts = new Date(s.timestamp_ms).toLocaleTimeString();
+        const stackBadge = s.ip_version === 'IPv6'
+          ? `<span class="badge" style="background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid #c084fc;">IPv6</span>`
+          : `<span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid #60a5fa;">IPv4</span>`;
+
+        const protoBadge = s.protocol === 'TCP'
+          ? `<span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid #34d399;">TCP</span>`
+          : `<span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid #fbbf24;">${escapeHTML(s.protocol)}</span>`;
+
+        // Shannon entropy badge
+        const isHighEntropy = s.entropy >= 6.5;
+        const entropyBadge = isHighEntropy
+          ? `<span class="badge" style="background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid #ef4444; font-weight: 700;">🔥 ${s.entropy.toFixed(2)} b/B</span>`
+          : `<span class="badge" style="background: rgba(148, 163, 184, 0.1); color: #cbd5e1; border: 1px solid #475569;">${s.entropy.toFixed(2)} b/B</span>`;
+
+        const reasonColor = s.drop_reason.includes('TARPIT') ? '#ff7700' : '#ff4444';
+        const reasonBadge = `<span class="badge" style="background: rgba(255, 68, 68, 0.15); color: ${reasonColor}; border: 1px solid ${reasonColor};">${escapeHTML(s.drop_reason)}</span>`;
+
+        const addr = s.source_port > 0 ? `${escapeHTML(s.source_ip)}:${s.source_port}` : escapeHTML(s.source_ip);
+        const lens = `${s.wire_len}B / ${s.capture_len}B`;
+
+        tr.innerHTML = `
+          <td style="color: var(--text-muted); font-size: 11px;">${ts}</td>
+          <td>${stackBadge}</td>
+          <td style="font-family: monospace; font-size: 11px; font-weight: 600; color: var(--text);">${addr}</td>
+          <td>${protoBadge}</td>
+          <td>${entropyBadge}</td>
+          <td>${reasonBadge}</td>
+          <td style="font-size: 11px; color: var(--text-muted);">${lens}</td>
+          <td style="text-align: right; display: flex; gap: 4px; justify-content: flex-end;">
+            <button class="btn btn-action" onclick="openHexDumpModalByIndex(${idx})">[INSPECT]</button>
+            <button class="btn btn-action" style="color: #38bdf8; border-color: rgba(56, 189, 248, 0.4);" onclick="exportSingleSampleByIndex(${idx})" title="Download packet as Libpcap 2.4 format">[PCAP]</button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    function togglePcapStream() {
+      isPcapStreamPaused = !isPcapStreamPaused;
+      const btn = document.getElementById('btnTogglePcapStream');
+      const badge = document.getElementById('pcapStreamStatusBadge');
+      if (btn) btn.textContent = isPcapStreamPaused ? '[RESUME STREAM]' : '[PAUSE STREAM]';
+      if (badge) {
+        if (isPcapStreamPaused) {
+          badge.textContent = '[STREAM: PAUSED]';
+          badge.style.background = 'rgba(255, 187, 0, 0.15)';
+          badge.style.color = '#ffbb00';
+          badge.style.borderColor = '#ffbb00';
+        } else {
+          badge.textContent = '[LIVE STREAMING]';
+          badge.style.background = 'rgba(0, 255, 157, 0.15)';
+          badge.style.color = '#00ff9d';
+          badge.style.borderColor = '#00ff9d';
+        }
+      }
+    }
+
+    function clearPcapStream() {
+      rawPacketSamples = [];
+      filteredRawPacketSamples = [];
+      renderRawPacketStreamTable();
+    }
+
+    function openHexDumpModalByIndex(idx) {
+      if (idx < 0 || idx >= filteredRawPacketSamples.length) return;
+      openHexDumpModal(filteredRawPacketSamples[idx]);
+    }
+
+    function exportSingleSampleByIndex(idx) {
+      if (idx < 0 || idx >= filteredRawPacketSamples.length) return;
+      downloadPcapBinary([filteredRawPacketSamples[idx]], `copsec_pkt_${filteredRawPacketSamples[idx].source_ip}_${Date.now()}.pcap`);
+    }
+
+    function openHexDumpModal(sample) {
+      selectedHexSample = sample;
+      const s = sample;
+
+      const sub = document.getElementById('pcapHexSubtitle');
+      if (sub) {
+        sub.innerHTML = `<strong>IP:</strong> ${escapeHTML(s.source_ip)}:${s.source_port} | <strong>Proto:</strong> ${escapeHTML(s.protocol)} | <strong>Drop Reason:</strong> ${escapeHTML(s.drop_reason)} | <strong>Wire Len:</strong> ${s.wire_len} bytes (Captured: ${s.capture_len} bytes)`;
+      }
+
+      const entBadge = document.getElementById('pcapInspectorEntropyBadge');
+      if (entBadge) {
+        const isHigh = s.entropy >= 6.5;
+        entBadge.textContent = `SHANNON ENTROPY: ${s.entropy.toFixed(3)} b/B ${isHigh ? '[HIGH RISK / ENCRYPTED]' : '[NORMAL]'}`;
+        entBadge.style.background = isHigh ? 'rgba(239, 68, 68, 0.2)' : 'rgba(148, 163, 184, 0.1)';
+        entBadge.style.color = isHigh ? '#f87171' : '#cbd5e1';
+        entBadge.style.borderColor = isHigh ? '#ef4444' : '#475569';
+      }
+
+      const container = document.getElementById('pcapHexContainer');
+      if (container) {
+        container.innerHTML = formatWiresharkHexDump(s);
+      }
+
+      clearHighlightByte();
+
+      const modal = document.getElementById('pcapHexModal');
+      if (modal) modal.style.display = 'flex';
+    }
+
+    function closeHexDumpModal() {
+      const modal = document.getElementById('pcapHexModal');
+      if (modal) modal.style.display = 'none';
+      selectedHexSample = null;
+    }
+
+    function copyHexDumpPayload() {
+      if (!selectedHexSample || !selectedHexSample.hex_data) return;
+      navigator.clipboard.writeText(selectedHexSample.hex_data).then(() => {
+        showToast('[PCAP] Copied raw hexadecimal payload to clipboard', 'ok');
+      }).catch(() => {
+        showToast('[PCAP] Failed to copy hex payload', 'crit');
+      });
+    }
+
+    // Bidirectional Hex & ASCII Hover Synchronizer
+    function highlightByte(offset, layerName, hexVal, decVal, charVal) {
+      // Highlight all matching bytes and ascii characters
+      const elems = document.querySelectorAll(`[data-offset="${offset}"]`);
+      elems.forEach(el => el.classList.add('byte-highlight'));
+
+      const status = document.getElementById('pcapInspectorStatusBar');
+      if (status) {
+        const offHex = '0x' + offset.toString(16).padStart(4, '0');
+        const printable = (decVal >= 32 && decVal <= 126) ? `'${charVal}'` : '[NON-PRINTABLE]';
+        status.innerHTML = `<span style="color: #ffffff; font-weight: 700;">Offset:</span> ${offHex} (${offset}) | <span style="color: #ffffff; font-weight: 700;">Layer:</span> ${layerName} | <span style="color: #ffffff; font-weight: 700;">Hex:</span> 0x${hexVal} | <span style="color: #ffffff; font-weight: 700;">Dec:</span> ${decVal} | <span style="color: #ffffff; font-weight: 700;">ASCII:</span> ${printable}`;
+      }
+    }
+
+    function clearHighlightByte() {
+      const highlighted = document.querySelectorAll('.byte-highlight');
+      highlighted.forEach(el => el.classList.remove('byte-highlight'));
+
+      const status = document.getElementById('pcapInspectorStatusBar');
+      if (status) {
+        status.innerHTML = 'Hover over any byte or character to inspect protocol layer and raw values...';
+      }
+    }
+
+    // Formats packet bytes with layer color coding and interactive inspection attributes
+    function formatWiresharkHexDump(sample) {
+      const hexString = sample.hex_data || '';
+      if (!hexString) return '<div style="color: var(--text-muted); padding: 20px; text-align: center;">No raw byte payload captured in sample.</div>';
+
+      const bytes = [];
+      for (let i = 0; i < hexString.length; i += 2) {
+        bytes.push(parseInt(hexString.substr(i, 2), 16));
+      }
+
+      // Analyze protocol layer boundaries
+      // Check if frame begins with 14-byte Ethernet header:
+      // EtherType at offset 12..13 is 0x0800 (IPv4) or 0x86dd (IPv6)
+      const hasEth = bytes.length >= 14 && (
+        (bytes[12] === 0x08 && bytes[13] === 0x00) ||
+        (bytes[12] === 0x86 && bytes[13] === 0xdd)
+      );
+
+      function getByteLayerInfo(offset) {
+        if (hasEth) {
+          if (offset < 14) return { cls: 'layer-l2', name: 'L2: Ethernet Header (14B)' };
+          const ethType = (bytes[12] << 8) | bytes[13];
+          if (ethType === 0x0800) {
+            // IPv4 header length
+            const ihl = (bytes[14] & 0x0f) * 4;
+            const l3End = 14 + (ihl > 0 ? ihl : 20);
+            if (offset < l3End) return { cls: 'layer-l3', name: 'L3: IPv4 Header' };
+            const proto = bytes[23];
+            const l4Len = proto === 6 ? 20 : 8; // TCP or UDP/ICMP
+            if (offset < l3End + l4Len) return { cls: 'layer-l4', name: proto === 6 ? 'L4: TCP Header' : 'L4: UDP/Transport Header' };
+            return { cls: 'layer-l7', name: 'L7: Application / Raw Payload' };
+          } else if (ethType === 0x86dd) {
+            // IPv6 fixed 40 bytes header
+            if (offset < 14 + 40) return { cls: 'layer-l3', name: 'L3: IPv6 Header (40B)' };
+            const nextHdr = bytes[20];
+            const l4Len = nextHdr === 6 ? 20 : 8;
+            if (offset < 14 + 40 + l4Len) return { cls: 'layer-l4', name: nextHdr === 6 ? 'L4: TCP Header' : 'L4: UDP/Transport Header' };
+            return { cls: 'layer-l7', name: 'L7: Application / Raw Payload' };
+          }
+        } else {
+          // Frame has no Ethernet header (e.g. captured directly at L3 IP)
+          const firstByte = bytes[0] || 0;
+          const version = (firstByte >> 4) & 0x0f;
+          if (version === 4) {
+            const ihl = (firstByte & 0x0f) * 4;
+            const l3End = ihl > 0 ? ihl : 20;
+            if (offset < l3End) return { cls: 'layer-l3', name: 'L3: IPv4 Header' };
+            const proto = bytes[9] || 0;
+            const l4Len = proto === 6 ? 20 : 8;
+            if (offset < l3End + l4Len) return { cls: 'layer-l4', name: proto === 6 ? 'L4: TCP Header' : 'L4: UDP/Transport Header' };
+            return { cls: 'layer-l7', name: 'L7: Application / Raw Payload' };
+          } else if (version === 6) {
+            if (offset < 40) return { cls: 'layer-l3', name: 'L3: IPv6 Header (40B)' };
+            const nextHdr = bytes[6] || 0;
+            const l4Len = nextHdr === 6 ? 20 : 8;
+            if (offset < 40 + l4Len) return { cls: 'layer-l4', name: nextHdr === 6 ? 'L4: TCP Header' : 'L4: UDP/Transport Header' };
+            return { cls: 'layer-l7', name: 'L7: Application / Raw Payload' };
+          }
+        }
+
+        // Generic fallback heuristic
+        if (offset < 14) return { cls: 'layer-l2', name: 'L2: Link Layer' };
+        if (offset < 34) return { cls: 'layer-l3', name: 'L3: Network Layer' };
+        if (offset < 54) return { cls: 'layer-l4', name: 'L4: Transport Layer' };
+        return { cls: 'layer-l7', name: 'L7: Payload Data' };
+      }
+
+      let html = '<div style="color: #64748b; margin-bottom: 8px; border-bottom: 1px solid #1e293b; padding-bottom: 4px;">';
+      html += '<span style="display: inline-block; width: 8ch;">OFFSET</span>   ';
+      html += '<span style="display: inline-block; width: 23ch;">00 01 02 03 04 05 06 07</span>  ';
+      html += '<span style="display: inline-block; width: 23ch;">08 09 0A 0B 0C 0D 0E 0F</span>   ';
+      html += '<span>ASCII INSPECTOR</span>';
+      html += '</div>';
+
+      for (let offset = 0; offset < bytes.length; offset += 16) {
+        const chunk = bytes.slice(offset, offset + 16);
+        const offsetStr = offset.toString(16).padStart(7, '0');
+
+        let hexCols1 = '';
+        let hexCols2 = '';
+        let asciiCols = '';
+
+        for (let i = 0; i < 16; i++) {
+          const byteIdx = offset + i;
+          if (i < chunk.length) {
+            const b = chunk[i];
+            const bHex = b.toString(16).padStart(2, '0').toUpperCase();
+            const bChar = (b >= 32 && b <= 126) ? escapeHTML(String.fromCharCode(b)) : '.';
+            const layerInfo = getByteLayerInfo(byteIdx);
+
+            const hexSpan = `<span class="hex-byte ${layerInfo.cls}" data-offset="${byteIdx}" onmouseenter="highlightByte(${byteIdx}, '${layerInfo.name}', '${bHex}', ${b}, '${bChar === "'" ? "\\'" : bChar}')" onmouseleave="clearHighlightByte()">${bHex}</span>`;
+            const asciiSpan = `<span class="ascii-char ${layerInfo.cls}" data-offset="${byteIdx}" onmouseenter="highlightByte(${byteIdx}, '${layerInfo.name}', '${bHex}', ${b}, '${bChar === "'" ? "\\'" : bChar}')" onmouseleave="clearHighlightByte()">${bChar}</span>`;
+
+            if (i < 8) hexCols1 += hexSpan;
+            else hexCols2 += hexSpan;
+            asciiCols += asciiSpan;
+          } else {
+            const emptyHex = '<span class="hex-byte" style="opacity: 0;">..</span>';
+            if (i < 8) hexCols1 += emptyHex;
+            else hexCols2 += emptyHex;
+          }
+        }
+
+        html += `<div class="pcap-hex-row" style="margin-bottom: 3px;"><span style="color: #64748b; margin-right: 1.5ch; user-select: none;">${offsetStr}</span>  ${hexCols1}  ${hexCols2}  <span style="color: #475569; user-select: none;">|</span>${asciiCols}<span style="color: #475569; user-select: none;">|</span></div>`;
+      }
+
+      return html;
+    }
+
+    // ============================================
+    // CLIENT-SIDE LIBPCAP 2.4 BINARY GENERATOR
+    // ============================================
+    function downloadPcapBinary(samples, filename) {
+      if (!samples || samples.length === 0) {
+        showToast('[PCAP] No packet samples available to export', 'crit');
+        return;
+      }
+
+      // Standard Libpcap 2.4 Global Header (24 bytes, Little Endian)
+      // Magic: 0xa1b2c3d4 (microsecond timestamps)
+      // Version: 2.4
+      // Snaplen: 65535
+      // LinkType: 1 (LINKTYPE_ETHERNET)
+      const globalHeader = new Uint8Array(24);
+      const ghView = new DataView(globalHeader.buffer);
+      ghView.setUint32(0, 0xa1b2c3d4, true); // magic number
+      ghView.setUint16(4, 2, true);          // version_major = 2
+      ghView.setUint16(6, 4, true);          // version_minor = 4
+      ghView.setInt32(8, 0, true);           // thiszone = 0
+      ghView.setUint32(12, 0, true);         // sigfigs = 0
+      ghView.setUint32(16, 65535, true);     // snaplen = 65535
+      ghView.setUint32(20, 1, true);         // network = 1 (LINKTYPE_ETHERNET)
+
+      const chunks = [globalHeader];
+
+      samples.forEach(s => {
+        if (!s.hex_data) return;
+
+        // Convert hex data to raw byte array
+        const hexLen = s.hex_data.length;
+        const byteCount = Math.floor(hexLen / 2);
+        const rawBytes = new Uint8Array(byteCount);
+        for (let i = 0; i < byteCount; i++) {
+          rawBytes[i] = parseInt(s.hex_data.substr(i * 2, 2), 16);
+        }
+
+        // Determine if frame has Ethernet header (14 bytes)
+        // If not, synthesize a standard 14-byte Ethernet header for Wireshark/tcpdump compatibility:
+        // Dst MAC: 00:50:56:c0:00:01, Src MAC: 00:50:56:c0:00:02, EtherType: 0x0800 (IPv4) or 0x86dd (IPv6)
+        let finalPacketBytes = rawBytes;
+        const hasEth = rawBytes.length >= 14 && (
+          (rawBytes[12] === 0x08 && rawBytes[13] === 0x00) ||
+          (rawBytes[12] === 0x86 && rawBytes[13] === 0xdd)
+        );
+
+        if (!hasEth && rawBytes.length > 0) {
+          const isV6 = (rawBytes[0] >> 4) === 6 || s.ip_version === 'IPv6';
+          const ethHdr = new Uint8Array(14);
+          ethHdr.set([0x00, 0x50, 0x56, 0xc0, 0x00, 0x01, 0x00, 0x50, 0x56, 0xc0, 0x00, 0x02]);
+          if (isV6) {
+            ethHdr[12] = 0x86;
+            ethHdr[13] = 0xdd;
+          } else {
+            ethHdr[12] = 0x08;
+            ethHdr[13] = 0x00;
+          }
+          const stitched = new Uint8Array(14 + rawBytes.length);
+          stitched.set(ethHdr, 0);
+          stitched.set(rawBytes, 14);
+          finalPacketBytes = stitched;
+        }
+
+        // Packet Header (16 bytes, Little Endian):
+        // ts_sec (4B), ts_usec (4B), incl_len (4B), orig_len (4B)
+        const tsMs = s.timestamp_ms || Date.now();
+        const tsSec = Math.floor(tsMs / 1000);
+        const tsUsec = (tsMs % 1000) * 1000;
+        const inclLen = finalPacketBytes.length;
+        const origLen = Math.max(inclLen, s.wire_len || inclLen);
+
+        const pktHeader = new Uint8Array(16);
+        const phView = new DataView(pktHeader.buffer);
+        phView.setUint32(0, tsSec, true);
+        phView.setUint32(4, tsUsec, true);
+        phView.setUint32(8, inclLen, true);
+        phView.setUint32(12, origLen, true);
+
+        chunks.push(pktHeader);
+        chunks.push(finalPacketBytes);
+      });
+
+      const blob = new Blob(chunks, { type: 'application/vnd.tcpdump.pcap' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename || `copsec_capture_${Date.now()}.pcap`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      showToast(`[PCAP] Exported ${samples.length} frames to ${a.download}`, 'ok');
+    }
+
+    function exportFilteredAsPcap() {
+      const samplesToExport = filteredRawPacketSamples.length > 0 ? filteredRawPacketSamples : rawPacketSamples;
+      if (samplesToExport.length === 0) {
+        showToast('[PCAP] No packet samples available to export', 'crit');
+        return;
+      }
+      downloadPcapBinary(samplesToExport, `copsec_filtered_${Date.now()}.pcap`);
+    }
+
+    function exportCurrentSamplePcap() {
+      if (!selectedHexSample) return;
+      downloadPcapBinary([selectedHexSample], `copsec_frame_${selectedHexSample.source_ip}_${Date.now()}.pcap`);
+    }
 
     // ============================================
     // KERNEL EDR & DNS TUNNELING TERMINAL STREAM

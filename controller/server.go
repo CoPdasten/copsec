@@ -675,6 +675,9 @@ func (s *CentralServer) processEvent(nodeID string, event *copsecproto.LogEvent)
 
 	if hub != nil {
 		hub.Broadcast("event", stored)
+		if stored.Source == "ebpf_pcap" {
+			hub.Broadcast("raw_packet", stored)
+		}
 		isWhitelisted := (s.threatEngine != nil && s.threatEngine.IsWhitelisted(stored.ClientIP)) || isProtectedIP(stored.ClientIP)
 		isRoutineSudo := stored.RuleID == "sudo_execution" || (strings.Contains(strings.ToLower(stored.RuleID), "sudo") && stored.ThreatScore < 70)
 		isHandled := IsAlertHandled(stored.ID) || IsIPHandled(stored.ClientIP) || isMitigated

@@ -62,21 +62,27 @@ func (m *mockReader) Close() error {
 
 func encodeTestEvent(srcIP string, port uint16, proto uint16, reason DropReason, ts uint64) []byte {
 	buf := make([]byte, DropEventSize)
-	ip := net.ParseIP(srcIP).To4()
-	if ip != nil {
-		copy(buf[0:4], ip)
+	parsed := net.ParseIP(srcIP)
+	if parsed != nil {
+		if v4 := parsed.To4(); v4 != nil {
+			copy(buf[0:4], v4)
+			buf[9] = 4
+		} else if v6 := parsed.To16(); v6 != nil {
+			buf[9] = 6
+			copy(buf[24:40], v6)
+		}
 	}
 	binary.LittleEndian.PutUint16(buf[4:6], port)
 	binary.LittleEndian.PutUint16(buf[6:8], proto)
 	buf[8] = byte(reason)
-	// buf[9:16] are padding bytes
+	// buf[10:16] are padding bytes
 	binary.LittleEndian.PutUint64(buf[16:24], ts)
 	return buf
 }
 
 func TestDropEventStructureAlignment(t *testing.T) {
-	if DropEventSize != 24 {
-		t.Fatalf("Expected DropEvent size of 24 bytes, got %d", DropEventSize)
+	if DropEventSize != 40 {
+		t.Fatalf("Expected DropEvent size of 40 bytes, got %d", DropEventSize)
 	}
 
 	var dummy DropEvent
@@ -92,11 +98,17 @@ func TestDropEventStructureAlignment(t *testing.T) {
 	if unsafe.Offsetof(dummy.DropReason) != 8 {
 		t.Errorf("DropReason offset expected 8, got %d", unsafe.Offsetof(dummy.DropReason))
 	}
-	if unsafe.Offsetof(dummy.Pad) != 9 {
-		t.Errorf("Pad offset expected 9, got %d", unsafe.Offsetof(dummy.Pad))
+	if unsafe.Offsetof(dummy.IPVersion) != 9 {
+		t.Errorf("IPVersion offset expected 9, got %d", unsafe.Offsetof(dummy.IPVersion))
+	}
+	if unsafe.Offsetof(dummy.Pad) != 10 {
+		t.Errorf("Pad offset expected 10, got %d", unsafe.Offsetof(dummy.Pad))
 	}
 	if unsafe.Offsetof(dummy.TimestampNs) != 16 {
 		t.Errorf("TimestampNs offset expected 16, got %d", unsafe.Offsetof(dummy.TimestampNs))
+	}
+	if unsafe.Offsetof(dummy.SrcIP6) != 24 {
+		t.Errorf("SrcIP6 offset expected 24, got %d", unsafe.Offsetof(dummy.SrcIP6))
 	}
 }
 

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"embed"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -221,6 +222,7 @@ func (ws *WebSOCServer) Start() error {
 
 	// 2b. Pre-Attack Forensics & PCAP Ring Buffer Capture APIs
 	forensics.RegisterHTTPHandlers(mux, nil)
+	mux.HandleFunc("/api/pcap/samples", ws.handlePcapSamples)
 
 	// 2c. Deception Honey-Token Engine APIs
 	mux.HandleFunc("/api/canary/tokens", ws.handleCanaryTokens)
@@ -572,6 +574,127 @@ func (ws *WebSOCServer) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	json.NewEncoder(w).Encode(events)
+}
+
+func (ws *WebSOCServer) handlePcapSamples(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodGet {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	limitStr := r.URL.Query().Get("limit")
+	limit := 100
+	if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
+		if l > 1000 {
+			l = 1000
+		}
+		limit = l
+	}
+
+	type PcapSampleDTO struct {
+		TimestampMs int64  `json:"timestamp_ms"`
+		SourceIP    string `json:"source_ip"`
+		SourcePort  int    `json:"source_port"`
+		Protocol    string `json:"protocol"`
+		DropReason  string `json:"drop_reason"`
+		IPVersion   string `json:"ip_version"`
+		CaptureLen  int    `json:"capture_len"`
+		WireLen     int    `json:"wire_len"`
+		HexData     string `json:"hex_data"`
+		HexDump     string `json:"hex_dump,omitempty"`
+		NodeID      string `json:"node_id"`
+		RawLine     string `json:"raw_line"`
+	}
+
+	var results []PcapSampleDTO
+
+	if ws.storage != nil {
+		events, err := ws.storage.SearchEvents("src:ebpf_pcap", limit)
+		if err != nil || len(events) == 0 {
+			events, _ = ws.storage.SearchEvents("PCAP_SAMPLE", limit)
+		}
+		for _, ev := range events {
+			if ev.Source != "ebpf_pcap" && !strings.Contains(ev.RawLine, "[PCAP_SAMPLE]") {
+				continue
+			}
+
+				dto := PcapSampleDTO{
+					TimestampMs: ev.TimestampMs,
+					SourceIP:    ev.ClientIP,
+					NodeID:      ev.NodeID,
+					RawLine:     ev.RawLine,
+					IPVersion:   "IPv4",
+				}
+				if strings.Contains(dto.SourceIP, ":") {
+					dto.IPVersion = "IPv6"
+				}
+
+				// Parse [PCAP_SAMPLE] fields from RawLine
+				line := ev.RawLine
+				if idx := strings.Index(line, "[PCAP_SAMPLE]"); idx >= 0 {
+					parts := strings.Fields(line[idx:])
+					for _, part := range parts {
+						kv := strings.SplitN(part, "=", 2)
+						if len(kv) != 2 {
+							continue
+						}
+						k, v := kv[0], kv[1]
+						switch k {
+						case "src_ip":
+							dto.SourceIP = v
+							if strings.Contains(v, ":") {
+								dto.IPVersion = "IPv6"
+							}
+						case "src_port":
+							dto.SourcePort, _ = strconv.Atoi(v)
+						case "proto":
+							p, _ := strconv.Atoi(v)
+							switch p {
+							case 6:
+								dto.Protocol = "TCP"
+							case 17:
+								dto.Protocol = "UDP"
+							case 1:
+								dto.Protocol = "ICMP"
+							case 58:
+								dto.Protocol = "ICMPv6"
+							default:
+								dto.Protocol = fmt.Sprintf("IP-%d", p)
+							}
+						case "reason":
+							dto.DropReason = v
+						case "cap_len":
+							dto.CaptureLen, _ = strconv.Atoi(v)
+						case "wire_len":
+							dto.WireLen, _ = strconv.Atoi(v)
+						case "hex":
+							dto.HexData = v
+						}
+					}
+				}
+
+				// Format hex dump if hex data present
+				if dto.HexData != "" {
+					if rawBytes, err := hex.DecodeString(dto.HexData); err == nil {
+						dto.HexDump = hex.Dump(rawBytes)
+					}
+				}
+
+				results = append(results, dto)
+			}
+		}
+
+	if results == nil {
+		results = []PcapSampleDTO{}
+	}
+
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"count":   len(results),
+		"samples": results,
+	})
 }
 
 func (ws *WebSOCServer) handleBans(w http.ResponseWriter, r *http.Request) {

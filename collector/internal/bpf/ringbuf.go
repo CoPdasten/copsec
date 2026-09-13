@@ -42,21 +42,28 @@ func (r DropReason) String() string {
 }
 
 // DropEvent binary layout matches struct drop_event_t (strictly aligned to 64-bit boundaries).
-// Total binary size: 4 + 2 + 2 + 1 + 7 + 8 = 24 bytes.
+// Total binary size: 4 + 2 + 2 + 1 + 1 + 6 + 8 + 16 = 40 bytes.
 type DropEvent struct {
-	SrcIP       uint32     // IPv4 source address in network order
+	SrcIP       uint32     // IPv4 source address in network order (or 0 if IPv6)
 	SrcPort     uint16     // L4 source port (host order)
-	Protocol    uint16     // L4 protocol (e.g. 6=TCP, 17=UDP)
+	Protocol    uint16     // L4 protocol (e.g. 6=TCP, 17=UDP, 58=ICMPv6)
 	DropReason  DropReason // Reason classification
-	Pad         [7]byte    // 64-bit alignment padding
+	IPVersion   uint8      // 4 for IPv4, 6 for IPv6
+	Pad         [6]byte    // 64-bit alignment padding
 	TimestampNs uint64     // Kernel monotonic/ktime timestamp in nanoseconds
+	SrcIP6      [16]byte   // Full 128-bit IPv6 address if IPVersion == 6
 }
 
 // DropEventSize defines the exact binary byte size of struct drop_event_t.
 const DropEventSize = int(unsafe.Sizeof(DropEvent{}))
 
-// IP converts the network-order IPv4 address to standard net.IP.
+// IP converts the network-order address to standard net.IP (supporting both IPv4 and IPv6).
 func (e *DropEvent) IP() net.IP {
+	if e.IPVersion == 6 {
+		ip := make(net.IP, 16)
+		copy(ip, e.SrcIP6[:])
+		return ip
+	}
 	var b [4]byte
 	binary.NativeEndian.PutUint32(b[:], e.SrcIP)
 	return net.IPv4(b[0], b[1], b[2], b[3])

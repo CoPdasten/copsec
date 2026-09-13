@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/copsec/collector/pkg/ebpf"
 	"github.com/copsec/collector/pkg/quarantine"
@@ -87,7 +88,7 @@ func ExecuteInstantBan(ip string) error {
 	banLock.Unlock()
 
 	// 0. ANLIK eBPF/XDP FAST-PATH İMHA (NIC Ring Buffer / Driver Drop)
-	_ = ebpf.GetXDPEngine().AddBan(cleanIP)
+	_ = ebpf.GetXDPEngine().AddBanWithTTL(cleanIP, 24*time.Hour, 1, "Fleet/Edge Automated Quarantine")
 
 	// 1. Cross-platform Quarantine Driver (Linux iptables/conntrack/XDP or Windows Firewall)
 	if driver := quarantine.GetDriver(); driver != nil {

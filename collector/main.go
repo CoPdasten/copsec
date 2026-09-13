@@ -19,6 +19,7 @@ import (
 	"github.com/copsec/collector/internal/cluster"
 	"github.com/copsec/collector/internal/dpi"
 	"github.com/copsec/collector/internal/network"
+	"github.com/copsec/collector/pkg/bgp"
 	"github.com/copsec/collector/pkg/dns"
 	"github.com/copsec/collector/pkg/ebpf"
 	"github.com/copsec/collector/pkg/healing"
@@ -51,6 +52,15 @@ func main() {
 	mgmtPortFlag := flag.Int("mgmt-port", 50052, "Port for dynamic rule management gRPC service")
 	enableTarpitFlag := flag.Bool("enable-tarpit", true, "Enable Asymmetric Zero-Window XDP Tarpit engine")
 	enableSynProxyFlag := flag.Bool("enable-syn-proxy", true, "Enable Stateful Kernel TCP SYN-Proxy mitigation")
+	enableBGPFlag := flag.Bool("enable-bgp", false, "Enable Autonomous BGP-4 Anycast & RFC 7999 RTBH signaling engine")
+	bgpPeerIPFlag := flag.String("bgp-peer-ip", "192.168.1.1", "Upstream BGP peer router IP address")
+	bgpPeerPortFlag := flag.Int("bgp-peer-port", 179, "Upstream BGP peer port")
+	bgpLocalASFlag := flag.Uint("bgp-local-as", 65001, "Local Autonomous System Number (ASN)")
+	bgpPeerASFlag := flag.Uint("bgp-peer-as", 65001, "Upstream peer Autonomous System Number (ASN)")
+	bgpRouterIDFlag := flag.String("bgp-router-id", "", "BGP Router ID (defaults to host IP or 192.168.1.8)")
+	bgpRTBHThresholdPPS := flag.Uint64("bgp-rtbh-threshold-pps", 200000, "Ingress packet flood threshold to trigger upstream RTBH blackholing")
+	bgpRecoveryDuration := flag.Duration("bgp-recovery-duration", 60*time.Second, "Quiet recovery duration before withdrawing RTBH blackhole")
+	bgpBlackholeNextHop := flag.String("bgp-blackhole-next-hop", "192.0.2.1", "RFC 5735 / RFC 7999 blackhole next-hop IP")
 	flag.Parse()
 
 	if *controllerIPFlag != "" {
@@ -255,13 +265,55 @@ func main() {
 		log.Println("[INFO] 🛡️ eBPF Kernel Map & Driver Integrity Guard active")
 	}
 	if sh := dns.GetDefaultSinkhole(); sh != nil {
+		sh.SetEventHandler(func(ev dns.DNSSinkholeEvent) {
+			if controllerClient != nil {
+				logEv := &copsecproto.LogEvent{
+					Source:           "dns_sinkhole",
+					RawLine:          fmt.Sprintf("[DNS_SINKHOLE] domain=%s anomaly=%s entropy=%.2f details=%s (caller_pid=%d proc=%s)", ev.Domain, ev.AnomalyType, ev.Entropy, ev.Details, ev.CallerPID, ev.ProcessName),
+					ClientIp:         "127.0.0.1",
+					ThreatScore:      int32(ev.ThreatScore),
+					RuleId:           fmt.Sprintf("dns_%s", strings.ToLower(ev.AnomalyType)),
+					MitreTechniqueId: ev.MitreID,
+					TimestampMs:      ev.TimestampMs,
+				}
+				controllerClient.Submit(logEv)
+			}
+		})
 		log.Println("[INFO] 🌐 Autonomous DNS Sinkhole active")
 	}
 	if yr := yara.GetDefaultScanner(); yr != nil {
 		log.Println("[INFO] 🔬 Memory & Payload YARA Scanner active")
 	}
 
-	// 5g. Attach Kernel RingBuffer Drop Telemetry Processor if pinned map exists
+	// 5g. Autonomous BGP-4 Anycast & RFC 7999 RTBH Signaling Engine
+	var bgpSpeaker *bgp.Speaker
+	if *enableBGPFlag {
+		routerID := *bgpRouterIDFlag
+		if routerID == "" {
+			routerID = "192.168.1.8"
+		}
+		bgpCfg := bgp.Config{
+			Enabled:          true,
+			LocalAS:          uint32(*bgpLocalASFlag),
+			PeerAS:           uint32(*bgpPeerASFlag),
+			RouterID:         routerID,
+			PeerAddress:      *bgpPeerIPFlag,
+			PeerPort:         *bgpPeerPortFlag,
+			RTBHThresholdPPS: *bgpRTBHThresholdPPS,
+			RecoveryDuration: *bgpRecoveryDuration,
+			BlackholeNextHop: *bgpBlackholeNextHop,
+		}
+		bgpSpeaker = bgp.NewSpeaker(bgpCfg)
+		if err := bgpSpeaker.Start(ctx); err != nil {
+			log.Printf("[WARN] BGP Speaker failed to start: %v", err)
+		} else {
+			defer bgpSpeaker.Stop()
+			log.Printf("[INFO] 🌐 Autonomous BGP-4 Anycast & RFC 7999 RTBH Engine active (Peer: AS%d@%s:%d, Threshold: %d PPS, Recovery: %v)",
+				*bgpPeerASFlag, *bgpPeerIPFlag, *bgpPeerPortFlag, *bgpRTBHThresholdPPS, *bgpRecoveryDuration)
+		}
+	}
+
+	// 5h. Attach Kernel RingBuffer Drop Telemetry Processor if pinned map exists
 	pinRingbufCandidates := []string{
 		filepath.Join(ebpf.DefaultBPFPinPath, "telemetry_ringbuf"),
 		"/sys/fs/bpf/telemetry_ringbuf",
@@ -269,6 +321,9 @@ func main() {
 	for _, pinPath := range pinRingbufCandidates {
 		if rbMap, err := ciliumEbpf.LoadPinnedMap(pinPath, nil); err == nil {
 			telemetryProc, err := bpf.NewReader(&bpf.TelemetryObjects{TelemetryRingbuf: rbMap}, bpf.FuncBus(func(event bpf.DropEvent) {
+				if bgpSpeaker != nil && (event.DropReason == bpf.DropReasonRateLimit || event.DropReason == bpf.DropReasonSynFlood) {
+					bgpSpeaker.RecordIngressMetrics(event.IP().String(), *bgpRTBHThresholdPPS)
+				}
 				if controllerClient != nil {
 					ev := &copsecproto.LogEvent{
 						Source:           "ebpf_xdp",
@@ -287,6 +342,45 @@ func main() {
 				log.Printf("[INFO] ⚡ Zero-Copy Kernel Telemetry RingBuffer processor attached at %s", pinPath)
 				break
 			}
+		}
+	}
+
+	// 5h. Attach Live Forensic Raw Packet Stream RingBuffer Processor
+	pinRawRingbufCandidates := []string{
+		filepath.Join(ebpf.DefaultBPFPinPath, "raw_packet_ringbuf"),
+		"/sys/fs/bpf/raw_packet_ringbuf",
+	}
+	var rawRbMap *ciliumEbpf.Map
+	for _, pinPath := range pinRawRingbufCandidates {
+		if m, err := ciliumEbpf.LoadPinnedMap(pinPath, nil); err == nil {
+			rawRbMap = m
+			log.Printf("[INFO] Attached to pinned raw_packet_ringbuf at %s", pinPath)
+			break
+		}
+	}
+	if rawRbMap == nil {
+		rawRbMap = ebpf.GetXDPEngine().GetRawPacketMap()
+	}
+	if rawRbMap != nil {
+		rawProc, err := bpf.NewRawPacketProcessor(rawRbMap, bpf.RawPacketFuncBus(func(sample bpf.RawPacketSample) {
+			if controllerClient != nil {
+				srcIP := sample.SrcIPString()
+				ev := &copsecproto.LogEvent{
+					Source:           "ebpf_pcap",
+					RawLine:          fmt.Sprintf("[PCAP_SAMPLE] src_ip=%s src_port=%d proto=%d reason=%s cap_len=%d wire_len=%d hex=%s",
+						srcIP, sample.SrcPort(), sample.Protocol(), sample.DropReasonString(), sample.CaptureLen, sample.WireLen, sample.HexString()),
+					ClientIp:         srcIP,
+					ThreatScore:      85,
+					RuleId:           fmt.Sprintf("pcap_%s", strings.ToLower(sample.DropReasonString())),
+					TimestampMs:      int64(sample.TimestampNs / 1000000),
+				}
+				controllerClient.Submit(ev)
+			}
+		}))
+		if err == nil {
+			rawProc.Start(ctx)
+			defer rawProc.Close()
+			log.Println("[INFO] 📡 Live Forensic Raw Packet RingBuffer stream processor attached")
 		}
 	}
 

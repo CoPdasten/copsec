@@ -73,6 +73,13 @@ func NewDNSSinkholeEngine(onSinkhole func(ev DNSSinkholeEvent)) *DNSSinkholeEngi
 	}
 }
 
+// SetEventHandler dynamically configures the asynchronous sinkhole callback.
+func (e *DNSSinkholeEngine) SetEventHandler(onSinkhole func(ev DNSSinkholeEvent)) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.onSinkhole = onSinkhole
+}
+
 // CalculateShannonEntropy measures randomness to identify algorithmic Domain Generation Algorithms (DGA).
 func CalculateShannonEntropy(s string) float64 {
 	if len(s) == 0 {
