@@ -4533,6 +4533,14 @@ ${notes}
         const addr = s.source_port > 0 ? `${escapeHTML(s.source_ip)}:${s.source_port}` : escapeHTML(s.source_ip);
         const lens = `${s.wire_len}B / ${s.capture_len}B`;
 
+        tr.style.cursor = 'pointer';
+        tr.title = 'Click to open Wireshark Hex/ASCII Inspector Drawer';
+        tr.onclick = function(e) {
+          if (!e.target.closest('button')) {
+            openHexDumpModalByIndex(idx);
+          }
+        };
+
         tr.innerHTML = `
           <td style="color: var(--text-muted); font-size: 11px;">${ts}</td>
           <td>${stackBadge}</td>
@@ -4543,7 +4551,7 @@ ${notes}
           <td style="font-size: 11px; color: var(--text-muted);">${lens}</td>
           <td style="text-align: right; display: flex; gap: 4px; justify-content: flex-end;">
             <button class="btn btn-action" onclick="openHexDumpModalByIndex(${idx})">[INSPECT]</button>
-            <button class="btn btn-action" style="color: #38bdf8; border-color: rgba(56, 189, 248, 0.4);" onclick="exportSingleSampleByIndex(${idx})" title="Download packet as Libpcap 2.4 format">[PCAP]</button>
+            <button class="btn btn-action" style="color: #38bdf8; border-color: rgba(56, 189, 248, 0.4);" onclick="exportSingleSampleByIndex(${idx})" title="Download packet as Libpcap 2.4 format">[EXPORT .PCAP]</button>
           </td>
         `;
         tbody.appendChild(tr);
@@ -4730,7 +4738,7 @@ ${notes}
 
       for (let offset = 0; offset < bytes.length; offset += 16) {
         const chunk = bytes.slice(offset, offset + 16);
-        const offsetStr = offset.toString(16).padStart(7, '0');
+        const offsetStr = offset.toString(16).padStart(8, '0');
 
         let hexCols1 = '';
         let hexCols2 = '';

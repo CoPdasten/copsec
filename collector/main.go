@@ -55,8 +55,9 @@ func main() {
 	enableBGPFlag := flag.Bool("enable-bgp", false, "Enable Autonomous BGP-4 Anycast & RFC 7999 RTBH signaling engine")
 	bgpPeerIPFlag := flag.String("bgp-peer-ip", "192.168.1.1", "Upstream BGP peer router IP address")
 	bgpPeerPortFlag := flag.Int("bgp-peer-port", 179, "Upstream BGP peer port")
-	bgpLocalASFlag := flag.Uint("bgp-local-as", 65001, "Local Autonomous System Number (ASN)")
-	bgpPeerASFlag := flag.Uint("bgp-peer-as", 65001, "Upstream peer Autonomous System Number (ASN)")
+	bgpASFlag := flag.Uint("bgp-as", 65001, "Autonomous System Number (ASN) for local and upstream peer peering")
+	bgpLocalASFlag := flag.Uint("bgp-local-as", 0, "Local Autonomous System Number (ASN, overrides --bgp-as)")
+	bgpPeerASFlag := flag.Uint("bgp-peer-as", 0, "Upstream peer Autonomous System Number (ASN, overrides --bgp-as)")
 	bgpRouterIDFlag := flag.String("bgp-router-id", "", "BGP Router ID (defaults to host IP or 192.168.1.8)")
 	bgpRTBHThresholdPPS := flag.Uint64("bgp-rtbh-threshold-pps", 200000, "Ingress packet flood threshold to trigger upstream RTBH blackholing")
 	bgpRecoveryDuration := flag.Duration("bgp-recovery-duration", 60*time.Second, "Quiet recovery duration before withdrawing RTBH blackhole")
@@ -292,10 +293,18 @@ func main() {
 		if routerID == "" {
 			routerID = "192.168.1.8"
 		}
+		localAS := uint32(*bgpASFlag)
+		if *bgpLocalASFlag != 0 {
+			localAS = uint32(*bgpLocalASFlag)
+		}
+		peerAS := uint32(*bgpASFlag)
+		if *bgpPeerASFlag != 0 {
+			peerAS = uint32(*bgpPeerASFlag)
+		}
 		bgpCfg := bgp.Config{
 			Enabled:          true,
-			LocalAS:          uint32(*bgpLocalASFlag),
-			PeerAS:           uint32(*bgpPeerASFlag),
+			LocalAS:          localAS,
+			PeerAS:           peerAS,
 			RouterID:         routerID,
 			PeerAddress:      *bgpPeerIPFlag,
 			PeerPort:         *bgpPeerPortFlag,
@@ -308,8 +317,8 @@ func main() {
 			log.Printf("[WARN] BGP Speaker failed to start: %v", err)
 		} else {
 			defer bgpSpeaker.Stop()
-			log.Printf("[INFO] 🌐 Autonomous BGP-4 Anycast & RFC 7999 RTBH Engine active (Peer: AS%d@%s:%d, Threshold: %d PPS, Recovery: %v)",
-				*bgpPeerASFlag, *bgpPeerIPFlag, *bgpPeerPortFlag, *bgpRTBHThresholdPPS, *bgpRecoveryDuration)
+			log.Printf("[INFO] 🌐 Autonomous BGP-4 Anycast & RFC 7999 RTBH Engine active (Local: AS%d, Peer: AS%d@%s:%d, Threshold: %d PPS, Recovery: %v)",
+				localAS, peerAS, *bgpPeerIPFlag, *bgpPeerPortFlag, *bgpRTBHThresholdPPS, *bgpRecoveryDuration)
 		}
 	}
 
