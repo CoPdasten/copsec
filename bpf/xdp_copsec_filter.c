@@ -616,6 +616,16 @@ int copsec_xdp(struct xdp_md *ctx) {
         __u32 ip_hdr_len = ip->ihl * 4;
         if (unlikely(ip_hdr_len < sizeof(struct iphdr) || (void *)ip + ip_hdr_len > data_end)) return XDP_PASS;
 
+        // 0. Immutable Static Bypass for Private / Management / Loopback Networks (RFC 1918)
+        __u32 saddr_host = bpf_ntohl(ip->saddr);
+        if (unlikely((saddr_host & 0xFF000000) == 0x0A000000 ||   // 10.0.0.0/8
+                     (saddr_host & 0xFFF00000) == 0xAC100000 ||   // 172.16.0.0/12
+                     (saddr_host & 0xFFFF0000) == 0xC0A80000 ||   // 192.168.0.0/16
+                     (saddr_host & 0xFF000000) == 0x7F000000)) {   // 127.0.0.0/8
+            increment_counter(COPSEC_PACKETS_WHITELISTED);
+            return XDP_PASS;
+        }
+
         // 1. In-Kernel Whitelist Fast Bypass
         __u32* is_whitelisted = bpf_map_lookup_elem(&whitelisted_ips, &ip->saddr);
         if (unlikely(is_whitelisted && *is_whitelisted == 1)) {
@@ -686,6 +696,14 @@ int copsec_xdp(struct xdp_md *ctx) {
                     return XDP_PASS;
                 }
             }
+        }
+
+        // 0. Immutable Static Bypass for IPv6 ULA (RFC 4193), Link-Local, and Loopback
+        const __u8 *s6 = (const __u8 *)&ip6->saddr;
+        if (unlikely((s6[0] & 0xFE) == 0xFC || // RFC 4193 ULA fc00::/7
+                     (s6[0] == 0xFE && (s6[1] & 0xC0) == 0x80))) { // fe80::/10
+            increment_counter(COPSEC_PACKETS_WHITELISTED);
+            return XDP_PASS;
         }
 
         struct in6_addr_key v6_key;

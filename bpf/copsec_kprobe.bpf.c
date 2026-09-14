@@ -32,4 +32,35 @@ int tracepoint__syscalls__sys_enter_execve(struct trace_event_raw_sys_enter* ctx
     return 0;
 }
 
+// Host-Level Socket & Ingress Process Correlation Event
+struct sock_trace_event {
+    __u32 pid;
+    __u32 uid;
+    __u16 sport;
+    __u16 dport;
+    __u32 saddr;
+    __u32 daddr;
+    char comm[16];
+    __u8 protocol;
+    __u8 oldstate;
+    __u8 newstate;
+    __u8 pad;
+};
+
+struct {
+    __uint(type, BPF_MAP_TYPE_RINGBUF);
+    __uint(max_entries, 1 << 20);
+} sock_events SEC(".maps");
+
+SEC("tracepoint/sock/inet_sock_set_state")
+int tracepoint__sock__inet_sock_set_state(void *ctx) {
+    struct sock_trace_event* event = bpf_ringbuf_reserve(&sock_events, sizeof(*event), 0);
+    if (!event) return 0;
+    event->pid = bpf_get_current_pid_tgid() >> 32;
+    event->uid = bpf_get_current_uid_gid();
+    bpf_get_current_comm(event->comm, sizeof(event->comm));
+    bpf_ringbuf_submit(event, 0);
+    return 0;
+}
+
 char LICENSE[] SEC("license") = "GPL";

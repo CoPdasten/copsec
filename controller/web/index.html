@@ -694,6 +694,9 @@
       <div class="stat-pill clickable" onclick="openQuarantineModal()" title="View and manage kernel XDP quarantine list">
         ACTIVE BANS (XDP): <span class="val" id="statBans">0</span>
       </div>
+      <button id="btnEmergencyFlush" class="btn btn-accent" style="padding: 4px 10px; font-weight: 700; display: flex; align-items: center; gap: 6px; background: #450a0a; border: 1px solid #ef4444; color: #fecaca; cursor: pointer;" onclick="openEmergencyFlushModal()" title="Operational Break-Glass: Flush All Bans Across Fleet">
+        <span>🚨</span> <span>[🚨 BREAK-GLASS FLUSH]</span>
+      </button>
       <button id="btnExportAuditPdf" class="btn btn-accent" style="padding: 4px 10px; font-weight: 700; display: flex; align-items: center; gap: 6px; background: #1c1917; border: 1px solid #78716c; color: #f5f5f4; cursor: pointer;" onclick="exportAuditCompliancePDF()" title="Export Executive Cryptographic Compliance SLA PDF Report">
         <span>📄</span> <span>[ 📄 Export Audit Compliance Report ]</span>
       </button>
@@ -1377,6 +1380,7 @@
         <span id="drawerISOBadge" class="badge badge-iso">[LOCAL]</span>
       </div>
       <div style="display: flex; gap: 6px; align-items: center;">
+        <button class="btn" style="padding: 3px 8px; font-size: 11px; border-color: #38bdf8; color: #38bdf8;" onclick="exportForensicBundleZip()" title="Export Forensic Incident Bundle (.zip) with PCAP, Merkle proof, and DFIR report">[EXPORT BUNDLE (.ZIP)]</button>
         <button class="btn" style="padding: 3px 8px; font-size: 11px;" onclick="dismissCurrentDrawerAlert()">[DISMISS ALERT]</button>
         <button class="btn" onclick="closeDrawer()">[CLOSE]</button>
       </div>
@@ -1457,6 +1461,7 @@
         <div style="display: flex; gap: 8px; margin-top: 6px;">
           <button class="btn" onclick="saveDrawerNotes()">Save Notes</button>
           <button class="btn" onclick="exportCaseMarkdown()">[Export Case .MD]</button>
+          <button class="btn" style="border-color: #38bdf8; color: #38bdf8;" onclick="exportForensicBundleZip()">[Export Forensic Bundle (.zip)]</button>
         </div>
       </div>
 
@@ -1469,6 +1474,24 @@
           <button class="btn" onclick="quickDrawerUnban()">[Unban IP]</button>
           <button class="btn" onclick="quickDrawerWhitelist()">[Whitelist CIDR]</button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Operational Break-Glass Panic Flush Modal -->
+  <div id="emergencyFlushModal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.88); z-index: 2100; align-items: center; justify-content: center;">
+    <div class="card" style="width: 560px; border: 2px solid #ef4444; box-shadow: 0 0 25px rgba(239, 68, 68, 0.4); background: #0c0a09;">
+      <div class="card-title" style="color: #ef4444; display: flex; align-items: center; gap: 8px;">
+        <span>🚨 OPERATIONAL BREAK-GLASS: EMERGENCY FLUSH</span>
+      </div>
+      <div style="padding: 12px 0; font-size: 12px; color: #e4e4e7; line-height: 1.5;">
+        <p style="margin-bottom: 8px;"><strong style="color: #f87171;">CRITICAL WARNING:</strong> This will immediately purge <strong>ALL</strong> active quarantine rules, eBPF/XDP blacklist maps, tarpit tables, and iptables blocks across <strong>the entire fleet</strong>.</p>
+        <p style="margin-bottom: 12px; color: var(--text-muted);">To prevent accidental triggering, type <code style="background: #27272a; padding: 2px 6px; color: #ef4444; font-weight: 700; border: 1px solid #ef4444;">CONFIRM-FLUSH</code> below to unlock the panic purge:</p>
+        <input id="txtEmergencyConfirm" type="text" class="input-box" style="width: 100%; font-family: monospace; font-size: 13px; letter-spacing: 1px; border-color: #ef4444; background: #000000;" placeholder="Type CONFIRM-FLUSH" oninput="checkEmergencyFlushInput()">
+      </div>
+      <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px;">
+        <button class="btn" onclick="closeEmergencyFlushModal()">[CANCEL]</button>
+        <button id="btnExecuteEmergencyFlush" class="btn" style="background: #7f1d1d; border-color: #ef4444; color: #fecaca; opacity: 0.4; cursor: not-allowed;" disabled onclick="executeEmergencyFlush()">[PURGE ALL BANS ACROSS FLEET]</button>
       </div>
     </div>
   </div>
@@ -3620,6 +3643,90 @@ ${notes}
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
       showToast(`[EXPORT] Case report downloaded: ${filename}`, 'ok');
+    }
+
+    function exportForensicBundleZip() {
+      if (!currentDrawerEvent) {
+        showToast('No active incident selected to export', 'crit');
+        return;
+      }
+      const ev = currentDrawerEvent;
+      const incidentId = ev.id || 1;
+      showToast(`Generating Forensic Case Bundle (.zip) for Incident #${incidentId}...`, 'info');
+
+      const downloadUrl = `/api/incidents/${incidentId}/export-bundle`;
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      link.download = `copsec_incident_${incidentId}.zip`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+
+    function openEmergencyFlushModal() {
+      const modal = document.getElementById('emergencyFlushModal');
+      if (modal) {
+        modal.style.display = 'flex';
+        const input = document.getElementById('txtEmergencyConfirm');
+        if (input) {
+          input.value = '';
+          input.focus();
+        }
+        checkEmergencyFlushInput();
+      }
+    }
+
+    function closeEmergencyFlushModal() {
+      const modal = document.getElementById('emergencyFlushModal');
+      if (modal) modal.style.display = 'none';
+    }
+
+    function checkEmergencyFlushInput() {
+      const input = document.getElementById('txtEmergencyConfirm');
+      const btn = document.getElementById('btnExecuteEmergencyFlush');
+      if (!input || !btn) return;
+      if (input.value.trim() === 'CONFIRM-FLUSH') {
+        btn.disabled = false;
+        btn.style.opacity = '1';
+        btn.style.cursor = 'pointer';
+      } else {
+        btn.disabled = true;
+        btn.style.opacity = '0.4';
+        btn.style.cursor = 'not-allowed';
+      }
+    }
+
+    async function executeEmergencyFlush() {
+      const input = document.getElementById('txtEmergencyConfirm');
+      if (!input || input.value.trim() !== 'CONFIRM-FLUSH') return;
+
+      const btn = document.getElementById('btnExecuteEmergencyFlush');
+      if (btn) {
+        btn.disabled = true;
+        btn.innerText = 'PURGING FLEET BANS...';
+      }
+
+      try {
+        const res = await fetch('/api/quarantine/emergency-flush', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          showToast(`🚨 BREAK-GLASS EXECUTED: Released ${data.flushed_count} quarantine rules across fleet`, 'crit');
+          closeEmergencyFlushModal();
+          if (typeof fetchBans === 'function') fetchBans();
+          if (typeof fetchDashboardStats === 'function') fetchDashboardStats();
+        } else {
+          showToast(`Emergency flush failed: ${data.error || 'Server error'}`, 'crit');
+        }
+      } catch (err) {
+        showToast(`Emergency flush request failed: ${err.message}`, 'crit');
+      } finally {
+        if (btn) {
+          btn.innerText = '[PURGE ALL BANS ACROSS FLEET]';
+        }
+      }
     }
 
     function closeDrawer() {

@@ -61,6 +61,8 @@ type StoredEvent struct {
 	SnortPriority     int     `json:"snort_priority,omitempty"`
 	PrevHash          string  `json:"prev_hash,omitempty"`
 	EntryHash         string  `json:"entry_hash,omitempty"`
+	TargetPID         int32   `json:"target_pid,omitempty"`
+	TargetComm        string  `json:"target_comm,omitempty"`
 }
 
 // ToUnifiedTelemetry converts a StoredEvent into the canonical UnifiedTelemetry contract.
@@ -505,6 +507,12 @@ func (s *StorageEngine) initSchema() error {
 	s.ensureColumnExists("events", "containment_state", "TEXT DEFAULT 'ACTIVE'")
 	s.ensureColumnExists("events", "prev_hash", "TEXT DEFAULT ''")
 	s.ensureColumnExists("events", "entry_hash", "TEXT DEFAULT ''")
+	s.ensureColumnExists("events", "target_pid", "INTEGER DEFAULT 0")
+	s.ensureColumnExists("events", "target_comm", "TEXT DEFAULT ''")
+	s.ensureColumnExists("telemetry", "target_pid", "INTEGER DEFAULT 0")
+	s.ensureColumnExists("telemetry", "target_comm", "TEXT DEFAULT ''")
+	s.ensureColumnExists("alerts", "target_pid", "INTEGER DEFAULT 0")
+	s.ensureColumnExists("alerts", "target_comm", "TEXT DEFAULT ''")
 	s.ensureColumnExists("alerts", "containment_state", "TEXT DEFAULT 'ACTIVE'")
 	s.ensureColumnExists("active_bans", "expire_time_ms", "INTEGER DEFAULT 0")
 	s.ensureColumnExists("active_bans", "penalty_tier", "TEXT DEFAULT 'TEMP_ISOLATION'")
@@ -730,9 +738,9 @@ func (s *StorageEngine) InsertEvent(ev *StoredEvent) error {
 	}()
 
 	// Insert record to events table
-	query := `INSERT INTO events (node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis, analyst_notes, playbook_progress, triage_status, containment_state, prev_hash, entry_hash)
-	          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	res, err := tx.Exec(query, ev.NodeID, ev.Source, ev.RawLine, ev.ClientIP, ev.StatusCode, ev.TimestampMs, ev.RuleID, ev.MitreTechniqueID, ev.ThreatScore, ev.AIAnalysis, ev.AnalystNotes, ev.PlaybookProgress, ev.TriageStatus, containmentState, ev.PrevHash, "")
+	query := `INSERT INTO events (node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis, analyst_notes, playbook_progress, triage_status, containment_state, prev_hash, entry_hash, target_pid, target_comm)
+	          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	res, err := tx.Exec(query, ev.NodeID, ev.Source, ev.RawLine, ev.ClientIP, ev.StatusCode, ev.TimestampMs, ev.RuleID, ev.MitreTechniqueID, ev.ThreatScore, ev.AIAnalysis, ev.AnalystNotes, ev.PlaybookProgress, ev.TriageStatus, containmentState, ev.PrevHash, "", ev.TargetPID, ev.TargetComm)
 	if err != nil {
 		return fmt.Errorf("failed to insert event record: %w", err)
 	}
@@ -750,9 +758,9 @@ func (s *StorageEngine) InsertEvent(ev *StoredEvent) error {
 	if _, err := tx.Exec(`UPDATE events SET entry_hash = ? WHERE id = ?`, entryH, id); err != nil {
 		return fmt.Errorf("failed to update event entry_hash: %w", err)
 	}
-	if _, err := tx.Exec(`INSERT INTO telemetry (id, node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis, analyst_notes, playbook_progress, triage_status, containment_state, prev_hash, entry_hash)
-	                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		ev.ID, ev.NodeID, ev.Source, ev.RawLine, ev.ClientIP, ev.StatusCode, ev.TimestampMs, ev.RuleID, ev.MitreTechniqueID, ev.ThreatScore, ev.AIAnalysis, ev.AnalystNotes, ev.PlaybookProgress, ev.TriageStatus, containmentState, ev.PrevHash, entryH); err != nil {
+	if _, err := tx.Exec(`INSERT INTO telemetry (id, node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis, analyst_notes, playbook_progress, triage_status, containment_state, prev_hash, entry_hash, target_pid, target_comm)
+	                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		ev.ID, ev.NodeID, ev.Source, ev.RawLine, ev.ClientIP, ev.StatusCode, ev.TimestampMs, ev.RuleID, ev.MitreTechniqueID, ev.ThreatScore, ev.AIAnalysis, ev.AnalystNotes, ev.PlaybookProgress, ev.TriageStatus, containmentState, ev.PrevHash, entryH, ev.TargetPID, ev.TargetComm); err != nil {
 		return fmt.Errorf("failed to insert telemetry record: %w", err)
 	}
 
@@ -822,9 +830,9 @@ func (s *StorageEngine) InsertAlert(ev *StoredEvent) error {
 		containmentState = "ACTIVE"
 	}
 
-	query := `INSERT INTO alerts (node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis, analyst_notes, playbook_progress, triage_status, containment_state)
-	          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	res, err := s.db.Exec(query, ev.NodeID, ev.Source, ev.RawLine, ev.ClientIP, ev.StatusCode, ev.TimestampMs, ev.RuleID, ev.MitreTechniqueID, ev.ThreatScore, ev.AIAnalysis, ev.AnalystNotes, ev.PlaybookProgress, ev.TriageStatus, containmentState)
+	query := `INSERT INTO alerts (node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis, analyst_notes, playbook_progress, triage_status, containment_state, target_pid, target_comm)
+	          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	res, err := s.db.Exec(query, ev.NodeID, ev.Source, ev.RawLine, ev.ClientIP, ev.StatusCode, ev.TimestampMs, ev.RuleID, ev.MitreTechniqueID, ev.ThreatScore, ev.AIAnalysis, ev.AnalystNotes, ev.PlaybookProgress, ev.TriageStatus, containmentState, ev.TargetPID, ev.TargetComm)
 	if err != nil {
 		return err
 	}
@@ -1333,6 +1341,21 @@ func (s *StorageEngine) RemoveBan(ip string) error {
 	return err
 }
 
+// EmergencyFlushAllBans marks all active bans as EMERGENCY_FLUSH and clears mitigated IP memory map.
+func (s *StorageEngine) EmergencyFlushAllBans() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.mitigatedIPs.Range(func(key, value interface{}) bool {
+		s.mitigatedIPs.Delete(key)
+		return true
+	})
+	query := `UPDATE active_bans SET status = 'EMERGENCY_FLUSH', l3_active = 0, l4_active = 0, l7_active = 0 WHERE status = 'ACTIVE'`
+	_, err := s.db.Exec(query)
+	return err
+}
+
+
 // GetActiveBans returns currently quarantined IPs (backward compatible).
 func (s *StorageEngine) GetActiveBans() ([]ActiveBanRecord, error) {
 	s.mu.RLock()
@@ -1414,6 +1437,71 @@ func (s *StorageEngine) GetRecentSOARActions(limit int) ([]SOARActionRecord, err
 		}
 	}
 	return list, nil
+}
+
+// GetEventByID retrieves a specific event by its ID.
+func (s *StorageEngine) GetEventByID(id int64) (*StoredEvent, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	query := `SELECT id, node_id, source, raw_line, client_ip, status_code, timestamp_ms, rule_id, mitre_technique_id, threat_score, ai_analysis, analyst_notes, playbook_progress, triage_status, target_pid, target_comm
+	          FROM events WHERE id = ? LIMIT 1`
+	row := s.db.QueryRow(query, id)
+	ev := &StoredEvent{}
+	var notes, pb, tStatus, tComm sql.NullString
+	var tPid sql.NullInt32
+	if err := row.Scan(&ev.ID, &ev.NodeID, &ev.Source, &ev.RawLine, &ev.ClientIP, &ev.StatusCode, &ev.TimestampMs, &ev.RuleID, &ev.MitreTechniqueID, &ev.ThreatScore, &ev.AIAnalysis, &notes, &pb, &tStatus, &tPid, &tComm); err != nil {
+		return nil, fmt.Errorf("event with id %d not found: %w", id, err)
+	}
+	ev.Severity = models.CalculateSeverity(ev.ThreatScore)
+	ev.AnalystNotes = notes.String
+	ev.PlaybookProgress = pb.String
+	ev.TriageStatus = tStatus.String
+	ev.TargetPID = tPid.Int32
+	ev.TargetComm = tComm.String
+	if ev.ClientIP != "" && ev.ClientIP != "-" {
+		loc := geoip.GetDefaultEngine().Lookup(ev.ClientIP)
+		ev.CountryCode = loc.CountryCode
+		ev.CountryName = loc.CountryName
+		ev.City = loc.City
+		ev.ASN = loc.ASN
+		ev.FlagEmoji = loc.FlagEmoji
+	}
+	return ev, nil
+}
+
+// GetEventAuditTrail retrieves cryptographic SHA-256 chain slice for an event.
+func (s *StorageEngine) GetEventAuditTrail(id int64) (map[string]interface{}, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	query := `SELECT id, timestamp_ms, client_ip, threat_score, prev_hash, entry_hash
+	          FROM events WHERE id = ? LIMIT 1`
+	row := s.db.QueryRow(query, id)
+
+	var evID, ts int64
+	var ip, prevHash, entryHash string
+	var score int
+
+	if err := row.Scan(&evID, &ts, &ip, &score, &prevHash, &entryHash); err != nil {
+		return nil, fmt.Errorf("audit record for id %d not found: %w", id, err)
+	}
+
+	expectedHash := CalculateLogHash(evID, ts, ip, score, prevHash)
+	verified := (expectedHash == entryHash)
+
+	return map[string]interface{}{
+		"record_id":          evID,
+		"timestamp_ms":       ts,
+		"client_ip":          ip,
+		"threat_score":       score,
+		"previous_hash":      prevHash,
+		"entry_hash":         entryHash,
+		"calculated_hash":    expectedHash,
+		"hash_valid":         verified,
+		"ledger_standard":    "SHA-256 Merkle Ledger (RFC 6962 Slice)",
+		"verification_state": map[bool]string{true: "IMMUTABLE_VERIFIED", false: "TAMPERED"}[verified],
+	}, nil
 }
 
 // GetRecentEvents retrieves the latest events.

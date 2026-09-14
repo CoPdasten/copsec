@@ -22,9 +22,11 @@ import (
 	"github.com/copsec/controller/pkg/models"
 	"github.com/copsec/controller/pkg/rules"
 	"github.com/copsec/controller/pkg/sigma"
+	"github.com/copsec/controller/pkg/siem"
 	"github.com/copsec/controller/pkg/snort"
 	"github.com/copsec/controller/pkg/soar"
 	"github.com/copsec/controller/pkg/threat"
+	"github.com/copsec/controller/pkg/webhook"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/keepalive"
@@ -52,18 +54,20 @@ type NodeSession struct {
 type CentralServer struct {
 	copsecproto.UnimplementedCopsecStreamServiceServer
 
-	mu           sync.RWMutex
-	storage      *StorageEngine
-	analyzer     *RuleEngine
-	sigmaEngine  *SigmaEngine
-	ttlManager   *TTLBanManager
-	wsHub        *WSHub
-	threatEngine *threat.ScoringEngine
-	soarEngine   *AutonomousSOAREngine
-	threatIntel  *ThreatIntelEngine
-	nodes        map[string]*NodeSession
-	fleetManager *FleetManager
-	eventSubChan chan *StoredEvent
+	mu              sync.RWMutex
+	storage         *StorageEngine
+	analyzer        *RuleEngine
+	sigmaEngine     *SigmaEngine
+	ttlManager      *TTLBanManager
+	wsHub           *WSHub
+	threatEngine    *threat.ScoringEngine
+	soarEngine      *AutonomousSOAREngine
+	threatIntel     *ThreatIntelEngine
+	nodes           map[string]*NodeSession
+	fleetManager    *FleetManager
+	eventSubChan    chan *StoredEvent
+	siemForwarder   *siem.SyslogForwarder
+	webhookNotifier *webhook.Notifier
 
 	// Autonomous Auto-Ban Tracker
 	autoBanMu        sync.Mutex
@@ -155,6 +159,20 @@ func (s *CentralServer) SetFleetManager(fm *FleetManager) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.fleetManager = fm
+}
+
+// SetSIEMForwarder attaches the real-time CEF / JSON Syslog forwarder.
+func (s *CentralServer) SetSIEMForwarder(f *siem.SyslogForwarder) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.siemForwarder = f
+}
+
+// SetWebhookNotifier attaches the real-time Slack/Discord/SOAR alert dispatcher.
+func (s *CentralServer) SetWebhookNotifier(n *webhook.Notifier) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.webhookNotifier = n
 }
 
 // GetFleetManager returns the attached FleetManager instance.
@@ -595,6 +613,16 @@ func (s *CentralServer) processEvent(nodeID string, event *copsecproto.LogEvent)
 		SnortAnomalyScore:  snortAnomalyScore,
 		SnortConfidence:    snortConfidence,
 		SnortPriority:      snortPriority,
+		TargetPID:          event.TargetPid,
+		TargetComm:         event.TargetComm,
+	}
+
+	if stored.TargetComm == "" {
+		if event.TargetPid > 0 {
+			stored.TargetComm = fmt.Sprintf("pid_%d", event.TargetPid)
+		} else if strings.HasPrefix(event.Source, "ebpf") || strings.HasPrefix(event.RuleId, "xdp_") {
+			stored.TargetComm = "KERNEL_FASTPATH_DROP [PID: 0]"
+		}
 	}
 
 	if stored.TimestampMs == 0 {
@@ -618,6 +646,50 @@ func (s *CentralServer) processEvent(nodeID string, event *copsecproto.LogEvent)
 		if isAlert {
 			_ = s.storage.InsertAlert(stored)
 		}
+	}
+
+	// Asynchronous SIEM Syslog & Alert Webhook Dispatch
+	s.mu.RLock()
+	sf := s.siemForwarder
+	wn := s.webhookNotifier
+	s.mu.RUnlock()
+
+	if sf != nil {
+		sf.Push(&siem.AlertEvent{
+			Timestamp:   time.UnixMilli(stored.TimestampMs),
+			NodeID:      stored.NodeID,
+			Source:      stored.Source,
+			SourceIP:    stored.ClientIP,
+			DestIP:      "0.0.0.0",
+			RuleID:      stored.RuleID,
+			RuleName:    stored.RuleID,
+			MitreID:     stored.MitreTechniqueID,
+			ThreatScore: stored.ThreatScore,
+			Severity:    string(stored.Severity),
+			Action:      stored.ContainmentState,
+			Message:     stored.RawLine,
+			TargetPID:   stored.TargetPID,
+			TargetComm:  stored.TargetComm,
+		})
+	}
+
+	if wn != nil && (stored.Severity == "CRITICAL" || stored.Severity == "HIGH" || stored.ThreatScore >= 70) {
+		wn.Dispatch(&webhook.WebhookAlert{
+			Timestamp:   time.UnixMilli(stored.TimestampMs),
+			NodeID:      stored.NodeID,
+			SourceIP:    stored.ClientIP,
+			RuleID:      stored.RuleID,
+			RuleName:    stored.RuleID,
+			MitreID:     stored.MitreTechniqueID,
+			ThreatScore: stored.ThreatScore,
+			Severity:    string(stored.Severity),
+			Action:      stored.ContainmentState,
+			Details:     stored.RawLine,
+			Country:     stored.CountryName,
+			ASN:         stored.ASN,
+			TargetPID:   stored.TargetPID,
+			TargetComm:  stored.TargetComm,
+		})
 	}
 
 	// Asynchronously enrich IP with IPinfo threat intelligence

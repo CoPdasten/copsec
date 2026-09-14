@@ -257,6 +257,38 @@ func (tm *TTLBanManager) UnbanIP(ip string) error {
 	return nil
 }
 
+// FlushAll terminates all active mitigations across all layers and broadcasts emergency flush to fleet.
+func (tm *TTLBanManager) FlushAll() int {
+	tm.mu.Lock()
+	ips := make([]string, 0, len(tm.activeBans))
+	for ip := range tm.activeBans {
+		ips = append(ips, ip)
+	}
+	tm.activeBans = make(map[string]*DetailedBanRecord)
+	cb := tm.onBanChange
+	tm.mu.Unlock()
+
+	for _, ip := range ips {
+		_ = ExecuteAbsoluteUnban(ip)
+		if cb != nil {
+			cb(&DetailedBanRecord{IP: ip, Status: "EMERGENCY_FLUSH"}, "UNBAN")
+		}
+	}
+
+	if tm.storage != nil {
+		_ = tm.storage.EmergencyFlushAllBans()
+		_ = tm.storage.RecordSOARAction("EMERGENCY_FLUSH", "ALL", len(ips))
+	}
+
+	// Broadcast Fleet Flush to all connected edge nodes
+	if tm.server != nil {
+		tm.server.BroadcastSOARCommand("FLUSH_BANS", "ALL", 0)
+	}
+
+	log.Printf("[SOAR_TTL] 🚨 EMERGENCY BREAK-GLASS FLUSH: Released %d quarantined IPs across fleet", len(ips))
+	return len(ips)
+}
+
 // GetActiveBans returns current snapshot of quarantined IPs with live calculated remaining seconds.
 func (tm *TTLBanManager) GetActiveBans() []DetailedBanRecord {
 	tm.mu.RLock()

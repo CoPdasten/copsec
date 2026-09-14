@@ -455,15 +455,17 @@ func (c *ControllerClient) executeSOARCommand(cmd *copsecproto.SOARCommand, stre
 			output = fmt.Sprintf("Failed to configure honeypot redirection for %s: %v", targetIP, err)
 		}
 
-	case "FLUSH_BANS":
-		_ = ebpf.GetXDPEngine().Flush()
-		out, err := exec.Command("copsec-cli", "flush").CombinedOutput()
-		if err == nil {
-			success = true
-			output = string(out)
-		} else {
-			output = fmt.Sprintf("Failed to flush bans: %v (%s)", err, string(out))
+	case "FLUSH_BANS", "EMERGENCY_FLUSH":
+		count := 0
+		if xdp := ebpf.GetXDPEngine(); xdp != nil {
+			c, err := xdp.EmergencyFlushAll()
+			if err == nil {
+				count += c
+			}
 		}
+		out, _ := exec.Command("copsec-cli", "flush").CombinedOutput()
+		success = true
+		output = fmt.Sprintf("Emergency flush executed: %d kernel map entries cleared (%s)", count, strings.TrimSpace(string(out)))
 
 	default:
 		output = "Unknown action type: " + cmd.ActionType

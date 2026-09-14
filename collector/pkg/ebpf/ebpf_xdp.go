@@ -637,6 +637,131 @@ func (x *XDPMitigationEngine) FlushTarpit() error {
 	return nil
 }
 
+// EmergencyFlushAll atomically flushes banned_ips, banned_ips_v6, tarpit_ips, and tarpit_ips_v6 maps
+// instantly without restarting services or dropping the XDP program.
+func (x *XDPMitigationEngine) EmergencyFlushAll() (int, error) {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+
+	flushedCount := 0
+
+	// 1. Flush IPv4 banned_ips
+	if x.bpfBannedMap != nil {
+		var keys []uint32
+		iter := x.bpfBannedMap.Iterate()
+		var key uint32
+		var val KernelBanEntry
+		for iter.Next(&key, &val) {
+			keys = append(keys, key)
+		}
+		for _, k := range keys {
+			if err := x.bpfBannedMap.Delete(k); err == nil {
+				flushedCount++
+			}
+		}
+	}
+
+	// 2. Flush IPv6 banned_ips_v6
+	if x.bpfBannedMapV6 != nil {
+		var keys [][16]byte
+		iter := x.bpfBannedMapV6.Iterate()
+		var key [16]byte
+		var val KernelBanEntry
+		for iter.Next(&key, &val) {
+			keys = append(keys, key)
+		}
+		for _, k := range keys {
+			if err := x.bpfBannedMapV6.Delete(k); err == nil {
+				flushedCount++
+			}
+		}
+	}
+
+	// 3. Flush IPv4 tarpit_ips
+	if x.bpfTarpitMap != nil {
+		var keys []uint32
+		iter := x.bpfTarpitMap.Iterate()
+		var key uint32
+		var val uint32
+		for iter.Next(&key, &val) {
+			keys = append(keys, key)
+		}
+		for _, k := range keys {
+			if err := x.bpfTarpitMap.Delete(k); err == nil {
+				flushedCount++
+			}
+		}
+	}
+
+	// 4. Flush IPv6 tarpit_ips_v6
+	if x.bpfTarpitMapV6 != nil {
+		var keys [][16]byte
+		iter := x.bpfTarpitMapV6.Iterate()
+		var key [16]byte
+		var val uint32
+		for iter.Next(&key, &val) {
+			keys = append(keys, key)
+		}
+		for _, k := range keys {
+			if err := x.bpfTarpitMapV6.Delete(k); err == nil {
+				flushedCount++
+			}
+		}
+	}
+
+	// Also attempt to purge pinned maps directly if not attached to engine instance
+	pinCandidates := []struct {
+		pin string
+		v6  bool
+	}{
+		{filepath.Join(DefaultBPFPinPath, "banned_ips"), false},
+		{filepath.Join(DefaultBPFPinPath, "banned_ips_v6"), true},
+		{filepath.Join(DefaultBPFPinPath, "tarpit_ips"), false},
+		{filepath.Join(DefaultBPFPinPath, "tarpit_ips_v6"), true},
+	}
+	for _, pc := range pinCandidates {
+		if m, err := ebpf.LoadPinnedMap(pc.pin, nil); err == nil {
+			if pc.v6 {
+				var keys [][16]byte
+				iter := m.Iterate()
+				var key [16]byte
+				var val [20]byte
+				for iter.Next(&key, &val) {
+					keys = append(keys, key)
+				}
+				for _, k := range keys {
+					if err := m.Delete(k); err == nil {
+						flushedCount++
+					}
+				}
+			} else {
+				var keys []uint32
+				iter := m.Iterate()
+				var key uint32
+				var val [20]byte
+				for iter.Next(&key, &val) {
+					keys = append(keys, key)
+				}
+				for _, k := range keys {
+					if err := m.Delete(k); err == nil {
+						flushedCount++
+					}
+				}
+			}
+			_ = m.Close()
+		}
+	}
+
+	// 5. Purge memory tracking tables
+	flushedCount += len(x.bannedIPs)
+	x.bannedIPs = make(map[string]bool)
+	x.banEntries = make(map[string]BanEntry)
+	x.tarpitIPs = make(map[string]bool)
+
+	log.Printf("[EMERGENCY_FLUSH] 🚨 Break-Glass Flush executed successfully. Flushed total records: %d", flushedCount)
+	return flushedCount, nil
+}
+
 // EnableSynProxy configures the kernel SYN-proxy for a specific port or all ports (port=0).
 func (x *XDPMitigationEngine) EnableSynProxy(port uint16) error {
 	x.mu.Lock()

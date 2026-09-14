@@ -97,6 +97,33 @@ func (s *RawPacketSample) SrcIPString() string {
 	return "-"
 }
 
+// DstIP parses and extracts the destination IP from the captured Ethernet frame.
+func (s *RawPacketSample) DstIP() net.IP {
+	if s.IPVersion == 6 {
+		// Ethernet header is 14 bytes; IPv6 dst IP is at offset 14 + 24 = 38 (16 bytes)
+		if len(s.Data) >= 54 {
+			ip := make(net.IP, 16)
+			copy(ip, s.Data[38:54])
+			return ip
+		}
+	} else {
+		// Ethernet header is 14 bytes; IPv4 dst IP is at offset 14 + 16 = 30 (4 bytes)
+		if len(s.Data) >= 34 {
+			return net.IPv4(s.Data[30], s.Data[31], s.Data[32], s.Data[33])
+		}
+	}
+	return nil
+}
+
+// DstIPString returns the string representation of the destination IP.
+func (s *RawPacketSample) DstIPString() string {
+	ip := s.DstIP()
+	if ip != nil {
+		return ip.String()
+	}
+	return "-"
+}
+
 // Protocol returns the L4 protocol number (e.g. 6 for TCP, 17 for UDP).
 func (s *RawPacketSample) Protocol() uint8 {
 	if s.IPVersion == 6 {

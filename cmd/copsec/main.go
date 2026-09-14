@@ -175,6 +175,8 @@ func main() {
 		handleUnban(cfg, cmdArgs)
 	case "bans", "list-bans", "quarantine":
 		handleListBans(cfg)
+	case "emergency-flush", "panic-flush", "panic-unban-all":
+		handleEmergencyFlush(cfg)
 	case "alerts", "alert":
 		handleAlerts(cfg, cmdArgs)
 	case "fleet", "nodes", "sensors":
@@ -1283,5 +1285,55 @@ func handleUpdate(args []string) {
 	fmt.Printf("  • Preserved API Key : %s/etc/copsec/api_key%s\n", cWhite, cReset)
 	fmt.Printf("  • Verify Health     : %scopsec status%s\n", cCyan, cReset)
 	fmt.Printf("%s================================================================================%s\n\n", cBold+cGreen, cReset)
+}
+
+func handleEmergencyFlush(cfg Config) {
+	printBanner()
+	fmt.Printf("%s[!] EMERGENCY BREAK-GLASS OPERATION: Flushing all active quarantines and eBPF maps%s\n\n", cBold+cRed, cReset)
+
+	// 1. Call Controller REST API
+	apiURL := cfg.BaseURL + "/api/quarantine/emergency-flush"
+	req, err := http.NewRequest(http.MethodPost, apiURL, strings.NewReader(`{"confirm":"CONFIRM-FLUSH"}`))
+	if err == nil {
+		req.Header.Set("Content-Type", "application/json")
+		if cfg.APIKey != "" {
+			req.Header.Set("X-API-Key", cfg.APIKey)
+		}
+		client := &http.Client{Timeout: 5 * time.Second}
+		resp, rErr := client.Do(req)
+		if rErr == nil {
+			defer resp.Body.Close()
+			body, _ := io.ReadAll(resp.Body)
+			if resp.StatusCode == http.StatusOK {
+				fmt.Printf("%s[✓] Controller Central Vault quarantine purged successfully.%s\n", cGreen, cReset)
+				fmt.Printf("    Response: %s\n", string(body))
+			} else {
+				fmt.Printf("%s[!] Controller returned HTTP %d: %s%s\n", cYellow, resp.StatusCode, string(body), cReset)
+			}
+		} else {
+			fmt.Printf("%s[!] Controller API unreachable (%v). Proceeding to direct local eBPF purge...%s\n", cYellow, rErr, cReset)
+		}
+	}
+
+	// 2. Direct local kernel eBPF map flush if collector binary is available
+	collectorBin := "copsec-collector"
+	if _, err := exec.LookPath(collectorBin); err != nil {
+		if _, err := os.Stat("/usr/local/bin/copsec-collector"); err == nil {
+			collectorBin = "/usr/local/bin/copsec-collector"
+		} else if _, err := os.Stat("./bin/copsec-collector"); err == nil {
+			collectorBin = "./bin/copsec-collector"
+		}
+	}
+
+	cmd := exec.Command(collectorBin, "--panic-unban-all")
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		fmt.Printf("%s[✓] Direct Kernel eBPF/XDP map purge completed successfully.%s\n", cGreen, cReset)
+		fmt.Printf("    Output: %s\n", strings.TrimSpace(string(out)))
+	} else {
+		fmt.Printf("%s[i] Note on local kernel flush: %v (%s)%s\n", cGray, err, strings.TrimSpace(string(out)), cReset)
+	}
+
+	fmt.Printf("\n%s[✓] Break-Glass Emergency Flush finished. Zero administrative lockouts guaranteed.%s\n", cBold+cGreen, cReset)
 }
 

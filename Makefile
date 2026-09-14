@@ -14,9 +14,9 @@ PROTO_DIR := proto
 BPF_SOURCES := $(BPF_DIR)/copsec_xdp.bpf.c $(BPF_DIR)/copsec_kprobe.bpf.c $(BPF_DIR)/copsec_ringbuf.bpf.c
 BPF_OBJECTS := $(BPF_DIR)/copsec_xdp.bpf.o $(BPF_DIR)/copsec_kprobe.bpf.o $(BPF_DIR)/copsec_ringbuf.bpf.o
 
-.PHONY: all bpf collector controller cockpit test vet proto clean help
+.PHONY: all bpf collector controller cockpit cli test vet proto clean help
 
-all: bpf collector controller cockpit
+all: bpf collector controller cockpit cli
 
 $(BIN_DIR):
 	mkdir -p $(BIN_DIR)
@@ -55,6 +55,10 @@ controller: $(BIN_DIR)
 cockpit: $(BIN_DIR)
 	@echo "==> Building copsec-cockpit binary into $(BIN_DIR)/copsec-cockpit..."
 	(cd controller && $(GO) build -ldflags="-s -w" -o ../$(BIN_DIR)/copsec-cockpit .)
+
+cli: $(BIN_DIR)
+	@echo "==> Building copsec CLI binary into $(BIN_DIR)/copsec..."
+	$(GO) build -ldflags="-s -w" -o $(BIN_DIR)/copsec ./cmd/copsec
 
 test:
 	@echo "==> Executing test suites with -race across all packages..."

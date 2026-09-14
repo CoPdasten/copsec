@@ -25,6 +25,7 @@ import (
 	"github.com/copsec/collector/pkg/healing"
 	"github.com/copsec/collector/pkg/honeypot"
 	"github.com/copsec/collector/pkg/tarpit"
+	"github.com/copsec/collector/pkg/ttp"
 	"github.com/copsec/collector/pkg/yara"
 	copsecproto "github.com/copsec/collector/proto"
 )
@@ -42,6 +43,8 @@ func main() {
 	offsetFilePath := flag.String("offset-file", "/var/lib/copsec/offsets.json", "Path to save/load file offsets")
 	whitelistPath := flag.String("whitelist", "/etc/copsec/whitelist.json", "Path to whitelist configuration JSON")
 	whitelistYamlPath := flag.String("whitelist-yaml", "/etc/copsec/whitelist.yaml", "Path to enterprise CIDR whitelist configuration YAML")
+	managementCIDRsFlag := flag.String("management-cidrs", "", "Comma-separated list of management CIDRs to whitelist and bypass in eBPF fast-path")
+	panicUnbanAllFlag := flag.Bool("panic-unban-all", false, "Emergency Break-Glass flush: immediately flush all banned and tarpit kernel eBPF maps and exit")
 	mirrorSockPath := flag.String("mirror-sock", network.DefaultMirrorSocketPath, "Path to TLS Decryption Mirror UNIX domain socket")
 	reaperInterval := flag.Duration("ban-reaper-interval", 15*time.Second, "Interval for dynamic eBPF ban TTL reaper")
 	ifaceFlag := flag.String("interface", "", "Network interface for eBPF/XDP mitigation (e.g. eth0)")
@@ -63,6 +66,15 @@ func main() {
 	bgpRecoveryDuration := flag.Duration("bgp-recovery-duration", 60*time.Second, "Quiet recovery duration before withdrawing RTBH blackhole")
 	bgpBlackholeNextHop := flag.String("bgp-blackhole-next-hop", "192.0.2.1", "RFC 5735 / RFC 7999 blackhole next-hop IP")
 	flag.Parse()
+
+	if *panicUnbanAllFlag {
+		flushed, err := ebpf.GetXDPEngine().EmergencyFlushAll()
+		if err != nil {
+			log.Fatalf("[PANIC_FLUSH_ERROR] Failed to execute emergency flush: %v", err)
+		}
+		log.Printf("[PANIC_FLUSH_SUCCESS] 🚨 Break-Glass Emergency Flush completed. Purged %d banned/tarpit records from kernel maps.", flushed)
+		os.Exit(0)
+	}
 
 	if *controllerIPFlag != "" {
 		trimmed := strings.TrimSpace(*controllerIPFlag)
@@ -170,6 +182,16 @@ func main() {
 		if err := cidrWhitelist.LoadFromFile(finalWhitelistPath); err != nil {
 			log.Printf("[INFO] CIDR Whitelist initialized with %d default RFC1918/loopback subnets", len(cidrWhitelist.ListCIDRs()))
 		}
+	}
+	if *managementCIDRsFlag != "" {
+		for _, cidr := range strings.Split(*managementCIDRsFlag, ",") {
+			trimmed := strings.TrimSpace(cidr)
+			if trimmed != "" {
+				cidrWhitelist.AddCIDR(trimmed, "CLI Management Whitelist")
+				_ = ebpf.GetXDPEngine().AddWhitelistIP(trimmed)
+			}
+		}
+		log.Printf("[INFO] Ingested user management CIDRs into fast-path bypass: %s", *managementCIDRsFlag)
 	}
 	dpiInspector := dpi.GetDefaultInspector()
 	dpiInspector.SetWhitelist(cidrWhitelist)
@@ -334,13 +356,20 @@ func main() {
 					bgpSpeaker.RecordIngressMetrics(event.IP().String(), *bgpRTBHThresholdPPS)
 				}
 				if controllerClient != nil {
+					mitreID := ""
+					if ttpInfo, ok := ttp.LookupByRule(event.DropReason.String()); ok {
+						mitreID = ttpInfo.ID
+					}
 					ev := &copsecproto.LogEvent{
 						Source:           "ebpf_xdp",
-						RawLine:          fmt.Sprintf("[XDP_DROP] src_ip=%s src_port=%d proto=%d reason=%s", event.IP().String(), event.SrcPort, event.Protocol, event.DropReason.String()),
+						RawLine:          fmt.Sprintf("[XDP_DROP] src_ip=%s src_port=%d proto=%d reason=%s target_comm=KERNEL_FASTPATH_DROP", event.IP().String(), event.SrcPort, event.Protocol, event.DropReason.String()),
 						ClientIp:         event.IP().String(),
 						ThreatScore:      90,
 						RuleId:           fmt.Sprintf("xdp_%s", strings.ToLower(event.DropReason.String())),
+						MitreTechniqueId: mitreID,
 						TimestampMs:      int64(event.TimestampNs / 1000000),
+						TargetPid:        0,
+						TargetComm:       "KERNEL_FASTPATH_DROP [PID: 0]",
 					}
 					controllerClient.Submit(ev)
 				}
@@ -374,14 +403,31 @@ func main() {
 		rawProc, err := bpf.NewRawPacketProcessor(rawRbMap, bpf.RawPacketFuncBus(func(sample bpf.RawPacketSample) {
 			if controllerClient != nil {
 				srcIP := sample.SrcIPString()
+				dstIP := sample.DstIPString()
+				mitreID := ""
+				if ttpInfo, ok := ttp.LookupByRule(sample.DropReasonString()); ok {
+					mitreID = ttpInfo.ID
+				}
+				targetPid := int32(0)
+				targetComm := "KERNEL_FASTPATH_DROP [PID: 0]"
+				if sample.DropReason == 0 {
+					// Packet reached host network stack - correlate with active sockets
+					if proc, ok := ebpf.GetDefaultEDREngine().LookupProcessBySocket(srcIP, int(sample.SrcPort()), dstIP, int(sample.DstPort())); ok && proc != nil {
+						targetPid = int32(proc.PID)
+						targetComm = fmt.Sprintf("%s [PID: %d]", proc.Comm, proc.PID)
+					}
+				}
 				ev := &copsecproto.LogEvent{
 					Source:           "ebpf_pcap",
-					RawLine:          fmt.Sprintf("[PCAP_SAMPLE] src_ip=%s src_port=%d proto=%d reason=%s cap_len=%d wire_len=%d hex=%s",
-						srcIP, sample.SrcPort(), sample.Protocol(), sample.DropReasonString(), sample.CaptureLen, sample.WireLen, sample.HexString()),
+					RawLine:          fmt.Sprintf("[PCAP_SAMPLE] src_ip=%s src_port=%d proto=%d reason=%s cap_len=%d wire_len=%d hex=%s target_comm=%s",
+						srcIP, sample.SrcPort(), sample.Protocol(), sample.DropReasonString(), sample.CaptureLen, sample.WireLen, sample.HexString(), targetComm),
 					ClientIp:         srcIP,
 					ThreatScore:      85,
 					RuleId:           fmt.Sprintf("pcap_%s", strings.ToLower(sample.DropReasonString())),
+					MitreTechniqueId: mitreID,
 					TimestampMs:      int64(sample.TimestampNs / 1000000),
+					TargetPid:        targetPid,
+					TargetComm:       targetComm,
 				}
 				controllerClient.Submit(ev)
 			}

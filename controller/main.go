@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/copsec/controller/pkg/ipinfo"
+	"github.com/copsec/controller/pkg/siem"
+	"github.com/copsec/controller/pkg/webhook"
 	"github.com/copsec/controller/pkg/whitelist"
 )
 
@@ -38,6 +40,11 @@ func main() {
 	autoBanThreshold := flag.Int("auto-ban-threshold", 80, "Threat score threshold for auto-ban")
 	remoteVaultFlag := flag.String("remote-vault", "", "Remote Vault / Controller address to proxy telemetry from (e.g. 192.168.1.11:50051 or 192.168.1.11:8080)")
 	apiKeyFlag := flag.String("api-key", "", "Master API Key for Web SOC authentication (or set COPSEC_API_KEY)")
+	siemEndpointFlag := flag.String("siem-endpoint", "", "Upstream SIEM Syslog endpoint host:port (e.g. wazuh.lan:514)")
+	siemTransportFlag := flag.String("siem-transport", "UDP", "SIEM Syslog transport protocol ('UDP', 'TCP', or 'TLS')")
+	siemFormatFlag := flag.String("siem-format", "CEF", "SIEM Syslog format ('CEF' or 'JSON')")
+	webhookURLFlag := flag.String("webhook-url", "", "Alert Webhook URL (Slack, Discord, or generic SOAR)")
+	webhookMinSevFlag := flag.String("webhook-min-severity", "HIGH", "Minimum alert severity to trigger webhook ('CRITICAL' or 'HIGH')")
 	flag.Parse()
 
 	if *apiKeyFlag != "" {
@@ -217,15 +224,47 @@ func main() {
 	centralServer.SetFleetManager(fleetManager)
 	defer fleetManager.Close()
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// 4c. Enterprise SIEM & Webhook Alert Notifier Integration
+	if *siemEndpointFlag != "" {
+		sf, err := siem.NewSyslogForwarder(siem.SyslogConfig{
+			Enabled:   true,
+			Endpoint:  *siemEndpointFlag,
+			Transport: siem.TransportType(strings.ToUpper(*siemTransportFlag)),
+			Format:    siem.FormatType(strings.ToUpper(*siemFormatFlag)),
+		})
+		if err == nil {
+			sf.Start(ctx)
+			defer sf.Close()
+			centralServer.SetSIEMForwarder(sf)
+		} else {
+			log.Printf("[WARN] Failed to initialize SIEM Syslog forwarder: %v", err)
+		}
+	}
+
+	if *webhookURLFlag != "" {
+		wn, err := webhook.NewNotifier(webhook.WebhookConfig{
+			Enabled:     true,
+			URL:         *webhookURLFlag,
+			MinSeverity: *webhookMinSevFlag,
+		})
+		if err == nil {
+			wn.Start(ctx)
+			defer wn.Close()
+			centralServer.SetWebhookNotifier(wn)
+		} else {
+			log.Printf("[WARN] Failed to initialize Webhook Notifier: %v", err)
+		}
+	}
+
 	// Start Autonomous SOAR Engine with sliding-window threat correlator
 	if centralServer.GetSOAREngine() != nil {
 		centralServer.GetSOAREngine().SetDependencies(storage, centralServer, ttlManager, wsHub, centralServer.GetThreatIntel())
 		centralServer.GetSOAREngine().Start()
 		defer centralServer.GetSOAREngine().Stop()
 	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	var wg sync.WaitGroup
 
