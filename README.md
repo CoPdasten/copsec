@@ -5,6 +5,8 @@
 # CoPSeC — Enterprise Autonomous XDR & Kernel-Level Threat Prevention Platform
 
 > Autonomous, kernel-native intrusion detection, deception honey-tokens, pre-attack PCAP forensics, cryptographic audit chaining, eBPF EDR, and real-time multi-node SOC triage ecosystem built with Go, eBPF/XDP, C++, and SQLite.
+> 
+> **Geliştirici / Developer:** **Eyyüp Efe Adıgüzel** ([eyupadiguzel20@gmail.com](mailto:eyupadiguzel20@gmail.com))
 
 <p align="center">
   <img src="https://img.shields.io/badge/Language-Go%201.25+-00ADD8?style=for-the-badge&logo=go&logoColor=white" alt="Go" />
@@ -263,6 +265,51 @@ CoPSeC Pro advances single-node lab verification into a multi-node distributed d
   - **L7 Payload / Application Data:** Amber (`#fbbf24`)
 * **Real-Time Hover Synchronization:** Hovering over any hexadecimal byte instantly highlights the corresponding ASCII character, rendering byte offset, decimal value, and layer name in the inspector status bar.
 * **Pure JS Libpcap 2.4 Binary Exporter:** Browser-side assembly of intercepted frames into standard `.pcap` format (`0xa1b2c3d4`, `LINKTYPE_ETHERNET`) with synthetic Ethernet header stitching, enabling immediate drag-and-drop analysis in Wireshark or tcpdump.
+
+### 8. Host-Level Socket & Process Tracing (L4-to-PID Correlation)
+* **Kernel Probe Hooking:** Lightweight `sock:inet_sock_set_state` tracepoint correlating incoming network flows directly with host-level PID, command name (`comm`), and UID.
+* **Pre-Socket Fast-Path Demuxing:** In-kernel XDP drops occur prior to Linux `sk_buff` and socket allocation; CoPSeC explicitly stamps these fast-path drops with `TargetPid: 0` and `TargetComm: "KERNEL_FASTPATH_DROP [PID: 0]"`.
+* **Zero-Allocation Socket Cache:** Thread-safe LRU hash cache resolving destination socket endpoints with sub-microsecond latency.
+
+### 9. Enterprise SIEM Ingestion (CEF & RFC 5424 Syslog + Alert Webhooks)
+* **Dual-Format Syslog Exporter:** Real-time forwarder supporting Micro Focus ArcSight Common Event Format (CEF) and RFC 5424 structured JSON syslog over UDP, TCP, and TLS transports.
+* **Asynchronous Alert Webhook Dispatcher:** Low-latency worker queue pushing rich Markdown alerts to Slack, Discord, and generic SOAR HTTP webhooks upon `CRITICAL` or `HIGH` severity detections.
+* **Configurable CLI Flags:**
+  ```bash
+  copsec-controller \
+    --siem-endpoint="siem.corp.internal:514" \
+    --siem-transport="tls" \
+    --siem-format="cef" \
+    --webhook-url="https://hooks.slack.com/services/..." \
+    --webhook-min-severity="HIGH"
+  ```
+
+### 10. Native MITRE ATT&CK Framework TTP Mapping Engine
+* **Immutable TTP Registry:** Real-time translation table mapping eBPF drop codes, behavioral rules, and Snort/Suricata alerts to authoritative MITRE ATT&CK tactics, techniques, and sub-techniques.
+* **Canonical MITRE Identifiers:**
+  - `SYN_FLOOD_DROP` / `xdp_syn_flood` $\to$ `T1498.001` (Direct Network Flood)
+  - `SHANNON_ENTROPY_ANOMALY` $\to$ `T1027` (Obfuscated Files or Information)
+  - `TARPIT_PORT_SCANNER` $\to$ `T1046` (Network Service Discovery)
+  - `L7_EXPLOIT_PATTERN` $\to$ `T1190` (Exploit Public-Facing Application)
+  - `DNS_C2_SINKHOLE` $\to$ `T1071.004` (Application Layer Protocol: DNS)
+  - `CANARY_HONEYTOKEN` $\to$ `T1078` (Valid Accounts)
+  - `BGP_RTBH_TRIGGER` $\to$ `T1498` (Network Denial of Service)
+
+### 11. Operational "Break-Glass" Panic Flush & Hardened Whitelist Fast-Path
+* **Hardware-Guaranteed Immunity:** Immutable eBPF fast-path bypass for RFC 1918 private subnets (`10/8`, `172.16/12`, `192.168/16`, `127/8`), RFC 4193 ULA (`fc00::/7`), and management subnets, ensuring zero accidental administrative lockouts.
+* **Multi-Tiered Panic Switches:**
+  - **CLI Panic Switch:** `copsec-collector --panic-unban-all` and `copsec emergency-flush`.
+  - **REST API Trigger:** `POST /api/quarantine/emergency-flush`.
+  - **Web SOC Break-Glass Modal:** Two-step confirmation modal requiring typing `CONFIRM-FLUSH` before execution.
+* **Fleet-Wide Broadcast:** A single break-glass trigger broadcasts `FLUSH_BANS` across all connected edge sensors and unbans kernel BPF maps in $< 10\,\text{ms}$.
+
+### 12. 1-Click Forensic Incident Case Bundle (.zip) Export
+* **Turnkey DFIR Case Packaging:** The endpoint `GET /api/incidents/:id/export-bundle` streams a cryptographically verified `.zip` archive containing:
+  1. `packet_capture.pcap`: Pure Libpcap 2.4 binary capture of the offending frame.
+  2. `merkle_audit_trail.json`: Cryptographic SHA-256 Merkle chain slice proving immutable non-repudiation.
+  3. `threat_metadata.json`: Comprehensive JSON metadata (Reverse DNS, GeoIP, ASN, MITRE TTPs, Host Target PID/Comm).
+  4. `incident_report.md`: Standalone DFIR Incident Case markdown report formatted for SOC leadership and external auditors.
+* **Cockpit Integration:** Triggered via `[Export Forensic Case (.zip)]` button in the Forensic Drawer.
 
 ---
 
@@ -787,6 +834,28 @@ Health and monitoring probes (`/api/fleet`, `/health`) are open for cluster tele
 
 ---
 
+### 6. Operational Break-Glass Emergency Flush
+* **Endpoint:** `POST /api/quarantine/emergency-flush`
+* **Description:** Instantly purges all kernel eBPF/XDP blacklist maps, zero-window tarpit entries, and iptables blocks across all connected edge sensors.
+* **Response Sample:**
+  ```json
+  {
+    "success": true,
+    "message": "Operational Emergency Break-Glass Flush executed across all edge sensors and kernel maps",
+    "flushed_count": 14,
+    "timestamp_ms": 1789412100000
+  }
+  ```
+
+---
+
+### 7. Forensic Incident Case Bundle (.zip) Export
+* **Endpoint:** `GET /api/incidents/:id/export-bundle`
+* **Description:** Packages an incident into a tamper-evident `.zip` forensic case archive containing `packet_capture.pcap`, `merkle_audit_trail.json`, `threat_metadata.json`, and `incident_report.md`.
+* **Headers:** `Content-Type: application/zip`, `Content-Disposition: attachment; filename="copsec_incident_<id>.zip"`
+
+---
+
 ## 🧪 Comprehensive Verification & Test Suite
 
 All components are rigorously tested across C++ unit tests, Go package suites with race detection, and live multi-node laboratory environments.
@@ -908,6 +977,15 @@ sudo ./copsec_dualstack_autonomous_test.sh
 # Or run the hardcore resilience stress suite:
 sudo ./copsec_hardcore_resilience_test.sh
 ```
+
+---
+
+## 👨‍💻 Geliştirici & Sistem Mimarı (Developer & Maintainer)
+
+* **Geliştirici & Sistem Mimarı (Lead Developer & Architect):** **Eyyüp Efe Adıgüzel**
+* **İletişim & Güvenlik Bildirimleri (Email):** [eyupadiguzel20@gmail.com](mailto:eyupadiguzel20@gmail.com)
+* **GitHub Profili:** [@CoPdasten](https://github.com/CoPdasten)
+* **Proje Deposu:** [CoPSeC Enterprise Active Defense & NDR Platform](https://github.com/CoPdasten/copsec)
 
 ---
 
