@@ -17,6 +17,7 @@
   <img src="https://img.shields.io/badge/Crypt-SHA--256%20Merkle%20Chaining-red?style=for-the-badge" alt="SHA-256 Hash Chain" />
   <img src="https://img.shields.io/badge/Fleet-gRPC%20Multi--Node%20Mesh-green?style=for-the-badge" alt="gRPC Fleet Mesh" />
   <img src="https://img.shields.io/badge/Cockpit-High--Contrast%20Monochrome-black?style=for-the-badge" alt="SOC Cockpit" />
+  <img src="https://img.shields.io/badge/License-AGPL%20v3.0-blue?style=for-the-badge&logo=gnu&logoColor=white" alt="License: AGPLv3" />
 </p>
 
 ---
@@ -990,4 +991,4 @@ sudo ./copsec_hardcore_resilience_test.sh
 ---
 
 ## 📄 License
-Released under the [GNU General Public License v3.0 (GPLv3)](LICENSE).
+Released under the [GNU Affero General Public License v3.0 (AGPLv3)](LICENSE).
