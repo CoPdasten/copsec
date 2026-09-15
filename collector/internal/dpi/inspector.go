@@ -308,7 +308,7 @@ func (insp *DPIInspector) triggerTarpitReactions(res InspectionResult) {
 		portStr := fmt.Sprintf("%d", port)
 		_ = exec.Command("iptables", "-t", "nat", "-I", "PREROUTING", "1",
 			"-p", "tcp", "-s", targetIP, "-j", "REDIRECT", "--to-ports", portStr).Run()
-		log.Printf("[DPI_TARPIT] 🕸️ Kernel redirect applied: %s -> TCP :%d (Zero-Window Tarpit Active)",
+		log.Printf("[DPI_TARPIT]  Kernel redirect applied: %s -> TCP :%d (Zero-Window Tarpit Active)",
 			targetIP, port)
 	}(res.SourceIP, insp.config.TarpitPort)
 }
@@ -339,7 +339,7 @@ func (insp *DPIInspector) dumpForensicsPCAP(res InspectionResult) {
 			data, readErr := os.ReadFile(snap.FilePath)
 			if readErr == nil {
 				_ = os.WriteFile(targetPath, data, 0640)
-				log.Printf("[DPI_FORENSICS] 📦 Forensic PCAP dumped: %s (%d bytes)", targetPath, len(data))
+				log.Printf("[DPI_FORENSICS] [FORENSIC] Forensic PCAP dumped: %s (%d bytes)", targetPath, len(data))
 				return
 			}
 		}
@@ -362,7 +362,7 @@ func (insp *DPIInspector) dumpForensicsPCAP(res InspectionResult) {
 	pcapBytes, err = forensics.SerializeToPCAP([]*forensics.RawPacket{pkt})
 	if err == nil && len(pcapBytes) > 0 {
 		if writeErr := os.WriteFile(targetPath, pcapBytes, 0640); writeErr == nil {
-			log.Printf("[DPI_FORENSICS] 📦 Synthesized forensic PCAP dumped: %s (%d bytes)", targetPath, len(pcapBytes))
+			log.Printf("[DPI_FORENSICS] [FORENSIC] Synthesized forensic PCAP dumped: %s (%d bytes)", targetPath, len(pcapBytes))
 		}
 	}
 }
@@ -398,7 +398,7 @@ func (insp *DPIInspector) dispatchControllerAlert(res InspectionResult) {
 	conn, err := dialSecureClientConn(ctx, insp.config.ControllerEndpoint)
 	if err != nil {
 		// Log dispatch in local security audit if central controller unreachable
-		log.Printf("[DPI_ALERT] ⚡ Layer 7 DPI Alert: IP=%s Reason=%q Score=%.2f (Controller offline/mTLS queued)",
+		log.Printf("[DPI_ALERT] [FASTPATH] Layer 7 DPI Alert: IP=%s Reason=%q Score=%.2f (Controller offline/mTLS queued)",
 			event.ClientIp, res.Reason, res.Score)
 		return
 	}
@@ -409,7 +409,7 @@ func (insp *DPIInspector) dispatchControllerAlert(res InspectionResult) {
 	if err == nil {
 		_ = stream.Send(event)
 		_, _ = stream.CloseAndRecv()
-		log.Printf("[DPI_ALERT] 🟢 Dispatched mTLS gRPC alert to %s for %s",
+		log.Printf("[DPI_ALERT] [OK] Dispatched mTLS gRPC alert to %s for %s",
 			insp.config.ControllerEndpoint, res.SourceIP)
 	}
 }

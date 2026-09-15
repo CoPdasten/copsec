@@ -249,7 +249,7 @@ func (ws *WebSOCServer) Start() error {
 		WriteTimeout: 15 * time.Second,
 	}
 
-	log.Printf("[INFO] 🌐 Minimalist SOC Web Interface listening on http://%s", ws.listenAddr)
+	log.Printf("[INFO]  Minimalist SOC Web Interface listening on http://%s", ws.listenAddr)
 
 	go func() {
 		if err := ws.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {

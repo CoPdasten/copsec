@@ -75,7 +75,7 @@ func isProtectedIP(ipStr string) bool {
 func ExecuteInstantBan(ip string) error {
 	cleanIP := strings.TrimSpace(ip)
 	if isProtectedIP(cleanIP) {
-		log.Printf("[SOAR_MITIGATION] ⚠️ Skip ban for protected/invalid IP: %s", cleanIP)
+		log.Printf("[SOAR_MITIGATION] [WARN] Skip ban for protected/invalid IP: %s", cleanIP)
 		return fmt.Errorf("protected/invalid ip: %s", cleanIP)
 	}
 
@@ -119,7 +119,7 @@ func ExecuteInstantBan(ip string) error {
 		}
 	}(cleanIP)
 
-	log.Printf("[SOAR_MITIGATION] ⚡ ZERO-LATENCY BAN EXECUTED: %s", cleanIP)
+	log.Printf("[SOAR_MITIGATION] [FASTPATH] ZERO-LATENCY BAN EXECUTED: %s", cleanIP)
 	return nil
 }
 
@@ -170,7 +170,7 @@ func ExecuteAbsoluteUnban(ip string) error {
 	}
 
 	bannedIPMap.Delete(ip)
-	log.Printf("[SOAR_MITIGATION] 🟢 IP UNBANNED ACROSS ALL LAYERS: %s", ip)
+	log.Printf("[SOAR_MITIGATION] [OK] IP UNBANNED ACROSS ALL LAYERS: %s", ip)
 	return nil
 }
 

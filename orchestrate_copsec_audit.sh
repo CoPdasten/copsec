@@ -34,19 +34,19 @@ echo -e "${CYAN}================================================================
 # Pre-flight local tool verification
 for tool in python3 ssh openssl; do
     if ! command -v "$tool" &>/dev/null; then
-        echo -e "${RED}[✗ FAIL] Required local tool '${tool}' is not installed or not in PATH.${RESET}" >&2
+        echo -e "${RED}[[FAIL] FAIL] Required local tool '${tool}' is not installed or not in PATH.${RESET}" >&2
         exit 1
     fi
 done
 
 if [[ ! -f "${ORCHESTRATOR_PY}" ]]; then
-    echo -e "${RED}[✗ FAIL] Python orchestrator not found at '${ORCHESTRATOR_PY}'.${RESET}" >&2
+    echo -e "${RED}[[FAIL] FAIL] Python orchestrator not found at '${ORCHESTRATOR_PY}'.${RESET}" >&2
     exit 1
 fi
 
 chmod +x "${ORCHESTRATOR_PY}"
 
-echo -e "${GREEN}[✓ PASS] Environment validated. Launching Python 3 Audit Orchestrator...${RESET}\n"
+echo -e "${GREEN}[[OK] PASS] Environment validated. Launching Python 3 Audit Orchestrator...${RESET}\n"
 
 exec python3 "${ORCHESTRATOR_PY}" \
     --pardus1-ip "${PARDUS1_IP}" \

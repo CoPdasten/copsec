@@ -78,7 +78,7 @@ func (d *LinuxQuarantineDriver) BlockIP(ip string, reason string) error {
 	_ = exec.CommandContext(connCtx, "ss", "-K", "src", cleanIP).Run()
 
 	d.blockedIPs[cleanIP] = reason
-	log.Printf("[QUARANTINE_LINUX] ⚡ Enforced iptables/conntrack isolation for IP %s (Reason: %s)", cleanIP, reason)
+	log.Printf("[QUARANTINE_LINUX] [FASTPATH] Enforced iptables/conntrack isolation for IP %s (Reason: %s)", cleanIP, reason)
 
 	// Trigger asynchronous pre-attack forensics PCAP snapshot
 	go func(targetIP, r string) {
@@ -109,7 +109,7 @@ func (d *LinuxQuarantineDriver) UnblockIP(ip string) error {
 	_ = exec.CommandContext(ctx, "sudo", "-n", "iptables", "-D", "INPUT", "-s", cleanIP, "-j", "DROP").Run()
 
 	delete(d.blockedIPs, cleanIP)
-	log.Printf("[QUARANTINE_LINUX] 🟢 Removed iptables isolation for IP %s", cleanIP)
+	log.Printf("[QUARANTINE_LINUX] [OK] Removed iptables isolation for IP %s", cleanIP)
 	return nil
 }
 

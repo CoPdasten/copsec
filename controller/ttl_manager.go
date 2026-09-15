@@ -209,7 +209,7 @@ func (tm *TTLBanManager) BanIP(ip, reason string, customDurationSec int64, tier 
 		cb(record, "BAN")
 	}
 
-	log.Printf("[SOAR_TTL] ⚡ Active Quarantine Enforced for %s (Tier: %s, Duration: %ds, Offenses: %d, Reason: %s)",
+	log.Printf("[SOAR_TTL] [FASTPATH] Active Quarantine Enforced for %s (Tier: %s, Duration: %ds, Offenses: %d, Reason: %s)",
 		cleanIP, finalTier, duration, offenses, reason)
 
 	return record, nil
@@ -253,7 +253,7 @@ func (tm *TTLBanManager) UnbanIP(ip string) error {
 		cb(record, "UNBAN")
 	}
 
-	log.Printf("[SOAR_TTL] 🟢 Quarantine Released (Manual Unban) for %s", cleanIP)
+	log.Printf("[SOAR_TTL] [OK] Quarantine Released (Manual Unban) for %s", cleanIP)
 	return nil
 }
 
@@ -285,7 +285,7 @@ func (tm *TTLBanManager) FlushAll() int {
 		tm.server.BroadcastSOARCommand("FLUSH_BANS", "ALL", 0)
 	}
 
-	log.Printf("[SOAR_TTL] 🚨 EMERGENCY BREAK-GLASS FLUSH: Released %d quarantined IPs across fleet", len(ips))
+	log.Printf("[SOAR_TTL] [ALERT] EMERGENCY BREAK-GLASS FLUSH: Released %d quarantined IPs across fleet", len(ips))
 	return len(ips)
 }
 
@@ -356,7 +356,7 @@ func (tm *TTLBanManager) pruneExpiredBans(now time.Time) {
 	tm.mu.Unlock()
 
 	for _, expired := range expiredList {
-		log.Printf("[SOAR_TTL] ⏳ Ban Expired for %s (Tier: %s, BanTime: %s). Executing autonomous unban.",
+		log.Printf("[SOAR_TTL] [EXPIRED] Ban Expired for %s (Tier: %s, BanTime: %s). Executing autonomous unban.",
 			expired.IP, expired.PenaltyTier, time.UnixMilli(expired.BanTimeMs).Format(time.RFC3339))
 
 		// 1. Clear Kernel L3 / Conntrack & L7 Nginx rules

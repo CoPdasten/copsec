@@ -289,7 +289,7 @@ func (w *CIDRWhitelist) LoadFromYAML(yamlData []byte) error {
 		}
 	}
 
-	log.Printf("[WHITELIST] 🛡️ Loaded enterprise CIDR whitelist from YAML (%d active IPv4 blocks)", len(w.ipv4Blocks))
+	log.Printf("[WHITELIST]  Loaded enterprise CIDR whitelist from YAML (%d active IPv4 blocks)", len(w.ipv4Blocks))
 	return nil
 }
 
@@ -305,7 +305,7 @@ func (w *CIDRWhitelist) LoadFromJSON(jsonData []byte) error {
 	for _, c := range cfg.TrustedCIDRs {
 		_ = w.AddCIDR(c)
 	}
-	log.Printf("[WHITELIST] 🛡️ Loaded enterprise CIDR whitelist from JSON (%d active IPv4 blocks)", len(w.ipv4Blocks))
+	log.Printf("[WHITELIST]  Loaded enterprise CIDR whitelist from JSON (%d active IPv4 blocks)", len(w.ipv4Blocks))
 	return nil
 }
 

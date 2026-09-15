@@ -124,7 +124,7 @@ func NewXDPMitigationEngine(iface string) *XDPMitigationEngine {
 		log.Printf("[XDP_EBPF] Running without root privileges. Kernel BPF map attached in userspace LRU fallback mode on %s", iface)
 	} else {
 		engine.initKernelMaps()
-		log.Printf("[XDP_EBPF] ⚡ Initialized XDP Packet Mitigation Fast-Path (LRU Hash: %d entries) on %s (Mode: %s)",
+		log.Printf("[XDP_EBPF] [FASTPATH] Initialized XDP Packet Mitigation Fast-Path (LRU Hash: %d entries) on %s (Mode: %s)",
 			MaxBannedIPsLRU, iface, engine.xdpMode)
 	}
 
@@ -416,7 +416,7 @@ func (x *XDPMitigationEngine) AddBanWithTTL(ipStr string, ttl time.Duration, rea
 	x.banEntries[cleanIP] = entry
 	atomic.AddUint64(&x.droppedPackets, 1)
 
-	log.Printf("[XDP_EBPF] ⚡ Injected IP %s into BPF banned_ips LRU map (TTL: %v, Reason: %q)", cleanIP, ttl, reason)
+	log.Printf("[XDP_EBPF] [FASTPATH] Injected IP %s into BPF banned_ips LRU map (TTL: %v, Reason: %q)", cleanIP, ttl, reason)
 	return nil
 }
 
@@ -460,7 +460,7 @@ func (x *XDPMitigationEngine) RemoveBan(ipStr string) error {
 
 	delete(x.bannedIPs, cleanIP)
 	delete(x.banEntries, cleanIP)
-	log.Printf("[XDP_EBPF] 🟢 Purged IP %s from BPF banned_ips map", cleanIP)
+	log.Printf("[XDP_EBPF] [OK] Purged IP %s from BPF banned_ips map", cleanIP)
 	return nil
 }
 
@@ -487,7 +487,7 @@ func (x *XDPMitigationEngine) Flush() error {
 
 	x.bannedIPs = make(map[string]bool)
 	x.banEntries = make(map[string]BanEntry)
-	log.Println("[XDP_EBPF] 🧹 Flushed all entries from BPF banned_ips maps")
+	log.Println("[XDP_EBPF]  Flushed all entries from BPF banned_ips maps")
 	return nil
 }
 
@@ -565,7 +565,7 @@ func (x *XDPMitigationEngine) AddTarpit(ipStr string) error {
 
 	x.tarpitIPs[cleanIP] = true
 	atomic.AddUint64(&x.tarpitPackets, 1)
-	log.Printf("[XDP_EBPF] 🕸️ Injected IP %s into BPF tarpit_ips map (Zero-Window Tarpit Active)", cleanIP)
+	log.Printf("[XDP_EBPF]  Injected IP %s into BPF tarpit_ips map (Zero-Window Tarpit Active)", cleanIP)
 	return nil
 }
 
@@ -600,7 +600,7 @@ func (x *XDPMitigationEngine) RemoveTarpit(ipStr string) error {
 	}
 
 	delete(x.tarpitIPs, cleanIP)
-	log.Printf("[XDP_EBPF] 🟢 Purged IP %s from BPF tarpit_ips map", cleanIP)
+	log.Printf("[XDP_EBPF] [OK] Purged IP %s from BPF tarpit_ips map", cleanIP)
 	return nil
 }
 
@@ -758,7 +758,7 @@ func (x *XDPMitigationEngine) EmergencyFlushAll() (int, error) {
 	x.banEntries = make(map[string]BanEntry)
 	x.tarpitIPs = make(map[string]bool)
 
-	log.Printf("[EMERGENCY_FLUSH] 🚨 Break-Glass Flush executed successfully. Flushed total records: %d", flushedCount)
+	log.Printf("[EMERGENCY_FLUSH] [ALERT] Break-Glass Flush executed successfully. Flushed total records: %d", flushedCount)
 	return flushedCount, nil
 }
 
@@ -776,7 +776,7 @@ func (x *XDPMitigationEngine) EnableSynProxy(port uint16) error {
 		var v1 uint32 = uint32(port)
 		_ = x.bpfSynProxyMap.Put(k1, v1)
 	}
-	log.Printf("[XDP_EBPF] 🛡️ In-kernel SYN-Proxy activated (Port: %d)", port)
+	log.Printf("[XDP_EBPF]  In-kernel SYN-Proxy activated (Port: %d)", port)
 	return nil
 }
 
@@ -850,7 +850,7 @@ func (x *XDPMitigationEngine) AddWhitelistIP(ipStr string) error {
 	}
 
 	x.whitelistedIPs[cleanIP] = true
-	log.Printf("[XDP_EBPF] 🛡️ Injected IP %s into BPF whitelisted_ips fast-bypass map", cleanIP)
+	log.Printf("[XDP_EBPF]  Injected IP %s into BPF whitelisted_ips fast-bypass map", cleanIP)
 	return nil
 }
 

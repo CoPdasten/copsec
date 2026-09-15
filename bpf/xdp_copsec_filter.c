@@ -46,6 +46,20 @@ struct {
     __type(value, struct ban_entry);
 } banned_ips_v6 SEC(".maps");
 
+// 1c. In-Kernel Longest Prefix Match (LPM) Trie Map (IPv4) for CIDR blocklists
+struct lpm_v4_key {
+    __u32 prefixlen;
+    __u32 data;
+};
+
+struct {
+    __uint(type, BPF_MAP_TYPE_LPM_TRIE);
+    __uint(max_entries, 65536);
+    __uint(map_flags, BPF_F_NO_PREALLOC);
+    __type(key, struct lpm_v4_key);
+    __type(value, __u32); // 1 = drop
+} lpm_blocklist SEC(".maps");
+
 // 2. In-Kernel Whitelist Map (IPv4) for line-rate fast bypass (XDP_PASS)
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
@@ -631,6 +645,20 @@ int copsec_xdp(struct xdp_md *ctx) {
         if (unlikely(is_whitelisted && *is_whitelisted == 1)) {
             increment_counter(COPSEC_PACKETS_WHITELISTED);
             return XDP_PASS;
+        }
+
+        // 1a. In-Kernel LPM Trie CIDR Blocklist Evaluation (BPF_MAP_TYPE_LPM_TRIE)
+        struct lpm_v4_key lpm_k = {
+            .prefixlen = 32,
+            .data = ip->saddr,
+        };
+        __u32* is_lpm_blocked = bpf_map_lookup_elem(&lpm_blocklist, &lpm_k);
+        if (unlikely(is_lpm_blocked && *is_lpm_blocked == 1)) {
+            __u64 now_ns = bpf_ktime_get_ns();
+            emit_drop_event(ip, data_end, DROP_REASON_RATE_LIMIT, now_ns);
+            emit_packet_sample(data, data_end, DROP_REASON_RATE_LIMIT, 4, now_ns);
+            increment_counter(COPSEC_PACKETS_DROPPED);
+            return XDP_DROP;
         }
 
         // 2. Dynamic TTL Banned IPs Evaluation (LRU Hash Map: 131,072 entries)

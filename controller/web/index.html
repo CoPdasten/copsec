@@ -683,10 +683,10 @@
     <div class="top-stats">
       <!-- SOAR Auto-Pilot Toggle -->
       <div class="stat-pill clickable" id="soarAutopilotPill" onclick="toggleSOARAutoPilot()" title="Toggle Autonomous SOAR Zero-Touch Mitigation">
-        <span id="soarAutopilotIcon">⚡</span> <span id="soarAutopilotLabel" style="font-weight: 700;">SOAR AUTO-PILOT: ACTIVE</span>
+        <span id="soarAutopilotIcon">[AUTO]</span> <span id="soarAutopilotLabel" style="font-weight: 700;">SOAR AUTO-PILOT: ACTIVE</span>
       </div>
       <button id="btnPauseStream" class="btn" style="padding: 3px 8px; font-size: 11px; display: flex; align-items: center; gap: 4px;" onclick="toggleStreamPause()">
-        <span>⏸</span> <span>PAUSE STREAM (Space)</span>
+        <span>[||]</span> <span>PAUSE STREAM (Space)</span>
       </button>
       <div class="stat-pill">EPS: <span class="val" id="statEPS">0</span></div>
       <div class="stat-pill">TOTAL EVENTS: <span class="val" id="statTotal">0</span></div>
@@ -695,13 +695,13 @@
         ACTIVE BANS (XDP): <span class="val" id="statBans">0</span>
       </div>
       <button id="btnEmergencyFlush" class="btn btn-accent" style="padding: 4px 10px; font-weight: 700; display: flex; align-items: center; gap: 6px; background: #450a0a; border: 1px solid #ef4444; color: #fecaca; cursor: pointer;" onclick="openEmergencyFlushModal()" title="Operational Break-Glass: Flush All Bans Across Fleet">
-        <span>🚨</span> <span>[🚨 BREAK-GLASS FLUSH]</span>
+        <span>[BREAK-GLASS FLUSH]</span>
       </button>
       <button id="btnExportAuditPdf" class="btn btn-accent" style="padding: 4px 10px; font-weight: 700; display: flex; align-items: center; gap: 6px; background: #1c1917; border: 1px solid #78716c; color: #f5f5f4; cursor: pointer;" onclick="exportAuditCompliancePDF()" title="Export Executive Cryptographic Compliance SLA PDF Report">
-        <span>📄</span> <span>[ 📄 Export Audit Compliance Report ]</span>
+        <span>[Export Audit Compliance Report]</span>
       </button>
       <button id="btnApiKeyConfig" class="btn btn-accent" style="padding: 4px 10px; font-weight: 700; display: flex; align-items: center; gap: 6px; background: #1c1917; border: 1px solid #eab308; color: #facc15; cursor: pointer;" onclick="manageAPIKey()" title="Configure or change Master API Key">
-        <span>🔑</span> <span id="apiKeyBtnLabel">API KEY</span>
+        <span id="apiKeyBtnLabel">API KEY</span>
       </button>
     </div>
   </header>
@@ -1021,7 +1021,7 @@
             <option value="BYPASS">BYPASS ONLY</option>
             <option value="OFFLINE">OFFLINE ONLY</option>
           </select>
-          <button class="btn" onclick="fetchFleetTelemetry(true)">[ 🔄 Refresh Fleet Telemetry ]</button>
+          <button class="btn" onclick="fetchFleetTelemetry(true)">[Refresh Fleet Telemetry]</button>
         </div>
         <div class="toolbar-right">
           <span style="font-size: 11px; color: var(--text-muted);">Real-Time Heartbeat: <span style="color: var(--accent); font-weight: 700;">10s</span> | Stale SLA: <span style="color: var(--text); font-weight: 700;">30s</span></span>
@@ -1212,7 +1212,7 @@
       <!-- Live eBPF Forensics Raw Packet Stream -->
       <div class="toolbar" style="margin-top: 24px;">
         <div class="toolbar-left">
-          <span style="font-weight: 600; color: var(--accent); font-size: 13px;">⚡ LIVE eBPF RAW PACKET STREAM (512KB RingBuffer)</span>
+          <span style="font-weight: 600; color: var(--accent); font-size: 13px;">LIVE eBPF RAW PACKET STREAM (512KB RingBuffer)</span>
           <span style="color: var(--text-muted); font-size: 11px; margin-left: 12px;">Real-time dual-stack packet sampling (first 128 bytes) intercepted by kernel fast-path</span>
         </div>
         <div class="toolbar-right">
@@ -1266,7 +1266,7 @@
           <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 12px; margin-bottom: 12px;">
             <div>
               <h3 style="margin: 0; color: var(--accent); font-size: 15px; font-family: 'JetBrains Mono', monospace; display: flex; align-items: center; gap: 8px;">
-                <span>🔬 WIRE FORENSICS: WIRESHARK PACKET INSPECTOR</span>
+                <span>WIRE FORENSICS: WIRESHARK PACKET INSPECTOR</span>
                 <span id="pcapInspectorEntropyBadge" class="badge" style="font-size: 10px;"></span>
               </h3>
               <div id="pcapHexSubtitle" style="font-size: 11px; color: var(--text-muted); margin-top: 4px;"></div>
@@ -1482,7 +1482,7 @@
   <div id="emergencyFlushModal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.88); z-index: 2100; align-items: center; justify-content: center;">
     <div class="card" style="width: 560px; border: 2px solid #ef4444; box-shadow: 0 0 25px rgba(239, 68, 68, 0.4); background: #0c0a09;">
       <div class="card-title" style="color: #ef4444; display: flex; align-items: center; gap: 8px;">
-        <span>🚨 OPERATIONAL BREAK-GLASS: EMERGENCY FLUSH</span>
+        <span>OPERATIONAL BREAK-GLASS: EMERGENCY FLUSH</span>
       </div>
       <div style="padding: 12px 0; font-size: 12px; color: #e4e4e7; line-height: 1.5;">
         <p style="margin-bottom: 8px;"><strong style="color: #f87171;">CRITICAL WARNING:</strong> This will immediately purge <strong>ALL</strong> active quarantine rules, eBPF/XDP blacklist maps, tarpit tables, and iptables blocks across <strong>the entire fleet</strong>.</p>
@@ -1674,10 +1674,10 @@
       const btn = document.getElementById('btnPauseStream');
       if (btn) {
         if (window.isStreamPaused) {
-          btn.innerHTML = `<span>▶</span> <span>RESUME STREAM (Space)</span>`;
+          btn.innerHTML = `<span>[&gt;]</span> <span>RESUME STREAM (Space)</span>`;
           btn.classList.add('btn-accent');
         } else {
-          btn.innerHTML = `<span>⏸</span> <span>PAUSE STREAM (Space)</span>`;
+          btn.innerHTML = `<span>[||]</span> <span>PAUSE STREAM (Space)</span>`;
           btn.classList.remove('btn-accent');
         }
       }
@@ -2659,7 +2659,7 @@
               reason: `Analyst Auto-Advance: Instant XDP Drop on ${ip}`
             })
           });
-          showToast(`[⚡ XDP_DROP] Enforced 1h blackhole on ${ip}`, 'ok');
+          showToast(`[XDP_DROP] Enforced 1h blackhole on ${ip}`, 'ok');
           fetchQuarantineBans();
         } else if (actionType === 'tarpit') {
           await fetch('/api/mitigation/tarpit', {
@@ -2671,7 +2671,7 @@
               reason: `Analyst Auto-Advance: Zero-Window Tarpit on ${ip}`
             })
           });
-          showToast(`[🕳️ TARPIT] Trapped ${ip} in zero-window buffer`, 'ok');
+          showToast(`[TARPIT] Trapped ${ip} in zero-window buffer`, 'ok');
           fetchQuarantineBans();
         } else {
           // dismiss
@@ -3127,7 +3127,7 @@
         a.click();
         document.body.removeChild(a);
         window.URL.revokeObjectURL(url);
-        showToast('✓ Cryptographic SLA Audit Report exported successfully', 'ok');
+        showToast('[OK] Cryptographic SLA Audit Report exported successfully', 'ok');
       } catch (err) {
         showToast('Audit report generation error: ' + err.message, 'crit');
       }
@@ -3164,7 +3164,7 @@
         if (activeBadge) activeBadge.textContent = `[${activeCount} ACTIVE / ${cachedFleetData.length} TOTAL NODES]`;
 
         if (manual) {
-          showToast(`✓ Fleet Telemetry refreshed: ${activeCount} active edge sensors`, 'ok');
+          showToast(`[OK] Fleet Telemetry refreshed: ${activeCount} active edge sensors`, 'ok');
         }
       } catch (e) {
         if (manual) showToast('Failed to fetch fleet telemetry: ' + e.message, 'crit');
@@ -3713,7 +3713,7 @@ ${notes}
         });
         const data = await res.json();
         if (res.ok && data.success) {
-          showToast(`🚨 BREAK-GLASS EXECUTED: Released ${data.flushed_count} quarantine rules across fleet`, 'crit');
+          showToast(`[BREAK-GLASS EXECUTED]: Released ${data.flushed_count} quarantine rules across fleet`, 'crit');
           closeEmergencyFlushModal();
           if (typeof fetchBans === 'function') fetchBans();
           if (typeof fetchDashboardStats === 'function') fetchDashboardStats();
@@ -3885,7 +3885,7 @@ ${notes}
             reason: type === 'xdp' ? `Analyst Auto-Advance: Instant XDP Drop on ${cleanIP}` : `Analyst Auto-Advance: Zero-Window Tarpit on ${cleanIP}`
           })
         });
-        showToast(type === 'xdp' ? `[⚡ XDP_DROP] Enforced 1h blackhole on ${cleanIP}` : `[🕳️ TARPIT] Trapped ${cleanIP} in zero-window buffer`, 'ok');
+        showToast(type === 'xdp' ? `[XDP_DROP] Enforced 1h blackhole on ${cleanIP}` : `[TARPIT] Trapped ${cleanIP} in zero-window buffer`, 'ok');
         fetchQuarantineBans();
       } catch (e) {
         console.error(`Mitigation error:`, e);
@@ -3931,7 +3931,7 @@ ${notes}
           body: JSON.stringify({ ip: currentEventIP })
         });
         if (res.ok) {
-          showToast(`[🔓 UNBAN] Removed ${currentEventIP} from quarantine`, 'ok');
+          showToast(`[UNBAN] Removed ${currentEventIP} from quarantine`, 'ok');
           fetchQuarantineBans();
           fetchAlerts();
         }
@@ -3949,7 +3949,7 @@ ${notes}
           body: JSON.stringify({ cidr: currentEventIP })
         });
         if (res.ok) {
-          showToast(`[🛡️ WHITELIST] Added ${currentEventIP} to protected CIDRs`, 'ok');
+          showToast(`[WHITELIST] Added ${currentEventIP} to protected CIDRs`, 'ok');
           quickDrawerUnban();
         }
       } catch (e) {
@@ -4154,12 +4154,12 @@ ${notes}
       if (isSOARAutoPilotActive) {
         pill.style.borderColor = '#ffffff';
         pill.style.color = '#ffffff';
-        icon.textContent = '⚡';
+        icon.textContent = '[ACTIVE]';
         label.textContent = 'SOAR AUTO-PILOT: ACTIVE';
       } else {
         pill.style.borderColor = 'var(--border)';
         pill.style.color = 'var(--text-muted)';
-        icon.textContent = '⏸';
+        icon.textContent = '[PAUSED]';
         label.textContent = 'SOAR AUTO-PILOT: PAUSED';
       }
     }
@@ -4631,7 +4631,7 @@ ${notes}
         // Shannon entropy badge
         const isHighEntropy = s.entropy >= 6.5;
         const entropyBadge = isHighEntropy
-          ? `<span class="badge" style="background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid #ef4444; font-weight: 700;">🔥 ${s.entropy.toFixed(2)} b/B</span>`
+          ? `<span class="badge" style="background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid #ef4444; font-weight: 700;"> ${s.entropy.toFixed(2)} b/B</span>`
           : `<span class="badge" style="background: rgba(148, 163, 184, 0.1); color: #cbd5e1; border: 1px solid #475569;">${s.entropy.toFixed(2)} b/B</span>`;
 
         const reasonColor = s.drop_reason.includes('TARPIT') ? '#ff7700' : '#ff4444';
@@ -5242,8 +5242,8 @@ ${notes}
               appendTerminalOutput(`<span style="color:#f43f5e;">[!] Usage: apikey set &lt;new_key&gt;</span>`);
             } else {
               setStoredAPIKey(newKey);
-              appendTerminalOutput(`<span style="color:#22c55e;">[✓] Master API Key updated in browser storage!</span>`);
-              appendTerminalOutput(`<span style="color:#a8a29e;">[🔒] Note: To change the server-wide Master Key on the host, run <code>copsec apikey set &lt;key&gt;</code> in host terminal (requires sudo authentication).</span>`);
+              appendTerminalOutput(`<span style="color:#22c55e;">[OK] Master API Key updated in browser storage!</span>`);
+              appendTerminalOutput(`<span style="color:#a8a29e;">[SECURE] Note: To change the server-wide Master Key on the host, run <code>copsec apikey set &lt;key&gt;</code> in host terminal (requires sudo authentication).</span>`);
             }
           } else {
             const k = getStoredAPIKey();
@@ -5275,7 +5275,7 @@ ${notes}
               body: JSON.stringify({ ip: banIP, duration_seconds: banDur, reason: banReason })
             });
             if (res.ok) {
-              appendTerminalOutput(`<span style="color:#22c55e;">[✓] Successfully quarantined ${banIP} in kernel XDP! (TTL: ${banDur}s, Reason: ${escapeHTML(banReason)})</span>`);
+              appendTerminalOutput(`<span style="color:#22c55e;">[OK] Successfully quarantined ${banIP} in kernel XDP! (TTL: ${banDur}s, Reason: ${escapeHTML(banReason)})</span>`);
               fetchQuarantineBans();
             } else {
               const err = await res.text();
@@ -5299,7 +5299,7 @@ ${notes}
               body: JSON.stringify({ ip: unbanIP })
             });
             if (res.ok) {
-              appendTerminalOutput(`<span style="color:#22c55e;">[✓] Successfully evicted ${unbanIP} from kernel quarantine.</span>`);
+              appendTerminalOutput(`<span style="color:#22c55e;">[OK] Successfully evicted ${unbanIP} from kernel quarantine.</span>`);
               fetchQuarantineBans();
             } else {
               const err = await res.text();

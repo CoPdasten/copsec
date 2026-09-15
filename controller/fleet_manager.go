@@ -125,7 +125,7 @@ func (fm *FleetManager) ConnectFleet(stream fleetproto.FleetService_ConnectFleet
 	fm.agents[nodeID] = session
 	fm.mu.Unlock()
 
-	log.Printf("[FLEET_MANAGER] 🚀 Node connected to fleet: %s (Host: %s, IP: %s)", nodeID, firstMsg.Hostname, firstMsg.IpAddress)
+	log.Printf("[FLEET_MANAGER]  Node connected to fleet: %s (Host: %s, IP: %s)", nodeID, firstMsg.Hostname, firstMsg.IpAddress)
 
 	// Update SQLite node registry
 	fm.recordNodeState(session, "ACTIVE")
@@ -183,7 +183,7 @@ func (fm *FleetManager) ConnectFleet(stream fleetproto.FleetService_ConnectFleet
 	fm.mu.Unlock()
 
 	fm.recordNodeState(session, "OFFLINE")
-	log.Printf("[FLEET_MANAGER] 🔌 Node disconnected from fleet: %s (Reason: %v)", nodeID, streamErr)
+	log.Printf("[FLEET_MANAGER]  Node disconnected from fleet: %s (Reason: %v)", nodeID, streamErr)
 
 	if streamErr == io.EOF || streamErr == context.Canceled {
 		return nil
@@ -287,7 +287,7 @@ func (fm *FleetManager) BroadcastBan(ip, reason string, durationSec int64) int {
 		case s.CommandChan <- cmd:
 			dispatched++
 		default:
-			log.Printf("[FLEET_MANAGER] ⚠️ Warning: CommandChan full for node %s, dropping ban push", s.NodeID)
+			log.Printf("[FLEET_MANAGER] [WARN] Warning: CommandChan full for node %s, dropping ban push", s.NodeID)
 		}
 	}
 
@@ -299,7 +299,7 @@ func (fm *FleetManager) BroadcastBan(ip, reason string, durationSec int64) int {
 		_ = fm.storage.RecordSOARAction("FLEET_ENFORCE_BAN", cleanIP, dispatched)
 	}
 
-	log.Printf("[FLEET_MANAGER] ⚡ BROADCAST_BAN: Pushed COMMAND_ENFORCE_BAN for IP %s to %d/%d nodes (Reason: %s, Duration: %ds)",
+	log.Printf("[FLEET_MANAGER] [FASTPATH] BROADCAST_BAN: Pushed COMMAND_ENFORCE_BAN for IP %s to %d/%d nodes (Reason: %s, Duration: %ds)",
 		cleanIP, dispatched, len(sessions), reason, durationSec)
 
 	return dispatched
@@ -340,7 +340,7 @@ func (fm *FleetManager) BroadcastRevokeBan(ip string) int {
 		_ = fm.storage.RecordSOARAction("FLEET_REVOKE_BAN", cleanIP, dispatched)
 	}
 
-	log.Printf("[FLEET_MANAGER] 🟢 BROADCAST_REVOKE_BAN: Pushed COMMAND_REVOKE_BAN for IP %s to %d nodes", cleanIP, dispatched)
+	log.Printf("[FLEET_MANAGER] [OK] BROADCAST_REVOKE_BAN: Pushed COMMAND_REVOKE_BAN for IP %s to %d nodes", cleanIP, dispatched)
 	return dispatched
 }
 
@@ -370,7 +370,7 @@ func (fm *FleetManager) runLifecycleMonitor(staleThreshold time.Duration) {
 			fm.mu.Lock()
 			for nodeID, s := range fm.agents {
 				if now.Sub(s.LastSeen) > staleThreshold {
-					log.Printf("[FLEET_MANAGER] ⏱️ Node %s timed out (> %v without heartbeat). Marking OFFLINE.", nodeID, staleThreshold)
+					log.Printf("[FLEET_MANAGER] [TIMEOUT] Node %s timed out (> %v without heartbeat). Marking OFFLINE.", nodeID, staleThreshold)
 					if s.CommandChan != nil {
 						close(s.CommandChan)
 					}

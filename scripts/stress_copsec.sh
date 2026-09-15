@@ -96,15 +96,15 @@ log_info() {
 }
 
 log_success() {
-  echo -e "${CLR_GREEN}[✓ PASS]${CLR_RESET} $1"
+  echo -e "${CLR_GREEN}[[OK] PASS]${CLR_RESET} $1"
 }
 
 log_warn() {
-  echo -e "${CLR_YELLOW}[⚠️  WARN]${CLR_RESET} $1"
+  echo -e "${CLR_YELLOW}[[WARN]  WARN]${CLR_RESET} $1"
 }
 
 log_error() {
-  echo -e "${CLR_RED}[✗ FAIL]${CLR_RESET} $1"
+  echo -e "${CLR_RED}[[FAIL] FAIL]${CLR_RESET} $1"
 }
 
 log_metric() {
@@ -332,9 +332,9 @@ preflight_and_baselines() {
   echo -e "${CLR_WHITE}Checking required diagnostic and benchmark toolchains:${CLR_RESET}"
   for tool in "${required_tools[@]}"; do
     if command -v "$tool" >/dev/null 2>&1; then
-      printf "  %-12s : ${CLR_GREEN}[✓ INSTALLED]${CLR_RESET} (%s)\n" "$tool" "$(command -v "$tool")"
+      printf "  %-12s : ${CLR_GREEN}[[OK] INSTALLED]${CLR_RESET} (%s)\n" "$tool" "$(command -v "$tool")"
     else
-      printf "  %-12s : ${CLR_RED}[✗ MISSING]${CLR_RESET}\n" "$tool"
+      printf "  %-12s : ${CLR_RED}[[FAIL] MISSING]${CLR_RESET}\n" "$tool"
       missing_tools+=("$tool")
     fi
   done
@@ -1036,10 +1036,10 @@ REPORT_BANNER
 
  5. SRE SLA VERDICT & PHASE ASSESSMENT
 ------------------------------------------------------------------------------------------------------------------------
- [✓] Pre-flight Diagnostics    : ${VERDICT_PREFLIGHT} - Dependencies, cluster reachability, and ports validated.
- [✓] Phase 1 (L4 XDP Line-Rate): ${VERDICT_PHASE1} - Packets dropped at driver layer without saturating CPU.
- [✓] Phase 2 (L7 Concurrency)  : ${VERDICT_PHASE2} - 400 concurrency sustained without socket or pool leaks.
- [✓] Phase 3 (WAL & Forensics) : ${VERDICT_PHASE3} - Pre-attack PCAPs dumped; SQLite WAL wrote 10 parallel bans.
+ [[OK]] Pre-flight Diagnostics    : ${VERDICT_PREFLIGHT} - Dependencies, cluster reachability, and ports validated.
+ [[OK]] Phase 1 (L4 XDP Line-Rate): ${VERDICT_PHASE1} - Packets dropped at driver layer without saturating CPU.
+ [[OK]] Phase 2 (L7 Concurrency)  : ${VERDICT_PHASE2} - 400 concurrency sustained without socket or pool leaks.
+ [[OK]] Phase 3 (WAL & Forensics) : ${VERDICT_PHASE3} - Pre-attack PCAPs dumped; SQLite WAL wrote 10 parallel bans.
 ------------------------------------------------------------------------------------------------------------------------
 TABLE_EOF
 

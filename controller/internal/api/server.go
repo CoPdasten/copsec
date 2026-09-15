@@ -89,7 +89,7 @@ func ResolveListenerAddress(cfg ServerConfig) (string, error) {
 		}
 
 		resolved := net.JoinHostPort(selectedIPv4.String(), strconv.Itoa(port))
-		log.Printf("[ZERO_TRUST] 🔒 Bound strictly to interface '%s' -> %s", targetIface, resolved)
+		log.Printf("[ZERO_TRUST] [SECURE] Bound strictly to interface '%s' -> %s", targetIface, resolved)
 		return resolved, nil
 	}
 
@@ -132,7 +132,7 @@ func ResolveListenerAddress(cfg ServerConfig) (string, error) {
 	}
 
 	resolved := net.JoinHostPort(hostPart, strconv.Itoa(port))
-	log.Printf("[ZERO_TRUST] 🔒 Cloaked Web SOC Cockpit listening on %s (External Scanners Receive ZERO TCP Response)", resolved)
+	log.Printf("[ZERO_TRUST] [SECURE] Cloaked Web SOC Cockpit listening on %s (External Scanners Receive ZERO TCP Response)", resolved)
 	return resolved, nil
 }
 

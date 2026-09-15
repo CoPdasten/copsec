@@ -315,7 +315,7 @@ func (e *EDREngine) KillRogueProcess(pid int, attackerIP string, reason string) 
 	atomic.AddUint64(&e.killedCount, 1)
 
 	logMsg := fmt.Sprintf("[EDR_KILL] Terminated rogue execution PID=%d, Comm=%s spawned by attacker %s", pid, comm, attackerIP)
-	log.Printf("[EDR_ALERT] ⚡ %s (Reason: %s)", logMsg, reason)
+	log.Printf("[EDR_ALERT] [FASTPATH] %s (Reason: %s)", logMsg, reason)
 
 	event := EDRTelemetryEvent{
 		TimestampMs: time.Now().UnixMilli(),

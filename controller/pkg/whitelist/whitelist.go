@@ -116,7 +116,7 @@ func (e *Engine) ReloadAndSeed() error {
 		var err error
 		dbEntries, err = e.storage.GetAllWhitelistEntries()
 		if err != nil {
-			log.Printf("[WHITELIST] ⚠️ Failed to query whitelist from storage: %v", err)
+			log.Printf("[WHITELIST] [WARN] Failed to query whitelist from storage: %v", err)
 		}
 	}
 
@@ -175,7 +175,7 @@ func (e *Engine) ReloadAndSeed() error {
 						CreatedAtMs: nowMs,
 					})
 					existing[def.target] = true
-					log.Printf("[WHITELIST] 🌱 Auto-seeded critical safeguard: %s (%s)", def.target, def.desc)
+					log.Printf("[WHITELIST]  Auto-seeded critical safeguard: %s (%s)", def.target, def.desc)
 				}
 			} else {
 				dbEntries = append(dbEntries, Entry{
@@ -232,7 +232,7 @@ func (e *Engine) ReloadAndSeed() error {
 	e.entries = dbEntries
 	e.initialized = true
 
-	log.Printf("[WHITELIST] ⚡ Cache reloaded: %d entries (%d exact IPs, %d subnets)",
+	log.Printf("[WHITELIST] [FASTPATH] Cache reloaded: %d entries (%d exact IPs, %d subnets)",
 		len(dbEntries), len(newExact), len(newSubnets))
 	return nil
 }

@@ -175,7 +175,7 @@ func (e *DNSSinkholeEngine) createSinkholeEvent(pid int, procName, domain, recTy
 	}
 	e.mu.Unlock()
 
-	log.Printf("[DNS_SINKHOLE] 🚫 SINKHOLED C2 RESOLUTION: %s (PID: %d [%s], Anomaly: %s, Score: %d)",
+	log.Printf("[DNS_SINKHOLE] [BLOCKED] SINKHOLED C2 RESOLUTION: %s (PID: %d [%s], Anomaly: %s, Score: %d)",
 		domain, pid, procName, anomaly, score)
 
 	if e.onSinkhole != nil {

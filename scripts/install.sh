@@ -39,9 +39,9 @@ EOF
 
 log_info()    { echo -e "${CLR_BLUE}[INFO]${CLR_RESET} $1"; }
 log_step()    { echo -e "\n${CLR_MAGENTA}${CLR_BOLD}[STEP]${CLR_RESET} ${CLR_WHITE}$1${CLR_RESET}"; }
-log_success() { echo -e "${CLR_GREEN}${CLR_BOLD}[✓ SUCCESS]${CLR_RESET} $1"; }
-log_warn()    { echo -e "${CLR_YELLOW}[⚠️ WARN]${CLR_RESET} $1"; }
-log_error()   { echo -e "${CLR_RED}${CLR_BOLD}[✗ FATAL]${CLR_RESET} $1" >&2; }
+log_success() { echo -e "${CLR_GREEN}${CLR_BOLD}[[OK] SUCCESS]${CLR_RESET} $1"; }
+log_warn()    { echo -e "${CLR_YELLOW}[[WARN] WARN]${CLR_RESET} $1"; }
+log_error()   { echo -e "${CLR_RED}${CLR_BOLD}[[FAIL] FATAL]${CLR_RESET} $1" >&2; }
 log_metric()  { printf "  ${CLR_CYAN}├─ %-32s :${CLR_RESET} ${CLR_WHITE}%s${CLR_RESET}\n" "$1" "$2"; }
 
 # Allow --help / -h without root privileges
@@ -395,7 +395,7 @@ TOPOLOGY_EOF
   │   │  copsec-collector (Bu Düğüm)                                     │  │
   │   │  ├─ TCP Tarpit (:2223) & Shadow Honeypot (:8088)                 │  │
   │   │  ├─ RAM İçi 30s Uçucu PCAP Halka Tamponu                         │  │
-  │   │  ├─ ⚡ Dedikodu Ağı (:7946 Gossip) <──> Komşu Sensörler          │  │
+  │   │  ├─ [FASTPATH] Dedikodu Ağı (:7946 Gossip) <──> Komşu Sensörler          │  │
   │   │  └─ Çift Yönlü Telemetri Akışı ──(gRPC :50051)─> Controller      │  │
   │   └──────────────────────────────────────────────────────────────────┘  │
   └─────────────────────────────────────────────────────────────────────────┘

@@ -151,7 +151,7 @@ func (d *clusterDelegate) NotifyMsg(data []byte) {
 	d.cluster.markRecentlySeen(ipStr)
 
 	d.cluster.rxCount.Add(1)
-	d.cluster.logf("[GOSSIP_SYNC] 🚨 Received line-rate IP quarantine from adjacent node %q -> Banning %s (TTL: %ds)",
+	d.cluster.logf("[GOSSIP_SYNC] [ALERT] Received line-rate IP quarantine from adjacent node %q -> Banning %s (TTL: %ds)",
 		threat.SourceNodeID, ipStr, threat.QuarantineTTL)
 
 	// Immediately populate the local eBPF ban_map in the NIC driver without waiting for controller
@@ -268,12 +268,12 @@ func NewGossipCluster(cfg GossipConfig) (*GossipCluster, error) {
 			if err != nil {
 				log.Printf("[GOSSIP_WARN] Failed to join initial peers %v: %v", validPeers, err)
 			} else {
-				log.Printf("[GOSSIP] 🤝 Successfully joined %d cluster peer(s)", joined)
+				log.Printf("[GOSSIP]  Successfully joined %d cluster peer(s)", joined)
 			}
 		}
 	}
 
-	log.Printf("[GOSSIP] ⚡ Distributed Threat Sync node active: ID=%s (%s:%d)",
+	log.Printf("[GOSSIP] [FASTPATH] Distributed Threat Sync node active: ID=%s (%s:%d)",
 		cfg.NodeID, cfg.BindAddr, cfg.BindPort)
 
 	return cluster, nil
@@ -308,7 +308,7 @@ func (c *GossipCluster) BroadcastThreat(attackerIP net.IP, ttlSec uint32) error 
 	c.queue.QueueBroadcast(&threatBroadcast{msg: data})
 	c.bcastCount.Add(1)
 
-	c.logf("[GOSSIP_BROADCAST] ⚡ Broadcasted IP %s (TTL: %ds) to cluster members", cleanIP, ttlSec)
+	c.logf("[GOSSIP_BROADCAST] [FASTPATH] Broadcasted IP %s (TTL: %ds) to cluster members", cleanIP, ttlSec)
 	return nil
 }
 

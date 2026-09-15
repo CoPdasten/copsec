@@ -86,10 +86,10 @@ func (h *ShadowHoneypot) Start(ctx context.Context) error {
 	// 1. SSH Decoy Listener (Port 2222)
 	l, err := net.Listen("tcp", h.sshBindAddr)
 	if err != nil {
-		log.Printf("[HONEYPOT] ⚠️ Failed to bind SSH honeypot on %s: %v", h.sshBindAddr, err)
+		log.Printf("[HONEYPOT] [WARN] Failed to bind SSH honeypot on %s: %v", h.sshBindAddr, err)
 	} else {
 		h.sshListener = l
-		log.Printf("[HONEYPOT] 🍯 Shadow SSH Honeypot listening on %s (Decoy Port 2222)", h.sshBindAddr)
+		log.Printf("[HONEYPOT] [CANARY] Shadow SSH Honeypot listening on %s (Decoy Port 2222)", h.sshBindAddr)
 		go h.acceptSSHLoop(ctx)
 	}
 
@@ -102,7 +102,7 @@ func (h *ShadowHoneypot) Start(ctx context.Context) error {
 	}
 
 	go func() {
-		log.Printf("[HONEYPOT] 🍯 Shadow HTTP/WAF Honeypot listening on %s (Decoy Port 8088)", h.httpBindAddr)
+		log.Printf("[HONEYPOT] [CANARY] Shadow HTTP/WAF Honeypot listening on %s (Decoy Port 8088)", h.httpBindAddr)
 		if err := h.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Printf("[HONEYPOT] HTTP honeypot stopped: %v", err)
 		}
@@ -160,7 +160,7 @@ func (h *ShadowHoneypot) handleSSHConn(conn net.Conn) {
 		IsHoneypot:       true,
 	}
 
-	log.Printf("[HONEYPOT] 🍯 Decoy SSH Trap triggered by %s:%d (Banner: %s) [MITRE: T1110.001]", host, port, clientBanner)
+	log.Printf("[HONEYPOT] [CANARY] Decoy SSH Trap triggered by %s:%d (Banner: %s) [MITRE: T1110.001]", host, port, clientBanner)
 
 	h.mu.RLock()
 	cb := h.onEvent
@@ -193,7 +193,7 @@ func (h *ShadowHoneypot) handleHTTPDecoy(w http.ResponseWriter, r *http.Request)
 
 	canaryEngine := deception.GetDefaultCanaryEngine()
 	if tok, triggered := canaryEngine.InspectHTTPRequest(r); triggered {
-		log.Printf("[HONEYPOT] 🚨 Canary Honey-Token triggered in honeypot by %s: %s (%s)", clientIP, tok.TokenValue, tok.TokenType)
+		log.Printf("[HONEYPOT] [ALERT] Canary Honey-Token triggered in honeypot by %s: %s (%s)", clientIP, tok.TokenValue, tok.TokenType)
 		mitreID = "T1078"
 	}
 
@@ -208,7 +208,7 @@ func (h *ShadowHoneypot) handleHTTPDecoy(w http.ResponseWriter, r *http.Request)
 		IsHoneypot:       true,
 	}
 
-	log.Printf("[HONEYPOT] 🍯 Decoy HTTP Trap triggered by %s -> %s %s [MITRE: %s]", clientIP, r.Method, urlPath, mitreID)
+	log.Printf("[HONEYPOT] [CANARY] Decoy HTTP Trap triggered by %s -> %s %s [MITRE: %s]", clientIP, r.Method, urlPath, mitreID)
 
 	h.mu.RLock()
 	cb := h.onEvent
@@ -251,7 +251,7 @@ func (h *ShadowHoneypot) RedirectAttackerToHoneypot(ip string, serviceType strin
 	_ = exec.Command("sudo", "-n", "iptables", "-t", "nat", "-I", "PREROUTING", "1", "-p", "tcp", "-s", cleanIP, "--dport", "80", "-j", "REDIRECT", "--to-ports", "8088").Run()
 	_ = exec.Command("sudo", "-n", "iptables", "-t", "nat", "-I", "PREROUTING", "1", "-p", "tcp", "-s", cleanIP, "--dport", "443", "-j", "REDIRECT", "--to-ports", "8088").Run()
 
-	log.Printf("[HONEYPOT] 🪤 Configured Kernel PREROUTING Deception Redirection for %s -> Decoys (2222/8088)", cleanIP)
+	log.Printf("[HONEYPOT] [TARPIT] Configured Kernel PREROUTING Deception Redirection for %s -> Decoys (2222/8088)", cleanIP)
 	return nil
 }
 

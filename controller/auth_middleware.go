@@ -42,7 +42,7 @@ func InitAPIKey() string {
 					trimmed := strings.TrimSpace(string(data))
 					if trimmed != "" {
 						envKey = trimmed
-						log.Printf("[AUTH] 🔐 Master API key loaded from persistent file: %s", path)
+						log.Printf("[AUTH]  Master API key loaded from persistent file: %s", path)
 						break
 					}
 				}
@@ -51,11 +51,11 @@ func InitAPIKey() string {
 
 		if envKey != "" {
 			globalAPIKey = envKey
-			log.Printf("[AUTH] 🔐 Active API Key configured (length: %d chars)", len(envKey))
+			log.Printf("[AUTH]  Active API Key configured (length: %d chars)", len(envKey))
 		} else {
 			buf := make([]byte, 32)
 			if _, err := rand.Read(buf); err != nil {
-				log.Fatalf("[FATAL] 💥 Failed to generate secure fallback API key: %v", err)
+				log.Fatalf("[FATAL]  Failed to generate secure fallback API key: %v", err)
 			}
 			globalAPIKey = hex.EncodeToString(buf)
 
@@ -72,14 +72,14 @@ func InitAPIKey() string {
 			}
 
 			log.Printf("================================================================================")
-			log.Printf("[SECURITY NOTICE] 🔑 Active Master API key:")
+			log.Printf("[SECURITY NOTICE] [KEY] Active Master API key:")
 			log.Printf("[SECURITY NOTICE]     %s", globalAPIKey)
 			if persistedPath != "" {
-				log.Printf("[SECURITY NOTICE] 💾 Persisted to %s for cross-restart continuity", persistedPath)
+				log.Printf("[SECURITY NOTICE]  Persisted to %s for cross-restart continuity", persistedPath)
 			} else {
-				log.Printf("[SECURITY WARNING] ⚠️ Could not write to disk; set COPSEC_API_KEY in environment.")
+				log.Printf("[SECURITY WARNING] [WARN] Could not write to disk; set COPSEC_API_KEY in environment.")
 			}
-			log.Printf("[SECURITY NOTICE] 🌐 Direct Web SOC URL: http://<SERVER_IP>:8080/?token=%s", globalAPIKey)
+			log.Printf("[SECURITY NOTICE]  Direct Web SOC URL: http://<SERVER_IP>:8080/?token=%s", globalAPIKey)
 			log.Printf("================================================================================")
 		}
 	})
@@ -191,7 +191,7 @@ func AuthMiddleware(next http.Handler) http.Handler {
 				clientIP = strings.TrimSpace(strings.Split(xff, ",")[0])
 			}
 
-			log.Printf("[AUTH_ALERT] 🚨 ZERO-FALSE-POSITIVE: Canary Honey-Token %s (%s) triggered by %s (Path: %s) -> Enforcing cluster-wide ban",
+			log.Printf("[AUTH_ALERT] [ALERT] ZERO-FALSE-POSITIVE: Canary Honey-Token %s (%s) triggered by %s (Path: %s) -> Enforcing cluster-wide ban",
 				token.TokenValue, token.TokenType, clientIP, r.URL.Path)
 
 			// Immediate cluster-wide / host ban enforcement

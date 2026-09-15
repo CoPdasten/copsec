@@ -208,7 +208,7 @@ func (fc *FleetClient) connectAndStream(ctx context.Context) error {
 	}
 
 	atomic.StoreInt32(&fc.isConnected, 1)
-	log.Printf("[FLEET_CLIENT] ✅ Connected to Fleet Mesh at %s (NodeID: %s)", fc.cfg.ServerAddress, fc.cfg.NodeID)
+	log.Printf("[FLEET_CLIENT]  Connected to Fleet Mesh at %s (NodeID: %s)", fc.cfg.ServerAddress, fc.cfg.NodeID)
 
 	errChan := make(chan error, 2)
 
@@ -278,7 +278,7 @@ func (fc *FleetClient) executeCommand(cmd *fleetproto.ControllerCommand) {
 	case fleetproto.ControllerCommand_COMMAND_ENFORCE_BAN:
 		targetIP := strings.TrimSpace(cmd.TargetIp)
 		if targetIP == "" || isProtectedIP(targetIP) {
-			log.Printf("[FLEET_COMMAND] ⚠️ Skipping ban for invalid/protected IP: %s", targetIP)
+			log.Printf("[FLEET_COMMAND] [WARN] Skipping ban for invalid/protected IP: %s", targetIP)
 			return
 		}
 
@@ -294,7 +294,7 @@ func (fc *FleetClient) executeCommand(cmd *fleetproto.ControllerCommand) {
 			}
 		}
 
-		log.Printf("[FLEET_COMMAND] ⚡ Enforced immediate ban on IP %s across local host", targetIP)
+		log.Printf("[FLEET_COMMAND] [FASTPATH] Enforced immediate ban on IP %s across local host", targetIP)
 
 	case fleetproto.ControllerCommand_COMMAND_REVOKE_BAN:
 		targetIP := strings.TrimSpace(cmd.TargetIp)
@@ -310,7 +310,7 @@ func (fc *FleetClient) executeCommand(cmd *fleetproto.ControllerCommand) {
 			_ = driver.UnblockIP(targetIP)
 		}
 
-		log.Printf("[FLEET_COMMAND] 🟢 Revoked ban on IP %s across local host", targetIP)
+		log.Printf("[FLEET_COMMAND] [OK] Revoked ban on IP %s across local host", targetIP)
 
 	case fleetproto.ControllerCommand_COMMAND_HEARTBEAT_ACK:
 		// Normal heartbeat acknowledgment from controller

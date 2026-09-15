@@ -193,7 +193,7 @@ func (s *TLSMirrorServer) Start(ctx context.Context) error {
 	s.running = true
 	s.mu.Unlock()
 
-	log.Printf("[DPI_MIRROR] 🪞 Decryption Mirror Ingress listening on UNIX socket: %s (Mode: 0666)", cleanPath)
+	log.Printf("[DPI_MIRROR]  Decryption Mirror Ingress listening on UNIX socket: %s (Mode: 0666)", cleanPath)
 
 	go s.acceptLoop(ctx)
 	return nil
@@ -293,7 +293,7 @@ func (s *TLSMirrorServer) handleMirrorConnection(conn net.Conn) {
 
 	if result.Verdict == dpi.VerdictDrop || result.Verdict == dpi.VerdictTarpit {
 		atomic.AddUint64(&s.threatsDetected, 1)
-		log.Printf("[DPI_MIRROR] 🚨 Exploit detected in decrypted TLS mirror from %s! Verdict: %s (Reason: %s, Score: %.2f)",
+		log.Printf("[DPI_MIRROR] [ALERT] Exploit detected in decrypted TLS mirror from %s! Verdict: %s (Reason: %s, Score: %.2f)",
 			realClientIP, result.Verdict, result.Reason, result.Score)
 	}
 }

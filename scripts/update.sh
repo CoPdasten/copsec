@@ -22,7 +22,7 @@ log_info() {
 }
 
 log_success() {
-  echo -e "  ${CLR_GREEN}[✓] ${1}${CLR_RESET}"
+  echo -e "  ${CLR_GREEN}[[OK]] ${1}${CLR_RESET}"
 }
 
 log_warn() {
@@ -30,7 +30,7 @@ log_warn() {
 }
 
 log_error() {
-  echo -e "  ${CLR_RED}[✗] ${1}${CLR_RESET}"
+  echo -e "  ${CLR_RED}[[FAIL]] ${1}${CLR_RESET}"
 }
 
 if [[ "$(id -u)" -ne 0 ]]; then

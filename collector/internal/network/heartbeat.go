@@ -84,7 +84,7 @@ func NewHeartbeatWorker(cfg HeartbeatConfig) *HeartbeatWorker {
 func (hw *HeartbeatWorker) Start(ctx context.Context) {
 	hw.wg.Add(1)
 	go hw.run(ctx)
-	log.Printf("[HEARTBEAT] 💓 Edge Collector Heartbeat Worker started (Node: %s, Group: %s, Target: %s, Interval: %v)",
+	log.Printf("[HEARTBEAT]  Edge Collector Heartbeat Worker started (Node: %s, Group: %s, Target: %s, Interval: %v)",
 		hw.cfg.NodeID, hw.cfg.NodeGroup, hw.cfg.ControllerEndpoint, hw.cfg.Interval)
 }
 
@@ -104,7 +104,7 @@ func (hw *HeartbeatWorker) Stop() {
 	}
 	hw.mu.Unlock()
 	hw.wg.Wait()
-	log.Println("[HEARTBEAT] 🛑 Edge Collector Heartbeat Worker stopped.")
+	log.Println("[HEARTBEAT] [STOP] Edge Collector Heartbeat Worker stopped.")
 }
 
 func (hw *HeartbeatWorker) run(ctx context.Context) {
@@ -151,7 +151,7 @@ func (hw *HeartbeatWorker) sendPulse(ctx context.Context) {
 
 	client, err := hw.getClient(ctx)
 	if err != nil {
-		log.Printf("[HEARTBEAT] ⚠️ Unable to establish gRPC client to %s: %v", hw.cfg.ControllerEndpoint, err)
+		log.Printf("[HEARTBEAT] [WARN] Unable to establish gRPC client to %s: %v", hw.cfg.ControllerEndpoint, err)
 		return
 	}
 
@@ -170,7 +170,7 @@ func (hw *HeartbeatWorker) sendPulse(ctx context.Context) {
 
 	resp, err := client.SendHeartbeat(callCtx, hb)
 	if err != nil {
-		log.Printf("[HEARTBEAT] ⚠️ Heartbeat RPC error (%s): %v", hw.cfg.ControllerEndpoint, err)
+		log.Printf("[HEARTBEAT] [WARN] Heartbeat RPC error (%s): %v", hw.cfg.ControllerEndpoint, err)
 		hw.mu.Lock()
 		if hw.conn != nil {
 			_ = hw.conn.Close()
@@ -182,7 +182,7 @@ func (hw *HeartbeatWorker) sendPulse(ctx context.Context) {
 	}
 
 	if resp != nil && resp.Acknowledged {
-		log.Printf("[HEARTBEAT] ✓ Pulse ACKed by Controller (Node=%s IP=%s NIC=%s CPU=%.1f%% RSS=%.1fMB Drops=%d XDP=%s)",
+		log.Printf("[HEARTBEAT] [OK] Pulse ACKed by Controller (Node=%s IP=%s NIC=%s CPU=%.1f%% RSS=%.1fMB Drops=%d XDP=%s)",
 			hb.NodeId, hb.IpAddress, hb.ActiveInterface, hb.CpuUsage, hb.MemoryUsage, hb.TotalPacketsDropped, hb.XdpStatus)
 	}
 }

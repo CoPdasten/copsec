@@ -379,7 +379,7 @@ func (s *CentralServer) processEvent(nodeID string, event *copsecproto.LogEvent)
 		threatScore = 100
 		dynamicAction = detection.ActionBan
 		dynamicBanDuration = 86400
-		log.Printf("[CANARY_ALERT] 🚨 ZERO-FALSE-POSITIVE: Canary Honey-Token %s (%s) triggered by %s", canaryTok.TokenValue, canaryTok.TokenType, event.ClientIp)
+		log.Printf("[CANARY_ALERT] [ALERT] ZERO-FALSE-POSITIVE: Canary Honey-Token %s (%s) triggered by %s", canaryTok.TokenValue, canaryTok.TokenType, event.ClientIp)
 	}
 
 	// 0b. DNS High-Entropy Tunneling & C2 Exfiltration Evaluation

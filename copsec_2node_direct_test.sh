@@ -382,7 +382,7 @@ REPORT_EOF
 log_info "Comprehensive 2-Node test report exported to: ${CLR_CYAN}${REPORT_JSON}${CLR_RESET}"
 echo ""
 echo -e "${CLR_GREEN}${CLR_BOLD}================================================================================${CLR_RESET}"
-echo -e "${CLR_GREEN}${CLR_BOLD}  [✓ SUITE COMPLETE] All 3 Direct 2-Node SLAs validated successfully!${CLR_RESET}"
+echo -e "${CLR_GREEN}${CLR_BOLD}  [[OK] SUITE COMPLETE] All 3 Direct 2-Node SLAs validated successfully!${CLR_RESET}"
 echo -e "${CLR_GREEN}${CLR_BOLD}================================================================================${CLR_RESET}"
 
 exit 0

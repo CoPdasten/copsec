@@ -72,7 +72,7 @@ func main() {
 		if err != nil {
 			log.Fatalf("[PANIC_FLUSH_ERROR] Failed to execute emergency flush: %v", err)
 		}
-		log.Printf("[PANIC_FLUSH_SUCCESS] 🚨 Break-Glass Emergency Flush completed. Purged %d banned/tarpit records from kernel maps.", flushed)
+		log.Printf("[PANIC_FLUSH_SUCCESS] [ALERT] Break-Glass Emergency Flush completed. Purged %d banned/tarpit records from kernel maps.", flushed)
 		os.Exit(0)
 	}
 
@@ -107,7 +107,7 @@ func main() {
 
 	if *enableSynProxyFlag {
 		_ = ebpf.GetXDPEngine().EnableSynProxy(0)
-		log.Println("[INFO] ⚡ In-kernel Stateful TCP SYN-Proxy active defense enabled")
+		log.Println("[INFO] [FASTPATH] In-kernel Stateful TCP SYN-Proxy active defense enabled")
 	}
 
 	log.Println("[INFO] CoPSeC Ultra-Fast Edge Collector initializing (Hub-and-Spoke SIEM Ingestion)...")
@@ -259,7 +259,7 @@ func main() {
 			}
 		}()
 		defer tarpitEngine.Close()
-		log.Println("[INFO] ⚡ Asymmetric XDP Zero-Window Tarpit defense active")
+		log.Println("[INFO] [FASTPATH] Asymmetric XDP Zero-Window Tarpit defense active")
 	}
 
 	honeypotEngine := honeypot.GetDefaultShadowHoneypot()
@@ -285,7 +285,7 @@ func main() {
 	defer honeypotEngine.Close()
 
 	if ig := ebpf.GetDefaultIntegrityGuard(); ig != nil {
-		log.Println("[INFO] 🛡️ eBPF Kernel Map & Driver Integrity Guard active")
+		log.Println("[INFO]  eBPF Kernel Map & Driver Integrity Guard active")
 	}
 	if sh := dns.GetDefaultSinkhole(); sh != nil {
 		sh.SetEventHandler(func(ev dns.DNSSinkholeEvent) {
@@ -302,10 +302,10 @@ func main() {
 				controllerClient.Submit(logEv)
 			}
 		})
-		log.Println("[INFO] 🌐 Autonomous DNS Sinkhole active")
+		log.Println("[INFO]  Autonomous DNS Sinkhole active")
 	}
 	if yr := yara.GetDefaultScanner(); yr != nil {
-		log.Println("[INFO] 🔬 Memory & Payload YARA Scanner active")
+		log.Println("[INFO]  Memory & Payload YARA Scanner active")
 	}
 
 	// 5g. Autonomous BGP-4 Anycast & RFC 7999 RTBH Signaling Engine
@@ -339,7 +339,7 @@ func main() {
 			log.Printf("[WARN] BGP Speaker failed to start: %v", err)
 		} else {
 			defer bgpSpeaker.Stop()
-			log.Printf("[INFO] 🌐 Autonomous BGP-4 Anycast & RFC 7999 RTBH Engine active (Local: AS%d, Peer: AS%d@%s:%d, Threshold: %d PPS, Recovery: %v)",
+			log.Printf("[INFO]  Autonomous BGP-4 Anycast & RFC 7999 RTBH Engine active (Local: AS%d, Peer: AS%d@%s:%d, Threshold: %d PPS, Recovery: %v)",
 				localAS, peerAS, *bgpPeerIPFlag, *bgpPeerPortFlag, *bgpRTBHThresholdPPS, *bgpRecoveryDuration)
 		}
 	}
@@ -377,7 +377,7 @@ func main() {
 			if err == nil {
 				telemetryProc.Start(ctx)
 				defer telemetryProc.Close()
-				log.Printf("[INFO] ⚡ Zero-Copy Kernel Telemetry RingBuffer processor attached at %s", pinPath)
+				log.Printf("[INFO] [FASTPATH] Zero-Copy Kernel Telemetry RingBuffer processor attached at %s", pinPath)
 				break
 			}
 		}
@@ -435,7 +435,7 @@ func main() {
 		if err == nil {
 			rawProc.Start(ctx)
 			defer rawProc.Close()
-			log.Println("[INFO] 📡 Live Forensic Raw Packet RingBuffer stream processor attached")
+			log.Println("[INFO]  Live Forensic Raw Packet RingBuffer stream processor attached")
 		}
 	}
 

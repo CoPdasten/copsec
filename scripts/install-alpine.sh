@@ -43,9 +43,9 @@ EOF
 
 log_info()    { printf "${CLR_BLUE}[INFO]${CLR_RESET} %s\n" "$1"; }
 log_step()    { printf "\n${CLR_MAGENTA}${CLR_BOLD}[STEP]${CLR_RESET} ${CLR_WHITE}%s${CLR_RESET}\n" "$1"; }
-log_success() { printf "${CLR_GREEN}${CLR_BOLD}[✓ SUCCESS]${CLR_RESET} %s\n" "$1"; }
-log_warn()    { printf "${CLR_YELLOW}[⚠️ WARN]${CLR_RESET} %s\n" "$1"; }
-log_error()   { printf "${CLR_RED}${CLR_BOLD}[✗ FATAL]${CLR_RESET} %s\n" "$1" >&2; }
+log_success() { printf "${CLR_GREEN}${CLR_BOLD}[[OK] SUCCESS]${CLR_RESET} %s\n" "$1"; }
+log_warn()    { printf "${CLR_YELLOW}[[WARN] WARN]${CLR_RESET} %s\n" "$1"; }
+log_error()   { printf "${CLR_RED}${CLR_BOLD}[[FAIL] FATAL]${CLR_RESET} %s\n" "$1" >&2; }
 log_metric()  { printf "  ${CLR_CYAN}├─ %-32s :${CLR_RESET} ${CLR_WHITE}%s${CLR_RESET}\n" "$1" "$2"; }
 
 # Allow --help / -h without root privileges

@@ -166,7 +166,7 @@ func (f *FallbackEngine) InspectOffline(rawLine, source string) {
 func (f *FallbackEngine) executeLocalBan(ipStr string) {
 	success, msg := ExecuteSOARBan(ipStr, 86400)
 	if success {
-		log.Printf("[FALLBACK_SOAR] 🚫 Autonomous local ban executed for %s (%s)", ipStr, msg)
+		log.Printf("[FALLBACK_SOAR] [BLOCKED] Autonomous local ban executed for %s (%s)", ipStr, msg)
 	} else {
 		log.Printf("[FALLBACK_SOAR] Failed to ban IP %s: %s", ipStr, msg)
 	}

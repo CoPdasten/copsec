@@ -221,7 +221,7 @@ func TestMultiNodeFleetSyncAndPentestDetection(t *testing.T) {
 	select {
 	case receivedIP := <-agent2BanReceived:
 		elapsed := time.Since(startBroadcast)
-		t.Logf("⚡ Agent 2 received COMMAND_ENFORCE_BAN for %s in %v (Threshold <= 50ms)", receivedIP, elapsed)
+		t.Logf("[FASTPATH] Agent 2 received COMMAND_ENFORCE_BAN for %s in %v (Threshold <= 50ms)", receivedIP, elapsed)
 		if receivedIP != attackerIP {
 			t.Errorf("Expected Agent 2 to receive ban for %s, got %s", attackerIP, receivedIP)
 		}
@@ -259,5 +259,5 @@ func TestMultiNodeFleetSyncAndPentestDetection(t *testing.T) {
 		t.Logf("Active platform driver quarantined IPs: %v", list)
 	}
 
-	t.Log("✅ Multi-Node Fleet Sync & Pentest Detection verified successfully.")
+	t.Log(" Multi-Node Fleet Sync & Pentest Detection verified successfully.")
 }

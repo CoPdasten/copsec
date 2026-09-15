@@ -22,7 +22,7 @@
 
 ---
 
-## 🏛️ Architecture Overview
+## Architecture Overview
 
 CoPSeC partitions responsibilities between high-speed kernel edge sensors (**Collectors**) and a centralized intelligence & policy orchestrator (**Controller**), interconnected over secure bidirectional gRPC/mTLS channels and visualized via a high-contrast zero-latency analyst cockpit.
 
@@ -93,7 +93,7 @@ CoPSeC partitions responsibilities between high-speed kernel edge sensors (**Col
 
 ---
 
-## 🏛️ Enterprise System Architecture & Core Capabilities Matrix
+## Enterprise System Architecture & Core Capabilities Matrix
 
 CoPSeC is engineered across **6 core architectural pillars** that decouple high-speed edge packet handling from hardened central intelligence, delivering banking-grade zero-trust isolation and non-repudiable cryptographic auditability:
 
@@ -148,7 +148,7 @@ CoPSeC is engineered across **6 core architectural pillars** that decouple high-
 
 ---
 
-## ⚡ Next-Gen Enterprise Subsystems (CoPSeC Pro)
+## Next-Gen Enterprise Subsystems (CoPSeC Pro)
 
 CoPSeC Pro advances single-node lab verification into a multi-node distributed defense ecosystem through four high-performance, kernel-integrated layers:
 
@@ -314,7 +314,7 @@ CoPSeC Pro advances single-node lab verification into a multi-node distributed d
 
 ---
 
-## 🧠 Autonomous RAM-Based Forensic Ring Buffer & Snapshot Engine
+## Autonomous RAM-Based Forensic Ring Buffer & Snapshot Engine
 
 ### The Problem: Disk Bottlenecks in Modern Packet Forensics
 Standard enterprise security architectures often struggle with packet-level network forensics during volumetric DDoS attacks or fast-moving exploit campaigns. Running persistent disk-backed packet sniffers (such as `tcpdump` or continuous `dumpcap` daemon rings) inevitably introduces catastrophic I/O bottlenecks, severe NVMe/SSD write wear, thread contention, and packet drops at the kernel ring-buffer layer.
@@ -379,17 +379,17 @@ CoPSeC eliminates persistent disk writes entirely by introducing an in-memory, i
 
 ---
 
-## 🚀 Quick Start & Autonomous Cluster Ignition
+## Quick Start & Autonomous Cluster Ignition
 
 CoPSeC Pro features a unified, idempotent, zero-touch installer (`scripts/install.sh`) supporting multi-role automated provisioning across your entire enterprise defense cluster. It handles package installation, binary resolution/compilation, eBPF/XDP driver hook detachment, directory tree creation, SQLite WAL ledger initialization with cryptographic anti-tamper triggers, and systemd service registration.
 
 ---
 
-## ⚡ Deployment & Ignition Topologies
+## Deployment & Ignition Topologies
 
 CoPSeC Pro scales seamlessly from single-host development environments to enterprise-grade, multi-tiered security operations centers. Select the deployment model suited to your infrastructure.
 
-> 📘 **Full Architecture & Deployment Guide**: Detailed port matrices, multi-datacenter replication, and firewall configuration examples are documented in [docs/DEPLOYMENT_TOPOLOGIES.md](docs/DEPLOYMENT_TOPOLOGIES.md).
+>  **Full Architecture & Deployment Guide**: Detailed port matrices, multi-datacenter replication, and firewall configuration examples are documented in [docs/DEPLOYMENT_TOPOLOGIES.md](docs/DEPLOYMENT_TOPOLOGIES.md).
 
 ---
 
@@ -398,22 +398,22 @@ Runs the entire stack on a single machine or VPS. Deploys the SQLite WAL vault, 
 
 ```mermaid
 flowchart TD
-    subgraph External ["🌐 External Network"]
+    subgraph External [" External Network"]
         ATTACKER["Attacker / Scanner"]
         USER["Legitimate User"]
     end
 
-    subgraph Host ["💻 Standalone Host"]
+    subgraph Host [" Standalone Host"]
         NIC["Interface (eth0)"]
 
-        subgraph KernelSpace ["🐧 Linux Kernel Space"]
+        subgraph KernelSpace [" Linux Kernel Space"]
             XDP["eBPF / XDP Hook"]
             BPF_MAP["banned_ips (Hash Map)"]
             XDP_DROP["XDP_DROP (<10µs Line-Rate)"]
             PASS["XDP_PASS (Legit Traffic)"]
         end
 
-        subgraph UserSpace ["⚙️ User Space Daemons"]
+        subgraph UserSpace [" User Space Daemons"]
             subgraph CollectorSvc ["copsec-collector.service"]
                 TARPIT["TCP Tarpit (:2223)"]
                 HONEY["Shadow Honeypot (:8088)"]
@@ -463,13 +463,13 @@ Your primary workstation functions as the cluster brain, log repository, and vis
 
 ```mermaid
 flowchart TD
-    subgraph Adversary ["⚡ ADVERSARY GENERATOR (kali — 192.168.1.12 / fd00::12)"]
+    subgraph Adversary [" ADVERSARY GENERATOR (kali — 192.168.1.12 / fd00::12)"]
         ATTACK_V4["IPv4 SYN Flood / Port Scan / RCE"]
         ATTACK_V6["IPv6 Volumetric Flood (fd00::12)"]
         ATTACK_ENTROPY["High-Entropy Obfuscated Payloads (H >= 6.5)"]
     end
 
-    subgraph EdgeSensor ["🛡️ TIER 1: EDGE SENSOR NODE (pardus1 — 192.168.1.8 / fd00::8)"]
+    subgraph EdgeSensor [" TIER 1: EDGE SENSOR NODE (pardus1 — 192.168.1.8 / fd00::8)"]
         NIC["Physical / Virt Interface (enp0s3 / eth0)"]
         NDP_SAFE{"NDP Check\n(ICMPv6 133-136)"}
         XDP_FAST["eBPF / XDP Dual-Stack Engine\nLine-Rate Discard (<22µs)"]
@@ -478,7 +478,7 @@ flowchart TD
         AUTONOMOUS["Autonomous SOAR & Shannon Engine\n<250ms Closed-Loop Kernel Ban"]
     end
 
-    subgraph CentralHub ["🧠 TIER 2: CENTRAL VAULT & SOC COCKPIT (cachy — 192.168.1.10)"]
+    subgraph CentralHub [" TIER 2: CENTRAL VAULT & SOC COCKPIT (cachy — 192.168.1.10)"]
         GRPC_SINK["gRPC Ingestion Hub (:50051)\nZero-Copy Protobuf Stream"]
         SQLITE_WAL[("Immutable Vault Ledger\n/var/lib/copsec/vault.db (WAL)")]
         MERKLE["SHA-256 Merkle Chain Integrity\nTrigger-Guarded Append-Only"]
@@ -526,12 +526,12 @@ Complete physical and logical separation of duties with upstream BGP Remotely Tr
 
 ```mermaid
 flowchart TD
-    subgraph Upstream ["🌐 UPSTREAM TRANSIT / ISP ROUTING"]
+    subgraph Upstream [" UPSTREAM TRANSIT / ISP ROUTING"]
         PEER_ROUTER["BGP-4 Edge Router (BIRD / FRR / Cisco / Juniper)\nAS65001 Peering :179"]
         UPSTREAM_DROP["Upstream Null0 / Blackhole Discard\nRFC 7999 Community 65535:666"]
     end
 
-    subgraph Tier1 ["🛡️ TIER 1: DMZ Edge Sensors (Stateless Frontline)"]
+    subgraph Tier1 [" TIER 1: DMZ Edge Sensors (Stateless Frontline)"]
         DMZ_NIC["Dual-Stack External Interface"]
         DMZ_XDP["eBPF / XDP Line-Rate Drop (111k+ PPS)"]
         DMZ_TARPIT["Zero-Socket TCP Tarpit (:2223)"]
@@ -539,13 +539,13 @@ flowchart TD
         DMZ_BUFF["512KB Raw Packet Ring Buffer"]
     end
 
-    subgraph Tier2 ["🏛️ TIER 2: Isolated Vault & SOAR Engine (Management VLAN)"]
+    subgraph Tier2 [" TIER 2: Isolated Vault & SOAR Engine (Management VLAN)"]
         VAULT_GRPC["gRPC Telemetry Hub (:50051)"]
         VAULT_DB[("Cryptographic SQLite Vault\nSHA-256 Merkle Chain (WAL)")]
         FIM["eBPF Host EDR & Kernel Guard"]
     end
 
-    subgraph Tier3 ["💻 TIER 3: Zero-Storage Analyst Workstation (SOC Cockpit)"]
+    subgraph Tier3 [" TIER 3: Zero-Storage Analyst Workstation (SOC Cockpit)"]
         ANALYST["Analyst Browser (127.0.0.1:8080)"]
         WIRESHARK_DRAWER["Wireshark Live Packet Drawer\nClient-Side .pcap Exporter"]
     end
@@ -626,7 +626,7 @@ docker compose logs -f
 
 ---
 
-### ⚙️ Autonomous Installer Options (`scripts/install.sh` & `scripts/install-alpine.sh`)
+### Autonomous Installer Options (`scripts/install.sh` & `scripts/install-alpine.sh`)
 
 The unified installers accept both `--flag=value` and `--flag value` syntaxes:
 
@@ -644,32 +644,37 @@ The unified installers accept both `--flag=value` and `--flag value` syntaxes:
 | `--grpc-port=<port>` | `50051` | Controller / Vault | Central gRPC ingestion port |
 | `--port=<port>` | `8080` | Controller / Vault / Cockpit | Web SOC Cockpit HTTP port |
 | `--db-path=<path>` | `/var/lib/copsec/vault.db`| Controller / Vault / Standalone | Immutable SQLite WAL ledger database path |
-| `--api-key=<key>` | Auto-generated (32-byte hex) | Controller / Vault / Standalone | Master API Key for Web SOC & CLI authentication |
+| `--rules-path=<path>` | `/etc/copsec/rules.yaml` | Controller / Standalone | Local YAML/JSON firewall and CIDR rules path |
 
 ---
 
-## ⌨️ Unified CLI Management (`copsec`) & Seamless OTA Updates
+## Unified CLI Management (`copsec`) & Offline-First Operation
 
-CoPSeC installs a standalone, high-performance command-line utility (`/usr/local/bin/copsec`) across all host nodes:
+CoPSeC is a 100% self-contained, standalone, offline-first open-source security tool. It requires zero external network connections, zero license keys, zero remote token validations, and zero feature-gating. All kernel-level eBPF filtering, local LPM trie prefix blocklists, real-time SIEM streaming, and the Web SOC cockpit are unconditionally enabled out-of-the-box.
+
+CoPSeC installs a standalone, high-performance command-line utility (`/usr/local/bin/copsec` or `./bin/copsec`):
 
 ```bash
-# Check cluster status, EPS, active bans, and health
+# Check cluster status, service health, EPS, and active bans
 copsec status
 
-# Show Master API key and one-click Web SOC login URL (prompts for sudo authentication)
-copsec apikey
+# Insert CIDR prefix into kernel LPM trie blocklist
+copsec block 192.0.2.0/24 "Malicious subnet"
 
-# Change Master API key (prompts for sudo authentication)
-copsec apikey set <new-secret-key>
+# Evict CIDR prefix from kernel LPM trie blocklist
+copsec unblock 192.0.2.0/24
 
-# Generate a fresh 32-byte Master API key (prompts for sudo authentication)
-copsec apikey generate
+# Dump active kernel-level CIDR blocks from LPM trie
+copsec list
 
-# Seamlessly pull latest GitHub release, recompile & reload daemons
-copsec update
+# Hot-reload local rule definition files (/etc/copsec/rules.yaml or .json) into kernel maps
+copsec reload-rules /etc/copsec/rules.yaml
 
-# Check for new upstream releases without applying
-copsec update --check
+# Bootstrap CoPSeC standalone daemon with web cockpit
+copsec daemon --listen :8080 --rules /etc/copsec/rules.yaml
+
+# Print Web SOC Cockpit URL
+copsec web
 
 # Instantly quarantine an attacker IP in kernel XDP/eBPF
 copsec ban 198.51.100.4 1h "DDoS / Port scan anomaly"
@@ -679,6 +684,9 @@ copsec bans
 
 # Evict an IP from quarantine
 copsec unban 198.51.100.4
+
+# Emergency break-glass panic flush of all active quarantines
+copsec emergency-flush
 
 # List active security alerts
 copsec alerts 10
@@ -692,7 +700,7 @@ copsec logs controller -f
 
 ---
 
-## 🛡️ REST API Reference
+## REST API Reference
 
 The CoPSeC Controller exposes REST endpoints for automated SOAR orchestration, telemetry ingestion, and SOC integration.
 
@@ -857,7 +865,7 @@ Health and monitoring probes (`/api/fleet`, `/health`) are open for cluster tele
 
 ---
 
-## 🧪 Comprehensive Verification & Test Suite
+## Comprehensive Verification & Test Suite
 
 All components are rigorously tested across C++ unit tests, Go package suites with race detection, and live multi-node laboratory environments.
 
@@ -919,7 +927,7 @@ ctest --test-dir build --output-on-failure
 
 ---
 
-## 📊 Production Benchmark Scorecard & Hardware Boundary Resilience
+## Production Benchmark Scorecard & Hardware Boundary Resilience
 
 CoPSeC Pro has been subjected to aggressive hardware boundary stress testing (`copsec_dualstack_autonomous_test.sh` and `copsec_hardcore_resilience_test.sh`) executed from dedicated adversary nodes (`kali` / `192.168.1.12` / `fd00::12`) against frontline edge sensors (`pardus1` / `192.168.1.8` / `fd00::8`).
 
@@ -937,12 +945,12 @@ CoPSeC Pro has been subjected to aggressive hardware boundary stress testing (`c
 
 ---
 
-### 🔬 128-Byte Raw Packet Terminal Hexdump Showcase
+### 128-Byte Raw Packet Terminal Hexdump Showcase
 
 The 512 KB in-kernel ring buffer captures and streams the first 128 bytes of intercepted frames directly to userspace without allocating Linux `sk_buff` structures. Below is an authentic captured frame inspected via the Web SOC Cockpit:
 
 ```text
-🔬 INTERCEPTED PACKET FRAME (512KB RingBuffer Sample #4821)
+ INTERCEPTED PACKET FRAME (512KB RingBuffer Sample #4821)
 Wire Length: 128 bytes | Captured Length: 128 bytes | Protocol: TCP (6) | Stack: IPv6
 Source: [fd00::12]:48922 -> Destination: [fd00::8]:2223 | Reason: TARPIT_ZERO_WINDOW
 Shannon Entropy: 7.842 bits/byte [HIGH RISK / ENCRYPTED SHELLCODE]
@@ -967,7 +975,7 @@ OFFSET   00 01 02 03 04 05 06 07  08 09 0A 0B 0C 0D 0E 0F   ASCII INSPECTOR
 
 ---
 
-### 🚀 Running the Automated Validation Test Suite
+### Running the Automated Validation Test Suite
 
 To verify the dual-stack autonomous mitigation engine and validate line-rate fast-path performance:
 
@@ -981,7 +989,7 @@ sudo ./copsec_hardcore_resilience_test.sh
 
 ---
 
-## 👨‍💻 Geliştirici & Sistem Mimarı (Developer & Maintainer)
+## Geliştirici & Sistem Mimarı (Developer & Maintainer)
 
 * **Geliştirici & Sistem Mimarı (Lead Developer & Architect):** **Eyyüp Efe Adıgüzel**
 * **İletişim & Güvenlik Bildirimleri (Email):** [eyupadiguzel20@gmail.com](mailto:eyupadiguzel20@gmail.com)
@@ -990,5 +998,5 @@ sudo ./copsec_hardcore_resilience_test.sh
 
 ---
 
-## 📄 License
+## License
 Released under the [GNU Affero General Public License v3.0 (AGPLv3)](LICENSE).

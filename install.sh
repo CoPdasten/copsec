@@ -153,7 +153,7 @@ validate_preflight() {
     echo -e "${CLR_RED}[FATAL] Root or sudo privileges required (EUID must be 0). Run as root or with sudo.${CLR_RESET}"
     exit 1
   fi
-  echo -e "  ${CLR_GREEN}✔ Root privileges verified (EUID=0)${CLR_RESET}"
+  echo -e "  ${CLR_GREEN}[OK] Root privileges verified (EUID=0)${CLR_RESET}"
 
   # Validate OS Kernel (Linux only)
   local os_type
@@ -174,19 +174,19 @@ validate_preflight() {
   minor_ver="${minor_ver:-0}"
 
   if [ "$major_ver" -gt 5 ] || { [ "$major_ver" -eq 5 ] && [ "$minor_ver" -ge 8 ]; }; then
-    echo -e "  ${CLR_GREEN}✔ Linux kernel version ${kernel_release} (>= 5.8) - eBPF/XDP full support confirmed${CLR_RESET}"
+    echo -e "  ${CLR_GREEN}[OK] Linux kernel version ${kernel_release} (>= 5.8) - eBPF/XDP full support confirmed${CLR_RESET}"
   else
-    echo -e "  ${CLR_YELLOW}⚠ WARNING: Linux kernel version ${kernel_release} is older than 5.8.${CLR_RESET}"
+    echo -e "  ${CLR_YELLOW}[WARN] WARNING: Linux kernel version ${kernel_release} is older than 5.8.${CLR_RESET}"
     echo -e "  ${CLR_YELLOW}           eBPF ring buffers, XDP fast-path, and bpf_link may have limited functionality.${CLR_RESET}"
   fi
 
   # Check init system (systemd)
   if [ "$ENABLE_SERVICE" = true ]; then
     if [ ! -d "/run/systemd/system" ] && ! command -v systemctl >/dev/null 2>&1; then
-      echo -e "  ${CLR_YELLOW}⚠ systemd environment not detected. Disabling automatic systemd unit installation.${CLR_RESET}"
+      echo -e "  ${CLR_YELLOW}[WARN] systemd environment not detected. Disabling automatic systemd unit installation.${CLR_RESET}"
       ENABLE_SERVICE=false
     else
-      echo -e "  ${CLR_GREEN}✔ systemd init system detected${CLR_RESET}"
+      echo -e "  ${CLR_GREEN}[OK] systemd init system detected${CLR_RESET}"
     fi
   fi
 }
@@ -236,7 +236,7 @@ install_dependencies() {
       apk add --no-cache sqlite curl jq libpcap libpcap-dev openssl ca-certificates >/dev/null 2>&1 || true
       ;;
     *)
-      echo -e "  ${CLR_YELLOW}⚠ Unrecognized package manager. Ensuring required binaries are available on PATH...${CLR_RESET}"
+      echo -e "  ${CLR_YELLOW}[WARN] Unrecognized package manager. Ensuring required binaries are available on PATH...${CLR_RESET}"
       ;;
   esac
 
@@ -251,7 +251,7 @@ install_dependencies() {
   if [ ${#missing_tools[@]} -gt 0 ]; then
     echo -e "${CLR_YELLOW}[WARN] Missing non-critical utilities: ${missing_tools[*]}. CoPSeC will function, but some CLI audit helpers require them.${CLR_RESET}"
   else
-    echo -e "  ${CLR_GREEN}✔ Core dependencies verified (sqlite3, curl, jq, openssl, libpcap)${CLR_RESET}"
+    echo -e "  ${CLR_GREEN}[OK] Core dependencies verified (sqlite3, curl, jq, openssl, libpcap)${CLR_RESET}"
   fi
 }
 
@@ -264,7 +264,7 @@ setup_user_and_directories() {
   # Create dedicated system group if not exists
   if ! getent group "$COPSEC_USER" >/dev/null 2>&1; then
     groupadd --system "$COPSEC_USER" >/dev/null 2>&1 || groupadd "$COPSEC_USER" >/dev/null 2>&1 || true
-    echo -e "  ${CLR_GREEN}✔ Created system group: ${COPSEC_USER}${CLR_RESET}"
+    echo -e "  ${CLR_GREEN}[OK] Created system group: ${COPSEC_USER}${CLR_RESET}"
   fi
 
   # Create dedicated system user if not exists
@@ -276,7 +276,7 @@ setup_user_and_directories() {
       --comment "CoPSeC Autonomous Security Daemon" \
       "$COPSEC_USER" >/dev/null 2>&1 || \
     useradd -r -s /usr/sbin/nologin -g "$COPSEC_USER" "$COPSEC_USER" >/dev/null 2>&1 || true
-    echo -e "  ${CLR_GREEN}✔ Created system user: ${COPSEC_USER} (nologin, non-interactive)${CLR_RESET}"
+    echo -e "  ${CLR_GREEN}[OK] Created system user: ${COPSEC_USER} (nologin, non-interactive)${CLR_RESET}"
   else
     echo -e "  ${CLR_BLUE}• System user already exists: ${COPSEC_USER}${CLR_RESET}"
   fi
@@ -304,7 +304,7 @@ setup_user_and_directories() {
   chown -R "${COPSEC_USER}":"${COPSEC_USER}" "${COPSEC_LOG_DIR}"
   chmod 0700 "${COPSEC_LOG_DIR}"
 
-  echo -e "  ${CLR_GREEN}✔ Directory boundaries and permission masks established:${CLR_RESET}"
+  echo -e "  ${CLR_GREEN}[OK] Directory boundaries and permission masks established:${CLR_RESET}"
   echo -e "    • Install  : ${COPSEC_INSTALL_DIR} [0750 root:${COPSEC_USER}]"
   echo -e "    • Config   : ${COPSEC_CONF_DIR} [0750 root:${COPSEC_USER}]"
   echo -e "    • Data     : ${COPSEC_DATA_DIR} [0700 ${COPSEC_USER}:${COPSEC_USER}] (Database isolation)"
@@ -361,7 +361,7 @@ deploy_binaries_and_configs() {
   if [ -f "${collector_binary}" ]; then
     ln -sf "${collector_binary}" /usr/local/bin/copsec-collector
   fi
-  echo -e "  ${CLR_GREEN}✔ Installed binaries linked to /usr/local/bin/copsec-controller${CLR_RESET}"
+  echo -e "  ${CLR_GREEN}[OK] Installed binaries linked to /usr/local/bin/copsec-controller${CLR_RESET}"
 
   # Deploy Default Config Files if missing or forced
   if [ ! -f "${COPSEC_CONF_DIR}/rules.json" ] || [ "$FORCE_REINSTALL" = true ]; then
@@ -455,7 +455,7 @@ ENV_EOF
   # Lock down environment file permissions to 0600 (owner read/write only)
   chown "${COPSEC_USER}":"${COPSEC_USER}" "$env_file"
   chmod 0600 "$env_file"
-  echo -e "  ${CLR_GREEN}✔ Configured environment file with strict permissions (0600 ${COPSEC_USER}:${COPSEC_USER})${CLR_RESET}"
+  echo -e "  ${CLR_GREEN}[OK] Configured environment file with strict permissions (0600 ${COPSEC_USER}:${COPSEC_USER})${CLR_RESET}"
 }
 
 # ------------------------------------------------------------------------------
@@ -546,7 +546,7 @@ print_summary() {
 
   echo ""
   echo -e "${CLR_CYAN}==============================================================================${CLR_RESET}"
-  echo -e "${CLR_BOLD}${CLR_GREEN}   ✔ CoPSeC Platform Successfully Provisioned & Deployed!${CLR_RESET}"
+  echo -e "${CLR_BOLD}${CLR_GREEN}   [OK] CoPSeC Platform Successfully Provisioned & Deployed!${CLR_RESET}"
   echo -e "${CLR_CYAN}==============================================================================${CLR_RESET}"
   echo -e "  ${CLR_BOLD}Platform User      :${CLR_RESET} ${COPSEC_USER}"
   echo -e "  ${CLR_BOLD}Install Directory  :${CLR_RESET} ${COPSEC_INSTALL_DIR}/bin/copsec-controller"

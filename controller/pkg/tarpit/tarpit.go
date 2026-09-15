@@ -70,7 +70,7 @@ func (t *TarpitEngine) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to bind tarpit listener on %s: %w", t.bindAddr, err)
 	}
 	t.listener = l
-	log.Printf("[TARPIT] 🕸️ TCP Zero-Window & Deception Tarpit listening on %s", t.bindAddr)
+	log.Printf("[TARPIT]  TCP Zero-Window & Deception Tarpit listening on %s", t.bindAddr)
 
 	go t.acceptLoop(ctx)
 	go t.statsTicker(ctx)
@@ -122,7 +122,7 @@ func (t *TarpitEngine) TrapConnection(conn net.Conn, service string) {
 	t.mu.Unlock()
 
 	atomic.AddUint64(&t.connectionsHold, 1)
-	log.Printf("[TARPIT] 🪤 Trapped attacking socket from %s:%d (Holding in Zero-Window Tarpit)", host, port)
+	log.Printf("[TARPIT] [TARPIT] Trapped attacking socket from %s:%d (Holding in Zero-Window Tarpit)", host, port)
 
 	if t.onTrap != nil {
 		go t.onTrap(*session)

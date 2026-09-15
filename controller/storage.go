@@ -699,7 +699,7 @@ func (s *StorageEngine) HealAndBackfillHashChain() error {
 
 	// 3. Store the healed head hash into atomic memory buffer
 	lastLogHash.Store(currentPrevHash)
-	log.Printf("[HASH_CHAIN] ⛓️ Cryptographic Log Chain verified & backfilled (%d records, head: %s...)", len(rowList), currentPrevHash[:12])
+	log.Printf("[HASH_CHAIN]  Cryptographic Log Chain verified & backfilled (%d records, head: %s...)", len(rowList), currentPrevHash[:12])
 	return nil
 }
 

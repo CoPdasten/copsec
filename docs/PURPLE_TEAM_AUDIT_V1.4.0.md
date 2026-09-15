@@ -22,13 +22,13 @@
 - **Objective:** Assert line-rate zero-allocation bypass for authorized internal gateways and vulnerability scanners.
 - **Mechanism:** Bitwise subnet masking `(ipVal & maskVal) == netVal` in userspace and `whitelisted_ips` eBPF hash table in kernel.
 - **Latency Benchmark:** `< 64 ns`
-- **Result:** `[✓ PASS]` (Instantaneous `XDP_PASS` without L7 inspection penalty).
+- **Result:** `[ PASS]` (Instantaneous `XDP_PASS` without L7 inspection penalty).
 
 ### Test 2: Line-Rate Volumetric SYN Flood Saturation
 - **Objective:** Validate wire-speed packet filtering in the NIC driver ring buffer before socket/sk_buff allocation.
 - **Attack Payload:** 2,000 rapid SYN frames dispatched at line rate via `hping3`.
 - **Latency Benchmark:** `0.042 ms` per-packet drop latency (`< 0.1 ms SLA`).
-- **Result:** `[✓ PASS]` (Packets dropped at wire speed with zero kernel context switch overhead).
+- **Result:** `[ PASS]` (Packets dropped at wire speed with zero kernel context switch overhead).
 
 ### Test 3: Layer 7 Exploit Ingestion & Deterministic MPM
 - **Objective:** Evaluate proprietary Aho-Corasick deterministic multi-pattern matcher (MPM) against weaponized CVE payloads.
@@ -38,20 +38,20 @@
   - SQL Injection: `admin' UNION SELECT 1,username,password_hash FROM users--`
 - **Traversal Performance:** `362 ns` average traversal time.
 - **Defense Action:** Attacker IP (`192.168.1.12`) trapped in Zero-Window Tarpit and quarantined in eBPF `banned_ips` table.
-- **Result:** `[✓ PASS]` (100% deterministic pattern hits, zero false negatives).
+- **Result:** `[ PASS]` (100% deterministic pattern hits, zero false negatives).
 
 ### Test 4: RAM Forensics PCAP Snapshot Ring Buffer
 - **Objective:** Assert rolling pre-attack packet capture snapshot is dumped to disk upon exploit trigger.
 - **Artifact Location:** `/var/log/copsec/forensics/attack_192.168.1.12_*.pcap`
 - **Memory Buffer:** 1,000-packet rolling circular memory ring buffer.
-- **Result:** `[✓ PASS]` (Pre-attack snapshot dump verified with valid PCAP format).
+- **Result:** `[ PASS]` (Pre-attack snapshot dump verified with valid PCAP format).
 
 ### Test 5: Dynamic eBPF Ban TTL & Automatic Expiration Reaper
 - **Objective:** Evict expired quarantine records automatically to prevent kernel BPF table memory saturation.
 - **Reaper Interval:** 15 seconds.
 - **Reaper Audit Signature:** `Actor="SYSTEM_TTL_REAPER" ActionType="AUTO_UNBAN" Reason="Dynamic TTL Expired"`.
 - **Controller Ledger Sync:** Streamed over mTLS gRPC to `pardus1:50051`.
-- **Result:** `[✓ PASS]` (Attacker IP automatically evicted after 15s TTL).
+- **Result:** `[ PASS]` (Attacker IP automatically evicted after 15s TTL).
 
 ### Test 6: SQLite Ledger Immutability Hard-Abort
 - **Objective:** Prevent retroactive log tampering or deletion on the Tier 2 Vault Node.
@@ -64,7 +64,7 @@
   ```
   Error: stepping, CRYPTOGRAPHIC_VIOLATION: audit_logs ledger is strictly immutable (19)
   ```
-- **Result:** `[✓ PASS]` (Unauthorized modification strictly blocked by database engine with exit code 19).
+- **Result:** `[ PASS]` (Unauthorized modification strictly blocked by database engine with exit code 19).
 
 ---
 

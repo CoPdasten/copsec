@@ -81,10 +81,10 @@ func NewCanaryEngine(db *sql.DB) *CanaryEngine {
 
 	if db != nil {
 		if err := engine.InitSchema(); err != nil {
-			log.Printf("[CANARY] ⚠️ Failed to initialize honey_tokens schema: %v", err)
+			log.Printf("[CANARY] [WARN] Failed to initialize honey_tokens schema: %v", err)
 		}
 		if err := engine.loadTokensFromDB(); err != nil {
-			log.Printf("[CANARY] ⚠️ Failed to load tokens from DB: %v", err)
+			log.Printf("[CANARY] [WARN] Failed to load tokens from DB: %v", err)
 		}
 	}
 
@@ -164,7 +164,7 @@ func (e *CanaryEngine) loadTokensFromDB() error {
 		e.tokens[t.TokenValue] = &t
 	}
 
-	log.Printf("[CANARY] 🍯 Loaded %d active honey-tokens from SQLite storage", len(e.tokens))
+	log.Printf("[CANARY] [CANARY] Loaded %d active honey-tokens from SQLite storage", len(e.tokens))
 	return nil
 }
 
@@ -287,7 +287,7 @@ func (e *CanaryEngine) RecordTrigger(tokenValue string, clientIP string, locatio
 	e.mu.Unlock()
 
 	atomic.AddUint64(&e.totalTriggers, 1)
-	log.Printf("[CANARY_ALERT] 🚨 ZERO-FALSE-POSITIVE: Honey-Token %s (%s) triggered by %s at %s (TriggerCount: %d)",
+	log.Printf("[CANARY_ALERT] [ALERT] ZERO-FALSE-POSITIVE: Honey-Token %s (%s) triggered by %s at %s (TriggerCount: %d)",
 		token.TokenValue, token.TokenType, clientIP, location, token.TriggeredCount)
 
 	if db != nil {

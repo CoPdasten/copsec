@@ -129,7 +129,7 @@ func (ase *AutonomousSOAREngine) Start() {
 	// TTL Decay & Ban Expiration Worker (Runs every 30 seconds)
 	go ase.startTTLDecayWorker(30 * time.Second)
 
-	log.Printf("[SOAR_ENGINE] ⚡ Autonomous SOAR & Correlation Engine active (Auto-Pilot: ON, Threshold: %d, Window: 60s)", ase.banThreshold)
+	log.Printf("[SOAR_ENGINE] [FASTPATH] Autonomous SOAR & Correlation Engine active (Auto-Pilot: ON, Threshold: %d, Window: 60s)", ase.banThreshold)
 }
 
 // Stop cleanly terminates background workers.
@@ -350,7 +350,7 @@ func (ase *AutonomousSOAREngine) ExecuteAutonomousBan(sourceIP string, duration 
 		duration = 86400 // Default 24h quarantine
 	}
 
-	log.Printf("[SOAR_AUTOPILOT] ⚡ EXECUTE AUTONOMOUS BAN: IP=%s, Duration=%ds, Reason=%s", cleanIP, duration, reason)
+	log.Printf("[SOAR_AUTOPILOT] [FASTPATH] EXECUTE AUTONOMOUS BAN: IP=%s, Duration=%ds, Reason=%s", cleanIP, duration, reason)
 
 	ase.mu.RLock()
 	storage := ase.storage
@@ -453,7 +453,7 @@ func (ase *AutonomousSOAREngine) ExecuteAutonomousDeception(ip string, reason st
 	hub := ase.wsHub
 	ase.mu.RUnlock()
 
-	log.Printf("[SOAR_DECEPTION] 🍯 EXECUTE AUTONOMOUS DECEPTION: IP=%s, Reason=%s", cleanIP, reason)
+	log.Printf("[SOAR_DECEPTION] [CANARY] EXECUTE AUTONOMOUS DECEPTION: IP=%s, Reason=%s", cleanIP, reason)
 
 	// 1. Dispatch DECEIVE / CONTAINMENT_HONEYPOT to all edge nodes
 	var dispatchedCount int
@@ -571,7 +571,7 @@ func (ase *AutonomousSOAREngine) runTTLDecayCycle() {
 			if server != nil {
 				server.BroadcastSOARCommand("UNBAN_IP", ip, 0)
 			}
-			log.Printf("[SOAR_TTL] 🟢 Evicted expired ban from kernel and SQLite: IP=%s", ip)
+			log.Printf("[SOAR_TTL] [OK] Evicted expired ban from kernel and SQLite: IP=%s", ip)
 		}
 	}
 

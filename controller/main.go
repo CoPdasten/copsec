@@ -102,9 +102,9 @@ func main() {
 [+] Ready for local threat simulation & audits
 =====================================================
 `, webAddr)
-		log.Println("[INFO] ⚡ Standalone PC Mode active: In-process local collection & loopback simulation safety enabled")
+		log.Println("[INFO] [FASTPATH] Standalone PC Mode active: In-process local collection & loopback simulation safety enabled")
 	} else {
-		log.Println("[INFO] ⚡ CoPSeC Lean SIEM + SOAR + Incident Playbook Hub initializing...")
+		log.Println("[INFO] [FASTPATH] CoPSeC Lean SIEM + SOAR + Incident Playbook Hub initializing...")
 	}
 
 	// 1. Embedded Timeseries Storage (WAL-mode SQLite)
@@ -316,7 +316,7 @@ func main() {
 		<-ctx.Done()
 	}()
 
-	log.Printf("[INFO] ⚡ CoPSeC SIEM + SOAR Platform successfully online.")
+	log.Printf("[INFO] [FASTPATH] CoPSeC SIEM + SOAR Platform successfully online.")
 	log.Printf("       • Minimalist Web SOC : http://%s", webAddr)
 	log.Printf("       • Hub gRPC Ingestion : %s", grpcAddr)
 	log.Printf("       • Autonomous SOAR    : Auto-Ban=%v (Threshold: %d)", *autoBan, *autoBanThreshold)

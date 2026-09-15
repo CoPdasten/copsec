@@ -168,9 +168,9 @@ case "$PKG_MANAGER" in
     if [ "$INSTALL_SURICATA" = true ]; then
       if ! command -v suricata >/dev/null 2>&1; then
         echo -e "${CLR_CYAN}[+] Auto-installing Suricata NIDS engine...${CLR_RESET}"
-        apt-get install -y -qq suricata suricata-update || echo -e "${CLR_YELLOW}⚠ Suricata install skipped or unavailable.${CLR_RESET}"
+        apt-get install -y -qq suricata suricata-update || echo -e "${CLR_YELLOW}[WARN] Suricata install skipped or unavailable.${CLR_RESET}"
       else
-        echo -e "  ${CLR_GREEN}✔ Suricata already installed:${CLR_RESET} $(which suricata)"
+        echo -e "  ${CLR_GREEN}[OK] Suricata already installed:${CLR_RESET} $(which suricata)"
       fi
       if command -v suricata >/dev/null 2>&1; then
         # Detect primary interface
@@ -192,9 +192,9 @@ case "$PKG_MANAGER" in
     if [ "$INSTALL_SNORT" = true ]; then
       if ! command -v snort >/dev/null 2>&1; then
         echo -e "${CLR_CYAN}[+] Auto-installing Snort IDS/IPS engine...${CLR_RESET}"
-        apt-get install -y -qq snort snort-rules-default || apt-get install -y -qq snort3 || echo -e "${CLR_YELLOW}⚠ Snort package not in default apt repos (standby log tailing active).${CLR_RESET}"
+        apt-get install -y -qq snort snort-rules-default || apt-get install -y -qq snort3 || echo -e "${CLR_YELLOW}[WARN] Snort package not in default apt repos (standby log tailing active).${CLR_RESET}"
       else
-        echo -e "  ${CLR_GREEN}✔ Snort already installed:${CLR_RESET} $(which snort)"
+        echo -e "  ${CLR_GREEN}[OK] Snort already installed:${CLR_RESET} $(which snort)"
       fi
     fi
     ;;
@@ -243,66 +243,66 @@ DETECTED_SYSLOG=""
 # Nginx / Web Server
 if [ -f "/var/log/nginx/access.log" ]; then
   DETECTED_NGINX="/var/log/nginx/access.log"
-  echo -e "  ${CLR_GREEN}✔ Nginx Access Log:${CLR_RESET} ${DETECTED_NGINX}"
+  echo -e "  ${CLR_GREEN}[OK] Nginx Access Log:${CLR_RESET} ${DETECTED_NGINX}"
 elif [ -f "/var/log/httpd/access_log" ]; then
   DETECTED_NGINX="/var/log/httpd/access_log"
-  echo -e "  ${CLR_GREEN}✔ Apache Access Log:${CLR_RESET} ${DETECTED_NGINX}"
+  echo -e "  ${CLR_GREEN}[OK] Apache Access Log:${CLR_RESET} ${DETECTED_NGINX}"
 elif [ -f "/var/log/apache2/access.log" ]; then
   DETECTED_NGINX="/var/log/apache2/access.log"
-  echo -e "  ${CLR_GREEN}✔ Apache2 Access Log:${CLR_RESET} ${DETECTED_NGINX}"
+  echo -e "  ${CLR_GREEN}[OK] Apache2 Access Log:${CLR_RESET} ${DETECTED_NGINX}"
 else
   touch /var/log/copsec/dummy_web.log
   DETECTED_NGINX="/var/log/copsec/dummy_web.log"
-  echo -e "  ${CLR_YELLOW}⚠ Web Access Log not found (created fallback buffer)${CLR_RESET}"
+  echo -e "  ${CLR_YELLOW}[WARN] Web Access Log not found (created fallback buffer)${CLR_RESET}"
 fi
 
 # SSH / Auth Logs
 if [ -f "/var/log/auth.log" ]; then
   DETECTED_AUTH="/var/log/auth.log"
-  echo -e "  ${CLR_GREEN}✔ SSH/Auth Log (Debian/Ubuntu):${CLR_RESET} ${DETECTED_AUTH}"
+  echo -e "  ${CLR_GREEN}[OK] SSH/Auth Log (Debian/Ubuntu):${CLR_RESET} ${DETECTED_AUTH}"
 elif [ -f "/var/log/secure" ]; then
   DETECTED_AUTH="/var/log/secure"
-  echo -e "  ${CLR_GREEN}✔ SSH/Secure Log (RHEL/CentOS):${CLR_RESET} ${DETECTED_AUTH}"
+  echo -e "  ${CLR_GREEN}[OK] SSH/Secure Log (RHEL/CentOS):${CLR_RESET} ${DETECTED_AUTH}"
 else
   touch /var/log/copsec/dummy_auth.log
   DETECTED_AUTH="/var/log/copsec/dummy_auth.log"
-  echo -e "  ${CLR_YELLOW}⚠ Auth Log not found (created fallback buffer)${CLR_RESET}"
+  echo -e "  ${CLR_YELLOW}[WARN] Auth Log not found (created fallback buffer)${CLR_RESET}"
 fi
 
 # Syslog
 if [ -f "/var/log/syslog" ]; then
   DETECTED_SYSLOG="/var/log/syslog"
-  echo -e "  ${CLR_GREEN}✔ Syslog (Debian/Ubuntu):${CLR_RESET} ${DETECTED_SYSLOG}"
+  echo -e "  ${CLR_GREEN}[OK] Syslog (Debian/Ubuntu):${CLR_RESET} ${DETECTED_SYSLOG}"
 elif [ -f "/var/log/messages" ]; then
   DETECTED_SYSLOG="/var/log/messages"
-  echo -e "  ${CLR_GREEN}✔ Messages Log (RHEL/CentOS):${CLR_RESET} ${DETECTED_SYSLOG}"
+  echo -e "  ${CLR_GREEN}[OK] Messages Log (RHEL/CentOS):${CLR_RESET} ${DETECTED_SYSLOG}"
 else
   touch /var/log/copsec/dummy_sys.log
   DETECTED_SYSLOG="/var/log/copsec/dummy_sys.log"
-  echo -e "  ${CLR_YELLOW}⚠ Syslog not found (created fallback buffer)${CLR_RESET}"
+  echo -e "  ${CLR_YELLOW}[WARN] Syslog not found (created fallback buffer)${CLR_RESET}"
 fi
 
 # Suricata EVE JSON
 if [ -f "/var/log/suricata/eve.json" ]; then
   DETECTED_SURICATA="/var/log/suricata/eve.json"
-  echo -e "  ${CLR_GREEN}✔ Suricata EVE Stream:${CLR_RESET} ${DETECTED_SURICATA}"
+  echo -e "  ${CLR_GREEN}[OK] Suricata EVE Stream:${CLR_RESET} ${DETECTED_SURICATA}"
 else
   touch /var/log/copsec/dummy_suricata.json
   DETECTED_SURICATA="/var/log/copsec/dummy_suricata.json"
-  echo -e "  ${CLR_YELLOW}⚠ Suricata EVE log not found (initialized standby stream)${CLR_RESET}"
+  echo -e "  ${CLR_YELLOW}[WARN] Suricata EVE log not found (initialized standby stream)${CLR_RESET}"
 fi
 
 # Snort Alert JSON / Snort-ML Stream
 if [ -f "/var/log/snort/alert_json.txt" ]; then
   DETECTED_SNORT="/var/log/snort/alert_json.txt"
-  echo -e "  ${CLR_GREEN}✔ Snort-ML Alert Stream:${CLR_RESET} ${DETECTED_SNORT}"
+  echo -e "  ${CLR_GREEN}[OK] Snort-ML Alert Stream:${CLR_RESET} ${DETECTED_SNORT}"
 elif [ -f "/var/log/snort/snort.alert" ]; then
   DETECTED_SNORT="/var/log/snort/snort.alert"
-  echo -e "  ${CLR_GREEN}✔ Snort Alert Log:${CLR_RESET} ${DETECTED_SNORT}"
+  echo -e "  ${CLR_GREEN}[OK] Snort Alert Log:${CLR_RESET} ${DETECTED_SNORT}"
 else
   touch /var/log/copsec/dummy_snort.txt
   DETECTED_SNORT="/var/log/copsec/dummy_snort.txt"
-  echo -e "  ${CLR_YELLOW}⚠ Snort Alert stream not found (initialized standby stream)${CLR_RESET}"
+  echo -e "  ${CLR_YELLOW}[WARN] Snort Alert stream not found (initialized standby stream)${CLR_RESET}"
 fi
 
 # 7. Generate or Load Node Identity
@@ -448,7 +448,7 @@ if command -v systemctl >/dev/null 2>&1; then
   sleep 1.5
   if systemctl is-active --quiet copsec-collector.service; then
     echo -e "${CLR_GREEN}==============================================================================${CLR_RESET}"
-    echo -e "${CLR_GREEN} ✔ CoPSeC Edge Collector successfully provisioned and running!${CLR_RESET}"
+    echo -e "${CLR_GREEN} [OK] CoPSeC Edge Collector successfully provisioned and running!${CLR_RESET}"
     echo -e "${CLR_GREEN}==============================================================================${CLR_RESET}"
     echo -e " • Node ID     : ${CLR_CYAN}${FINAL_NODE_ID}${CLR_RESET}"
     echo -e " • Fleet Group : ${CLR_CYAN}${NODE_GROUP}${CLR_RESET}"

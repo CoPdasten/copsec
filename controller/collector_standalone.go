@@ -85,7 +85,7 @@ func detectStandaloneInterface() string {
 
 // Start launches the in-process collector background workers.
 func (sc *StandaloneCollector) Start(ctx context.Context) {
-	log.Printf("[STANDALONE] 🛡️ Starting In-Process Local Collector (Platform: %s, Interface: %s)", runtime.GOOS, sc.interfaceName)
+	log.Printf("[STANDALONE]  Starting In-Process Local Collector (Platform: %s, Interface: %s)", runtime.GOOS, sc.interfaceName)
 
 	// 1. File Tailers for available local logs
 	for _, path := range sc.sources {

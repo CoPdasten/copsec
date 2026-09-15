@@ -667,7 +667,7 @@ python3 "$TMP_DIR/build_report.py"
 log_info "Comprehensive Dual-Stack validation report exported to: ${CLR_CYAN}${REPORT_JSON}${CLR_RESET}"
 echo ""
 echo -e "${CLR_GREEN}${CLR_BOLD}================================================================================${CLR_RESET}"
-echo -e "${CLR_GREEN}${CLR_BOLD}  [✓ SUITE COMPLETE] All Dual-Stack & Autonomous Defense Gates Passed!${CLR_RESET}"
+echo -e "${CLR_GREEN}${CLR_BOLD}  [[OK] SUITE COMPLETE] All Dual-Stack & Autonomous Defense Gates Passed!${CLR_RESET}"
 echo -e "${CLR_GREEN}${CLR_BOLD}================================================================================${CLR_RESET}"
 
 exit 0

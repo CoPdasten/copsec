@@ -164,7 +164,7 @@ func (zte *ContextualZeroTrustEngine) EvaluateEvent(event *StoredEvent) (int, bo
 	zte.mu.Unlock()
 
 	if triggerIsolation {
-		log.Printf("[ZERO_TRUST] 🔒 Zero Trust Threshold Breached (<40)! Enforcing Session Isolation for %s (Score: %d)", entityKey, currentScore)
+		log.Printf("[ZERO_TRUST] [SECURE] Zero Trust Threshold Breached (<40)! Enforcing Session Isolation for %s (Score: %d)", entityKey, currentScore)
 		if server != nil {
 			server.BroadcastSOARCommandWithReason("ISOLATE_SESSION", entityKey, fmt.Sprintf("Zero Trust Engine: Contextual Trust Score collapsed to %d/100", currentScore), 86400)
 		}

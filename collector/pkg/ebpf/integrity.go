@@ -168,7 +168,7 @@ func (ig *IntegrityGuard) terminateAndQuarantine(pid int, binPath string) {
 			_ = proc.Kill()
 		}
 		atomic.AddUint64(&ig.processesTerminated, 1)
-		log.Printf("[EBPF_INTEGRITY] ⚡ Terminated rogue PID %d via SIGKILL (Process Injection / Rootkit Guard)", pid)
+		log.Printf("[EBPF_INTEGRITY] [FASTPATH] Terminated rogue PID %d via SIGKILL (Process Injection / Rootkit Guard)", pid)
 	}
 
 	if binPath != "" && !strings.HasPrefix(binPath, "/bin/") && !strings.HasPrefix(binPath, "/usr/bin/") {

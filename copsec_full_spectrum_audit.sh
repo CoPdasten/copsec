@@ -55,9 +55,9 @@ log_phase() {
 }
 
 log_info() { echo -e "${CLR_BLUE}[INFO]${CLR_RESET} $1"; }
-log_pass() { echo -e "${CLR_GREEN}${CLR_BOLD}[✓ PASS]${CLR_RESET} $1"; }
-log_fail() { echo -e "${CLR_RED}${CLR_BOLD}[✗ FAIL]${CLR_RESET} $1" >&2; }
-log_warn() { echo -e "${CLR_YELLOW}[⚠️ WARN]${CLR_RESET} $1"; }
+log_pass() { echo -e "${CLR_GREEN}${CLR_BOLD}[[OK] PASS]${CLR_RESET} $1"; }
+log_fail() { echo -e "${CLR_RED}${CLR_BOLD}[[FAIL] FAIL]${CLR_RESET} $1" >&2; }
+log_warn() { echo -e "${CLR_YELLOW}[[WARN] WARN]${CLR_RESET} $1"; }
 log_metric() { printf "${CLR_GRAY}  ├─ %-35s :${CLR_RESET} ${CLR_WHITE}%s${CLR_RESET}\n" "$1" "$2"; }
 
 # --- Topology Configuration ---
@@ -363,5 +363,5 @@ JSON_EOF
 
 log_info "JSON audit summary generated: ${JSON_REPORT}"
 echo ""
-echo -e "${CLR_GREEN}${CLR_BOLD}[✓ AUDIT COMPLETED] CoPSeC cluster successfully passed all 6 defense tests.${CLR_RESET}"
+echo -e "${CLR_GREEN}${CLR_BOLD}[[OK] AUDIT COMPLETED] CoPSeC cluster successfully passed all 6 defense tests.${CLR_RESET}"
 exit 0

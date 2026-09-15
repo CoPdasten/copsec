@@ -59,11 +59,11 @@ func (d *BGPFlowspecDriver) EnforceEdgeDrop(ctx context.Context, ip string, dura
 	cmd := exec.CommandContext(ctx, "sudo", "-n", "ip", "route", "add", "blackhole", cidr)
 	out, err := cmd.CombinedOutput()
 	if err != nil && !strings.Contains(string(out), "File exists") {
-		log.Printf("[SDN_ROUTER] ⚠️ IP-Route blackhole command output: %s (err: %v)", string(out), err)
+		log.Printf("[SDN_ROUTER] [WARN] IP-Route blackhole command output: %s (err: %v)", string(out), err)
 		return err
 	}
 
-	log.Printf("[SDN_ROUTER] ⚡ BGP/IP-Route Blackhole Enforced on %s (Duration: %ds)", cidr, durationSeconds)
+	log.Printf("[SDN_ROUTER] [FASTPATH] BGP/IP-Route Blackhole Enforced on %s (Duration: %ds)", cidr, durationSeconds)
 	return nil
 }
 
@@ -82,7 +82,7 @@ func (d *BGPFlowspecDriver) ReleaseEdgeDrop(ctx context.Context, ip string) erro
 	}
 
 	_ = exec.CommandContext(ctx, "sudo", "-n", "ip", "route", "del", "blackhole", cidr).Run()
-	log.Printf("[SDN_ROUTER] 🟢 BGP/IP-Route Blackhole Released for %s", cidr)
+	log.Printf("[SDN_ROUTER] [OK] BGP/IP-Route Blackhole Released for %s", cidr)
 	return nil
 }
 
@@ -113,7 +113,7 @@ func (c *CloudEdgeSecurityGroupDriver) EnforceEdgeDrop(ctx context.Context, ip s
 	cleanIP := strings.TrimSpace(ip)
 	if c.endpointURL == "" {
 		// Mock / Simulation mode when URL is not configured
-		log.Printf("[SDN_ROUTER] ☁️ [MOCK] Cloud Edge Security Group rule dispatched: DROP %s (Duration: %ds)", cleanIP, durationSeconds)
+		log.Printf("[SDN_ROUTER]  [MOCK] Cloud Edge Security Group rule dispatched: DROP %s (Duration: %ds)", cleanIP, durationSeconds)
 		return nil
 	}
 
@@ -137,7 +137,7 @@ func (c *CloudEdgeSecurityGroupDriver) EnforceEdgeDrop(ctx context.Context, ip s
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		log.Printf("[SDN_ROUTER] ⚠️ Upstream Edge SDN dispatch error: %v", err)
+		log.Printf("[SDN_ROUTER] [WARN] Upstream Edge SDN dispatch error: %v", err)
 		return err
 	}
 	defer resp.Body.Close()
@@ -146,14 +146,14 @@ func (c *CloudEdgeSecurityGroupDriver) EnforceEdgeDrop(ctx context.Context, ip s
 		return fmt.Errorf("upstream edge responded with HTTP %d", resp.StatusCode)
 	}
 
-	log.Printf("[SDN_ROUTER] ☁️ Cloud Edge Security Group drop successfully synced: %s", cleanIP)
+	log.Printf("[SDN_ROUTER]  Cloud Edge Security Group drop successfully synced: %s", cleanIP)
 	return nil
 }
 
 func (c *CloudEdgeSecurityGroupDriver) ReleaseEdgeDrop(ctx context.Context, ip string) error {
 	cleanIP := strings.TrimSpace(ip)
 	if c.endpointURL == "" {
-		log.Printf("[SDN_ROUTER] ☁️ [MOCK] Cloud Edge Security Group release dispatched: ALLOW %s", cleanIP)
+		log.Printf("[SDN_ROUTER]  [MOCK] Cloud Edge Security Group release dispatched: ALLOW %s", cleanIP)
 		return nil
 	}
 

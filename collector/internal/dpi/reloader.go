@@ -147,7 +147,7 @@ func (e *DynamicEngine) HotSwapRules(signatures []Rule) error {
 	e.swapCount.Add(1)
 	e.lastSwapNano.Store(time.Now().UnixNano())
 
-	log.Printf("[DPI_RELOADER] ⚡ Atomically hot-swapped DFA ruleset to version %d (%d rules compiled)",
+	log.Printf("[DPI_RELOADER] [FASTPATH] Atomically hot-swapped DFA ruleset to version %d (%d rules compiled)",
 		nextVersion, compiledDFA.RuleCount())
 	return nil
 }
@@ -429,6 +429,6 @@ func StartManagementServer(lis net.Listener, engine *DynamicEngine, opt ...grpc.
 		}
 	}()
 
-	log.Printf("[MANAGEMENT_GRPC] 🛡️ Sensor Management Service actively listening on %s", lis.Addr())
+	log.Printf("[MANAGEMENT_GRPC]  Sensor Management Service actively listening on %s", lis.Addr())
 	return grpcServer, nil
 }

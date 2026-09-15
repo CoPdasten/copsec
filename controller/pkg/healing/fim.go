@@ -182,9 +182,9 @@ func (e *FIMHealingEngine) executeHealing(target *FIMTarget, tamperedHash, detai
 	remediated := err == nil
 	if remediated {
 		atomic.AddUint64(&e.healedTotal, 1)
-		log.Printf("[FIM_HEALING] 🛠️ SELF-HEALED CONFIG DRIFT on %s (Restored to SHA256: %s)", target.Path, target.BaselineSHA256[:8])
+		log.Printf("[FIM_HEALING]  SELF-HEALED CONFIG DRIFT on %s (Restored to SHA256: %s)", target.Path, target.BaselineSHA256[:8])
 	} else {
-		log.Printf("[FIM_HEALING] ⚠️ Failed to auto-restore %s: %v", target.Path, err)
+		log.Printf("[FIM_HEALING] [WARN] Failed to auto-restore %s: %v", target.Path, err)
 	}
 
 	ev := FIMDriftEvent{

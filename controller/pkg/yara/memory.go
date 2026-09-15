@@ -262,7 +262,7 @@ func (ms *MemoryScanner) triggerHit(rule YARARule, pid int, procName, matchedDat
 	}
 	ms.mu.Unlock()
 
-	log.Printf("[YARA_MEM] 🚨 IN-MEMORY THREAT DETECTED: %s (PID: %d, Rule: %s, Score: %d)",
+	log.Printf("[YARA_MEM] [ALERT] IN-MEMORY THREAT DETECTED: %s (PID: %d, Rule: %s, Score: %d)",
 		rule.Name, pid, rule.ID, rule.ThreatScore)
 
 	if ms.onDetection != nil {

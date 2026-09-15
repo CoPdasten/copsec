@@ -434,5 +434,5 @@ JSON_EOF
 
 log_info "JSON audit record written to ${JSON_SUMMARY}"
 echo ""
-echo -e "${CLR_GREEN}${CLR_BOLD}[✓ AUDIT COMPLETE] All 5 distributed subsystem stages PASSED with 100% compliance.${CLR_RESET}"
+echo -e "${CLR_GREEN}${CLR_BOLD}[[OK] AUDIT COMPLETE] All 5 distributed subsystem stages PASSED with 100% compliance.${CLR_RESET}"
 exit 0

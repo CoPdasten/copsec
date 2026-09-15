@@ -23,7 +23,7 @@
 - **SLA Target:** `< 0.05 ms` per packet
 - **Actual Measured Latency:** **`0.0078 ms`** (`7.8 µs`)
 - **Ingress Load:** Volumetric burst via `hping3` and high-frequency UDP frames against edge ingress interfaces.
-- **Verdict:** `[✓ PASS]` (Wire-speed `XDP_DROP` executed at driver ring-buffer boundary with zero CPU context-switch penalty).
+- **Verdict:** `[ PASS]` (Wire-speed `XDP_DROP` executed at driver ring-buffer boundary with zero CPU context-switch penalty).
 
 ### Stage 2: Ring Buffer Zero-Copy Queue Stress & Memory Stability
 - **Objective:** Stress the `BPF_MAP_TYPE_RINGBUF` (256KB capacity) with rapid multi-tuple bursts and monitor memory drift.
@@ -31,28 +31,28 @@
   - Ring Buffer Capacity: `256 KB`
   - Ring Buffer Faults / Drops: `0`
   - Process RSS Drift: `0 KB` (Strict zero-leakage verified)
-- **Verdict:** `[✓ PASS]` (Kernel-to-userspace zero-copy ring buffer maintained strictly bounded memory footprints under continuous event floods).
+- **Verdict:** `[ PASS]` (Kernel-to-userspace zero-copy ring buffer maintained strictly bounded memory footprints under continuous event floods).
 
 ### Stage 3: Stream Boundary Reassembly & Fragmented Payload Inspection
 - **Objective:** Verify deterministic detection and mitigation of weaponized exploits split across arbitrary TCP segment boundaries.
 - **Injected Signatures:** Fragmented Log4j JNDI expressions, cross-window Shellshock tokens, and multi-chunk SQL injection syntax.
 - **Reassembly Engine:** Stateful sliding stream reassembly window buffer.
 - **Defense Action:** Attacker node blocked at chunk boundary; quarantine hash propagated to kernel `banned_ips` table.
-- **Verdict:** `[✓ PASS]` (100% exploit detection across fragmented packet streams with zero bypass).
+- **Verdict:** `[ PASS]` (100% exploit detection across fragmented packet streams with zero bypass).
 
 ### Stage 4: Decentralized Gossip Propagation Convergence Latency
 - **Objective:** Measure cluster-wide synchronization latency for dynamic quarantine gossip between edge sensors.
 - **SLA Target:** `< 100 ms` cluster convergence
 - **Actual Measured Latency:** **`18 ms`**
 - **Protocol:** Memberlist UDP/TCP gossip mesh on port `7946` between `pardus1` and `pardus2`.
-- **Verdict:** `[✓ PASS]` (Banned adversary IP synchronized cluster-wide in 18ms, enabling autonomous edge protection without central controller dependency).
+- **Verdict:** `[ PASS]` (Banned adversary IP synchronized cluster-wide in 18ms, enabling autonomous edge protection without central controller dependency).
 
 ### Stage 5: Controller gRPC Fleet Ingestion & Concurrent Database Locking
 - **Objective:** Verify concurrent multi-sensor ingestion under heavy read/write load against the central SQLite WAL ledger.
 - **Load Profile:** 125 concurrent high-frequency heartbeat and metric streams.
 - **Database Engine:** SQLite (Journal Mode: `WAL`, Concurrency: Multi-Reader / Single-Writer).
 - **Security Check:** Unauthorized `UPDATE` and `DELETE` queries strictly blocked by append-only triggers (`CRYPTOGRAPHIC_VIOLATION`).
-- **Verdict:** `[✓ PASS]` (Zero database lock timeouts; append-only cryptographic audit trail preserved under high concurrency).
+- **Verdict:** `[ PASS]` (Zero database lock timeouts; append-only cryptographic audit trail preserved under high concurrency).
 
 ---
 

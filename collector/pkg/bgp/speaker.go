@@ -217,7 +217,7 @@ func (s *Speaker) RecordIngressMetrics(ipStr string, pps uint64) {
 			if err != nil {
 				log.Printf("[BGP] Failed to advertise RTBH for %s: %v", key, err)
 			} else {
-				log.Printf("[BGP-RTBH] 🚨 THRESHOLD EXCEEDED (%d PPS >= %d PPS) -> ADVERTISED RTBH for %s (Community 65535:666, Next-Hop: %s)",
+				log.Printf("[BGP-RTBH] [ALERT] THRESHOLD EXCEEDED (%d PPS >= %d PPS) -> ADVERTISED RTBH for %s (Community 65535:666, Next-Hop: %s)",
 					pps, s.cfg.RTBHThresholdPPS, key, s.cfg.BlackholeNextHop)
 				atomic.AddUint64(&s.advertisedCount, 1)
 			}
@@ -330,7 +330,7 @@ func (s *Speaker) checkRecovery() {
 			if err != nil {
 				log.Printf("[BGP] Error withdrawing recovered route %s: %v", key, err)
 			} else {
-				log.Printf("[BGP-RTBH] ✅ QUIET RECOVERY COMPLETED (%s quiet for > %v) -> WITHDRAWN RTBH route",
+				log.Printf("[BGP-RTBH]  QUIET RECOVERY COMPLETED (%s quiet for > %v) -> WITHDRAWN RTBH route",
 					key, s.cfg.RecoveryDuration)
 				atomic.AddUint64(&s.withdrawnCount, 1)
 				route.Active = false

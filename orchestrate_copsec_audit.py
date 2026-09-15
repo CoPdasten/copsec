@@ -72,15 +72,15 @@ def log_info(msg: str):
 
 
 def log_success(msg: str):
-    print(f"{Colors.GREEN}[✓ PASS]{Colors.RESET} {msg}")
+    print(f"{Colors.GREEN}[[PASS] PASS]{Colors.RESET} {msg}")
 
 
 def log_warn(msg: str):
-    print(f"{Colors.YELLOW}[⚠️  WARN]{Colors.RESET} {msg}")
+    print(f"{Colors.YELLOW}[[WARN]  WARN]{Colors.RESET} {msg}")
 
 
 def log_error(msg: str):
-    print(f"{Colors.RED}[✗ FAIL]{Colors.RESET} {msg}")
+    print(f"{Colors.RED}[[FAIL] FAIL]{Colors.RESET} {msg}")
 
 
 def log_metric(key: str, value: str):
@@ -659,7 +659,7 @@ class HoneypotHandler(BaseHTTPRequestHandler):
         canary = self.headers.get("X-Debug-Session-Token", "")
         
         if "() { :;};" in ua or "canary" in canary.lower() or "admin" in self.path:
-            print(f"[HONEYPOT] 🚨 Attack detected from {client_ip}: UA={ua} Canary={canary}")
+            print(f"[HONEYPOT] [ALERT] Attack detected from {client_ip}: UA={ua} Canary={canary}")
             dump_pcap(client_ip)
             notify_controller(client_ip, "L7 Exploit Canary Detection")
             self.send_response(403)

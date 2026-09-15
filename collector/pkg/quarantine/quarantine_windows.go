@@ -122,7 +122,7 @@ func (d *WindowsQuarantineDriver) BlockIP(ip string, reason string) error {
 	}
 
 	d.blockedIPs[cleanIP] = reason
-	log.Printf("[QUARANTINE_WINDOWS] ⚡ Enforced Windows Firewall Block: %s (IP: %s, Reason: %s)", rName, cleanIP, reason)
+	log.Printf("[QUARANTINE_WINDOWS] [FASTPATH] Enforced Windows Firewall Block: %s (IP: %s, Reason: %s)", rName, cleanIP, reason)
 
 	// Trigger asynchronous pre-attack forensics PCAP snapshot
 	go func(targetIP, r string) {
@@ -160,7 +160,7 @@ func (d *WindowsQuarantineDriver) UnblockIP(ip string) error {
 	_ = cmd.Run()
 
 	delete(d.blockedIPs, cleanIP)
-	log.Printf("[QUARANTINE_WINDOWS] 🟢 Removed Windows Firewall Block: %s (IP: %s)", rName, cleanIP)
+	log.Printf("[QUARANTINE_WINDOWS] [OK] Removed Windows Firewall Block: %s (IP: %s)", rName, cleanIP)
 	return nil
 }
 

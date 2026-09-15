@@ -610,7 +610,7 @@ REPORT_EOF
 log_info "Complete execution report exported to: ${CLR_CYAN}${REPORT_JSON}${CLR_RESET}"
 echo ""
 echo -e "${CLR_GREEN}${CLR_BOLD}================================================================================${CLR_RESET}"
-echo -e "${CLR_GREEN}${CLR_BOLD}  [✓ SUITE COMPLETE] All 6 Active Defense SLAs validated successfully!${CLR_RESET}"
+echo -e "${CLR_GREEN}${CLR_BOLD}  [[OK] SUITE COMPLETE] All 6 Active Defense SLAs validated successfully!${CLR_RESET}"
 echo -e "${CLR_GREEN}${CLR_BOLD}================================================================================${CLR_RESET}"
 
 exit 0

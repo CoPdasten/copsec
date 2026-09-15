@@ -582,7 +582,7 @@ REPORT_EOF
 log_info "Comprehensive benchmark report exported to: ${CLR_CYAN}${REPORT_JSON}${CLR_RESET}"
 echo ""
 echo -e "${CLR_GREEN}${CLR_BOLD}================================================================================${CLR_RESET}"
-echo -e "${CLR_GREEN}${CLR_BOLD}  [✓ BENCHMARK COMPLETE] All 5 cluster resilience SLAs validated successfully!${CLR_RESET}"
+echo -e "${CLR_GREEN}${CLR_BOLD}  [[OK] BENCHMARK COMPLETE] All 5 cluster resilience SLAs validated successfully!${CLR_RESET}"
 echo -e "${CLR_GREEN}${CLR_BOLD}================================================================================${CLR_RESET}"
 
 exit 0

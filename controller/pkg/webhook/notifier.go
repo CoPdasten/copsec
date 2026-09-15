@@ -166,7 +166,7 @@ func (n *Notifier) Start(ctx context.Context) {
 		go n.worker(workerCtx, i)
 	}
 
-	log.Printf("[WEBHOOK_NOTIFIER] ⚡ Active Defense Webhook Dispatcher started (Target: %s [%s], Workers: %d)",
+	log.Printf("[WEBHOOK_NOTIFIER] [FASTPATH] Active Defense Webhook Dispatcher started (Target: %s [%s], Workers: %d)",
 		n.cfg.URL, n.cfg.Type, n.cfg.Workers)
 }
 
@@ -236,9 +236,9 @@ func (n *Notifier) formatPayload(alert *WebhookAlert) ([]byte, error) {
 		if alert.Severity == "HIGH" {
 			color = "#f59e0b" // amber
 		}
-		title := fmt.Sprintf("🚨 [%s] Threat Incident: %s", alert.Severity, alert.RuleName)
+		title := fmt.Sprintf("[ALERT] [%s] Threat Incident: %s", alert.Severity, alert.RuleName)
 		if alert.RuleName == "" {
-			title = fmt.Sprintf("🚨 [%s] Threat Incident: %s", alert.Severity, alert.RuleID)
+			title = fmt.Sprintf("[ALERT] [%s] Threat Incident: %s", alert.Severity, alert.RuleID)
 		}
 
 		type field struct {
@@ -281,7 +281,7 @@ func (n *Notifier) formatPayload(alert *WebhookAlert) ([]byte, error) {
 		if alert.Severity == "HIGH" {
 			colorCode = 16098851 // Orange
 		}
-		title := fmt.Sprintf("🚨 [%s] CoPSeC Threat Incident: %s", alert.Severity, alert.RuleID)
+		title := fmt.Sprintf("[ALERT] [%s] CoPSeC Threat Incident: %s", alert.Severity, alert.RuleID)
 
 		type field struct {
 			Name   string `json:"name"`
@@ -298,7 +298,7 @@ func (n *Notifier) formatPayload(alert *WebhookAlert) ([]byte, error) {
 		}
 
 		payload := map[string]interface{}{
-			"content": "⚠️ **CoPSeC Active Defense High-Priority Incident Alert**",
+			"content": "[WARN] **CoPSeC Active Defense High-Priority Incident Alert**",
 			"embeds": []map[string]interface{}{
 				{
 					"title":       title,

@@ -62,6 +62,7 @@ cli: $(BIN_DIR)
 
 test:
 	@echo "==> Executing test suites with -race across all packages..."
+	$(GO) test -race ./pkg/...
 	(cd collector && $(GO) test -race ./...)
 	(cd controller && $(GO) test -race ./...)
 

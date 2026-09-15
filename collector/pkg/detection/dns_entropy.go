@@ -196,7 +196,7 @@ func (e *DNSEntropyEvaluator) EvaluateQuery(srcIP, queryDomain string) (*DNSEntr
 		result.ActionTaken = "XDP_FIREWALL_BLOCK"
 
 		atomic.AddUint64(&e.totalDetections, 1)
-		log.Printf("[DNS_TUNNEL_ALERT] 🚨 RULE-DNS-TUNNEL-001 triggered for %s: %d high-entropy DNS spikes in %v (Domain: %s, Entropy: %.2f, Len: %d) [MITRE: T1071.004, Score: 85]",
+		log.Printf("[DNS_TUNNEL_ALERT] [ALERT] RULE-DNS-TUNNEL-001 triggered for %s: %d high-entropy DNS spikes in %v (Domain: %s, Entropy: %.2f, Len: %d) [MITRE: T1071.004, Score: 85]",
 			srcIP, spikeCount, e.windowDuration, queryDomain, entropy, labelLen)
 
 		e.mu.RLock()

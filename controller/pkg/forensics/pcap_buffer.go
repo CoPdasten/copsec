@@ -231,7 +231,7 @@ func (b *PCAPBuffer) SnapshotForIP(targetIP string, reason string) (*ForensicSna
 	b.mu.Unlock()
 
 	atomic.AddUint64(&b.totalDumps, 1)
-	log.Printf("[FORENSICS] 📦 Captured pre-attack PCAP ring buffer dump for %s -> %s (%d packets, %d bytes)",
+	log.Printf("[FORENSICS] [FORENSIC] Captured pre-attack PCAP ring buffer dump for %s -> %s (%d packets, %d bytes)",
 		cleanIP, filePath, len(matching), len(pcapBytes))
 
 	return snapshot, nil

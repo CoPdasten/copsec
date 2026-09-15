@@ -46,15 +46,15 @@ log_info() {
 }
 
 log_success() {
-  echo -e "${CLR_GREEN}[✓ SUCCESS]${CLR_RESET} $1"
+  echo -e "${CLR_GREEN}[[OK] SUCCESS]${CLR_RESET} $1"
 }
 
 log_warn() {
-  echo -e "${CLR_YELLOW}[⚠️  WARNING]${CLR_RESET} $1"
+  echo -e "${CLR_YELLOW}[[WARN]  WARNING]${CLR_RESET} $1"
 }
 
 log_error() {
-  echo -e "${CLR_RED}[✗ FATAL]${CLR_RESET} $1" >&2
+  echo -e "${CLR_RED}[[FAIL] FATAL]${CLR_RESET} $1" >&2
 }
 
 # --- 1. Root Privilege Enforcement ---
@@ -327,7 +327,7 @@ for bin in "${!BINARY_CHECKS[@]}"; do
     log_error "Dependency verification failed: '${bin}' (${BINARY_CHECKS[$bin]}) not found in PATH."
     exit 1
   fi
-  printf "  %-14s : ${CLR_GREEN}[✓ OK]${CLR_RESET} (%s)\n" "$bin" "$(command -v "$bin")"
+  printf "  %-14s : ${CLR_GREEN}[[OK] OK]${CLR_RESET} (%s)\n" "$bin" "$(command -v "$bin")"
 done
 log_success "All required toolchains installed and verified."
 

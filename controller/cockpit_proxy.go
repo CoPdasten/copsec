@@ -94,7 +94,7 @@ func runCockpitProxyMode(remoteVault string, webAddr string, allowExternal bool)
 ================================================================================
 `, listenAddr, remoteVault, targetURLStr)
 
-	log.Printf("[INFO] ⚡ CoPSeC Central Cockpit active on %s (Connected to Vault at %s)", listenAddr, targetURLStr)
+	log.Printf("[INFO] [FASTPATH] CoPSeC Central Cockpit active on %s (Connected to Vault at %s)", listenAddr, targetURLStr)
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)

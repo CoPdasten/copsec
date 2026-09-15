@@ -312,7 +312,7 @@ func (f *SyslogForwarder) Start(ctx context.Context) {
 		go f.worker(workerCtx, i)
 	}
 
-	log.Printf("[SIEM_FORWARDER] ⚡ Started Syslog forwarder (%s, format: %s, endpoint: %s, workers: %d)",
+	log.Printf("[SIEM_FORWARDER] [FASTPATH] Started Syslog forwarder (%s, format: %s, endpoint: %s, workers: %d)",
 		f.cfg.Transport, f.cfg.Format, f.cfg.Endpoint, f.cfg.Workers)
 }
 

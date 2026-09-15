@@ -48,15 +48,15 @@ log_info() {
 }
 
 log_success() {
-  echo -e "${CLR_GREEN}[✓ SUCCESS]${CLR_RESET} $1"
+  echo -e "${CLR_GREEN}[[OK] SUCCESS]${CLR_RESET} $1"
 }
 
 log_warn() {
-  echo -e "${CLR_YELLOW}[⚠️  WARNING]${CLR_RESET} $1"
+  echo -e "${CLR_YELLOW}[[WARN]  WARNING]${CLR_RESET} $1"
 }
 
 log_error() {
-  echo -e "${CLR_RED}[✗ FATAL]${CLR_RESET} $1" >&2
+  echo -e "${CLR_RED}[[FAIL] FATAL]${CLR_RESET} $1" >&2
 }
 
 log_metric() {

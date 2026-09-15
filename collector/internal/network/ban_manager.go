@@ -179,7 +179,7 @@ func (bm *BanManager) StartBanReaper(ctx context.Context, checkInterval time.Dur
 		checkInterval = DefaultReaperInterval
 	}
 
-	log.Printf("[BAN_REAPER] ⏱️ Dynamic eBPF Ban TTL Reaper initialized (Tick: %v)", checkInterval)
+	log.Printf("[BAN_REAPER] [TIMER] Dynamic eBPF Ban TTL Reaper initialized (Tick: %v)", checkInterval)
 
 	go func() {
 		ticker := time.NewTicker(checkInterval)
@@ -226,7 +226,7 @@ func (bm *BanManager) ReapExpiredBans() int {
 				TimestampMs: time.Now().UnixMilli(),
 			}
 
-			log.Printf("[BAN_REAPER] ♻️ Reaped expired IP %s (TTL: %v expired). Triggering unban audit trail...",
+			log.Printf("[BAN_REAPER]  Reaped expired IP %s (TTL: %v expired). Triggering unban audit trail...",
 				ip, time.Duration(entry.TTLNs))
 
 			bm.recordAndStreamAudit(ev)
@@ -273,7 +273,7 @@ func (bm *BanManager) recordAndStreamAudit(ev UnbanAuditEvent) {
 
 		conn, err := dialSecureController(ctx, endpoint)
 		if err != nil {
-			log.Printf("[BAN_REAPER] ⚡ Audit stream deferred: %v (queued locally)", err)
+			log.Printf("[BAN_REAPER] [FASTPATH] Audit stream deferred: %v (queued locally)", err)
 			return
 		}
 		defer conn.Close()
@@ -283,7 +283,7 @@ func (bm *BanManager) recordAndStreamAudit(ev UnbanAuditEvent) {
 		if err == nil {
 			_ = stream.Send(logEvent)
 			_, _ = stream.CloseAndRecv()
-			log.Printf("[BAN_REAPER] 🟢 Streamed unban audit event for %s to Controller (%s)",
+			log.Printf("[BAN_REAPER] [OK] Streamed unban audit event for %s to Controller (%s)",
 				ev.TargetIP, endpoint)
 		}
 	}()

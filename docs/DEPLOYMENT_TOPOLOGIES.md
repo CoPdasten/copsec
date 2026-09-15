@@ -4,7 +4,7 @@
 
 ---
 
-## 🗺️ Dağıtım Modelleri Özeti
+## Dağıtım Modelleri Özeti
 
 | Topoloji Modeli | Hedef Altyapı | Düğüm Sayısı | Temel Bileşenler | Güvenlik İzolasyonu |
 | :--- | :--- | :--- | :--- | :--- |
@@ -15,7 +15,7 @@
 
 ---
 
-## 🏛️ Topoloji 1: Standalone All-in-One (Tek Sunucu / VPS)
+## Topoloji 1: Standalone All-in-One (Tek Sunucu / VPS)
 
 Tüm bileşenlerin (eBPF/XDP motoru, Tarpit, Deception bal küpleri, SQLite WAL kasası ve Minimalist Web SOC Kokpiti) tek bir fiziksel sunucu veya sanal makine (VPS) üzerinde çalıştığı modeldir.
 
@@ -23,22 +23,22 @@ Tüm bileşenlerin (eBPF/XDP motoru, Tarpit, Deception bal küpleri, SQLite WAL 
 
 ```mermaid
 flowchart TD
-    subgraph Internet ["🌐 Dış Ağ / Saldırı Trafiği"]
+    subgraph Internet [" Dış Ağ / Saldırı Trafiği"]
         ATTACKER["Saldırgan / Tarayıcı"]
         CLIENT["Meşru Kullanıcı"]
     end
 
-    subgraph Host ["💻 Tek Sunucu (Standalone Host - 192.168.1.10)"]
+    subgraph Host [" Tek Sunucu (Standalone Host - 192.168.1.10)"]
         NIC["Ağ Arayüzü (eth0)"]
         
-        subgraph KernelSpace ["🐧 Linux Çekirdek Alanı (Kernel Space)"]
+        subgraph KernelSpace [" Linux Çekirdek Alanı (Kernel Space)"]
             XDP["eBPF / XDP Sürücü Kancası"]
             BPF_MAP["banned_ips (BPF Hash Map)"]
             XDP_DROP["XDP_DROP (<10µs Line-Rate)"]
             PASS["XDP_PASS (İzin Verilen Paketler)"]
         end
 
-        subgraph UserSpace ["⚙️ Kullanıcı Alanı (User Space Daemons)"]
+        subgraph UserSpace [" Kullanıcı Alanı (User Space Daemons)"]
             subgraph CollectorSvc ["copsec-collector.service"]
                 TARPIT["TCP Tarpit (:2223)"]
                 HONEY["Shadow Honeypot (:8088)"]
@@ -89,7 +89,7 @@ curl -fsSL https://raw.githubusercontent.com/CoPdasten/copsec/main/scripts/insta
 
 ---
 
-## 🌐 Topoloji 2: Dağıtık Kurumsal Küme (Distributed Enterprise Cluster)
+## Topoloji 2: Dağıtık Kurumsal Küme (Distributed Enterprise Cluster)
 
 Merkezi bir **Controller / Vault** düğümü ile korunacak çok sayıda hedef sunucuda çalışan **Collector (Edge Sensör)** düğümlerinden oluşur. Uç sensörler kendi aralarında **Memberlist Gossip Protokolü (`:7946`)** üzerinden haberleşerek engellenen IP'leri merkezi denetleyiciyi beklemeden mikrosaniyeler içinde kümedeki tüm düğümlerin eBPF XDP haritasına yansıtır.
 
@@ -97,11 +97,11 @@ Merkezi bir **Controller / Vault** düğümü ile korunacak çok sayıda hedef s
 
 ```mermaid
 flowchart TD
-    subgraph Traffic ["🌍 Gelen Ağ Trafiği"]
+    subgraph Traffic [" Gelen Ağ Trafiği"]
         ATTACK["Saldırı & Tarama Trafiği"]
     end
 
-    subgraph EdgeNodes ["🛡️ Uç Nokta Sensörleri (Edge Sensors)"]
+    subgraph EdgeNodes [" Uç Nokta Sensörleri (Edge Sensors)"]
         subgraph Node1 ["Sensör 1 (pardus1 - 192.168.1.8)"]
             XDP1["eBPF/XDP Fast-Drop"]
             COLL1["Collector Servisi"]
@@ -120,7 +120,7 @@ flowchart TD
         end
     end
 
-    subgraph Central ["🧠 Merkezi Yönetim ve Kasa (Controller Node - 192.168.1.10)"]
+    subgraph Central [" Merkezi Yönetim ve Kasa (Controller Node - 192.168.1.10)"]
         GRPC_HUB["gRPC Fleet Ingestion Hub (:50051)"]
         SOAR_ENGINE["Otonom SOAR & Tehdit Korelasyonu"]
         SQLITE_VAULT[("Değişmez Kriptografik Kasa\nSHA-256 Hash Chain")]
@@ -128,7 +128,7 @@ flowchart TD
         WEB_COCKPIT["Web SOC Cockpit (:8080)"]
     end
 
-    subgraph ExternalSIEM ["📊 Kurumsal SIEM & Log Deposu"]
+    subgraph ExternalSIEM [" Kurumsal SIEM & Log Deposu"]
         WAZUH["Wazuh SIEM"]
         SPLUNK["Splunk / Elastic"]
     end
@@ -137,8 +137,8 @@ flowchart TD
     ATTACK --> Node2
     ATTACK --> NodeN
 
-    COLL1 <-->|⚡ Gossip Mesh (:7946)\nLine-Rate Ban Senkronizasyonu| COLL2
-    COLL2 <-->|⚡ Gossip Mesh (:7946)| COLLN
+    COLL1 <-->| Gossip Mesh (:7946)\nLine-Rate Ban Senkronizasyonu| COLL2
+    COLL2 <-->| Gossip Mesh (:7946)| COLLN
 
     COLL1 -->|mTLS gRPC Akışı (:50051)| GRPC_HUB
     COLL2 -->|mTLS gRPC Akışı (:50051)| GRPC_HUB
@@ -178,7 +178,7 @@ curl -fsSL https://raw.githubusercontent.com/CoPdasten/copsec/main/scripts/insta
 
 ---
 
-## 🔒 Topoloji 3: 3-Katmanlı Sıfır Güven SOC Mimarisi (Zero-Trust 3-Tier Enterprise SOC)
+## Topoloji 3: 3-Katmanlı Sıfır Güven SOC Mimarisi (Zero-Trust 3-Tier Enterprise SOC)
 
 Kritik altyapılar ve yüksek güvenlikli kurumsal ortamlar için görevlerin fiziksel ve mantıksal olarak ayrıldığı modeldir. Veritabanı ve SOAR motoru dış ağdan tamamen izole edilmiş bir Yönetim VLAN'ında tutulur; analistler kokpite yalnızca şifreli SSH tüneli veya WireGuard üzerinden erişir.
 
@@ -186,7 +186,7 @@ Kritik altyapılar ve yüksek güvenlikli kurumsal ortamlar için görevlerin fi
 
 ```mermaid
 flowchart TD
-    subgraph Tier1 ["🛡️ KATMAN 1: DMZ Uç Sensörleri (İnternete Açık, Durumsuz / Stateless)"]
+    subgraph Tier1 [" KATMAN 1: DMZ Uç Sensörleri (İnternete Açık, Durumsuz / Stateless)"]
         DMZ_NIC["Dış Ağ Arayüzü"]
         DMZ_XDP["eBPF / XDP Line-Rate Drop"]
         DMZ_TARPIT["TCP Tarpit (:2223)"]
@@ -194,20 +194,20 @@ flowchart TD
         DMZ_BUFF["RAM-Only PCAP Ring Buffer"]
     end
 
-    subgraph Firewall1 ["🔥 Güvenlik Duvarı: Yalnızca Port 50051 (mTLS) İzinli"]
+    subgraph Firewall1 [" Güvenlik Duvarı: Yalnızca Port 50051 (mTLS) İzinli"]
     end
 
-    subgraph Tier2 ["🏛️ KATMAN 2: İzole Kasa & SOAR Motoru (Yönetim VLAN'ı)"]
+    subgraph Tier2 [" KATMAN 2: İzole Kasa & SOAR Motoru (Yönetim VLAN'ı)"]
         VAULT_GRPC["gRPC Sunucusu (:50051)"]
         SOAR_CORE["SOAR & Tehdit İstihbarat Motoru"]
         VAULT_DB[("Kriptografik Olarak İmzalı SQLite Kasa\nSHA-256 Merkle Chain")]
         FIM["FIM & Kernel Bütünlük Denetimi"]
     end
 
-    subgraph Firewall2 ["🔥 Güvenlik Duvarı: Dışarıdan Giriş Kapalı / Sadece Yerel Tünel"]
+    subgraph Firewall2 [" Güvenlik Duvarı: Dışarıdan Giriş Kapalı / Sadece Yerel Tünel"]
     end
 
-    subgraph Tier3 ["💻 KATMAN 3: Sıfır-Depolamalı Analist İstasyonu (SOC Cockpit)"]
+    subgraph Tier3 [" KATMAN 3: Sıfır-Depolamalı Analist İstasyonu (SOC Cockpit)"]
         ANALYST["Analist Tarayıcısı (127.0.0.1:8080)"]
         SSH_TUNNEL["SSH Port Forwarding / WireGuard\n(127.0.0.1:8080 -> Vault:8080)"]
     end
@@ -253,7 +253,7 @@ ssh -N -L 8080:127.0.0.1:8080 copdasten@<VAULT_IP>
 
 ---
 
-## ⚡ Ağ Portları ve Güvenlik Duvarı Akış Matrisi
+## Ağ Portları ve Güvenlik Duvarı Akış Matrisi
 
 Aşağıdaki şema ve tablo, CoPSeC bileşenleri arasındaki tüm ağ trafiğini ve güvenlik duvarında açılması gereken kuralları tanımlar:
 
@@ -285,7 +285,7 @@ flowchart LR
 
 ---
 
-## 🐳 Konteyner ve Docker Compose ile Hızlı Başlangıç
+## Konteyner ve Docker Compose ile Hızlı Başlangıç
 
 Geliştirme veya hızlı test ortamlarında tek komutla ayağa kaldırmak için `docker-compose.yml` desteği sunulmaktadır:
 
@@ -326,7 +326,7 @@ docker compose up -d
 
 ---
 
-## 🔍 Kurulum Sonrası Doğrulama ve Sağlık Kontrolleri
+## Kurulum Sonrası Doğrulama ve Sağlık Kontrolleri
 
 Kurulum tamamlandıktan sonra aşağıdaki komutlarla küme sağlığı doğrulanabilir:
 

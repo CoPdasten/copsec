@@ -307,7 +307,7 @@ REPORT_EOF
 log_info "Tiered SOC test report saved to: ${CLR_CYAN}${REPORT_JSON}${CLR_RESET}"
 echo ""
 echo -e "${CLR_GREEN}${CLR_BOLD}================================================================================${CLR_RESET}"
-echo -e "${CLR_GREEN}${CLR_BOLD}  [✓ SUITE COMPLETE] All Tiered SOC Defense SLAs verified successfully!${CLR_RESET}"
+echo -e "${CLR_GREEN}${CLR_BOLD}  [[OK] SUITE COMPLETE] All Tiered SOC Defense SLAs verified successfully!${CLR_RESET}"
 echo -e "${CLR_GREEN}${CLR_BOLD}================================================================================${CLR_RESET}"
 
 exit 0

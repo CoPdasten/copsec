@@ -103,7 +103,7 @@ func (r *RuleRegistry) startSignalListener() {
 	signal.Notify(c, syscall.SIGHUP)
 	go func() {
 		for range c {
-			log.Println("[INFO] ⚡ Received SIGHUP signal: Initiating zero-downtime detection rules hot-reload...")
+			log.Println("[INFO] [FASTPATH] Received SIGHUP signal: Initiating zero-downtime detection rules hot-reload...")
 			active, disabled, err := r.ReloadRules()
 			if err != nil {
 				log.Printf("[ERROR] SIGHUP rule reload encountered error: %v", err)

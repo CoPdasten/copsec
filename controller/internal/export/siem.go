@@ -318,7 +318,7 @@ func (e *SIEMExporter) Start(ctx context.Context) {
 		go e.worker(workerCtx, i)
 	}
 
-	log.Printf("[SIEM_EXPORTER] ⚡ Started asynchronous SIEM worker pool (%d workers, queue: %d) -> Target: %s [%s]",
+	log.Printf("[SIEM_EXPORTER] [FASTPATH] Started asynchronous SIEM worker pool (%d workers, queue: %d) -> Target: %s [%s]",
 		e.cfg.Workers, e.cfg.QueueSize, e.cfg.Endpoint, e.cfg.TargetType)
 }
 

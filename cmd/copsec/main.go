@@ -2,19 +2,25 @@ package main
 
 import (
 	"bytes"
-	"crypto/rand"
-	"encoding/hex"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"text/tabwriter"
 	"time"
+
+	"github.com/copsec/pkg/rules"
+	"github.com/copsec/pkg/server"
+	"github.com/copsec/pkg/streamer"
 )
 
 const (
@@ -55,8 +61,9 @@ func init() {
 
 // Global CLI options
 type Config struct {
-	BaseURL string
-	APIKey  string
+	BaseURL   string
+	RulesPath string
+	BPFMap    string
 }
 
 func resolveConfig() Config {
@@ -65,42 +72,29 @@ func resolveConfig() Config {
 		baseURL = DefaultURL
 	}
 
-	apiKey := strings.TrimSpace(os.Getenv("COPSEC_API_KEY"))
-	if apiKey == "" {
+	rulesPath := strings.TrimSpace(os.Getenv("COPSEC_RULES_PATH"))
+	if rulesPath == "" {
 		candidates := []string{
-			"/etc/copsec/api_key",
-			"/var/lib/copsec/api_key",
-			"/opt/copsec/etc/api_key",
-			"./controller/data/api_key",
-			"./data/api_key",
-			"../controller/data/api_key",
+			"/etc/copsec/rules.yaml",
+			"/etc/copsec/rules.json",
+			"./config/rules.json",
+			"./rules.yaml",
 		}
 		for _, p := range candidates {
-			if data, err := os.ReadFile(p); err == nil {
-				trimmed := strings.TrimSpace(string(data))
-				if trimmed != "" {
-					apiKey = trimmed
-					break
-				}
+			if _, err := os.Stat(p); err == nil {
+				rulesPath = p
+				break
 			}
 		}
 	}
-	if apiKey == "" {
-		// Also inspect copsec.env
-		if data, err := os.ReadFile("/etc/copsec/copsec.env"); err == nil {
-			for _, line := range strings.Split(string(data), "\n") {
-				line = strings.TrimSpace(line)
-				if strings.HasPrefix(line, "COPSEC_API_KEY=") {
-					apiKey = strings.Trim(strings.TrimPrefix(line, "COPSEC_API_KEY="), " \"'\r\n")
-					break
-				}
-			}
-		}
+	if rulesPath == "" {
+		rulesPath = "/etc/copsec/rules.yaml"
 	}
 
 	return Config{
-		BaseURL: baseURL,
-		APIKey:  apiKey,
+		BaseURL:   baseURL,
+		RulesPath: rulesPath,
+		BPFMap:    "/sys/fs/bpf/copsec/lpm_blocklist",
 	}
 }
 
@@ -112,6 +106,8 @@ func main() {
 	}
 
 	cfg := resolveConfig()
+	listenAddr := ":8080"
+	isDaemon := false
 
 	// Parse global flags if provided at the start
 	for len(args) > 0 && strings.HasPrefix(args[0], "-") {
@@ -135,19 +131,76 @@ func main() {
 				continue
 			}
 		}
-		if strings.HasPrefix(args[0], "--key=") {
-			cfg.APIKey = strings.TrimPrefix(args[0], "--key=")
+		if strings.HasPrefix(args[0], "--rules=") {
+			cfg.RulesPath = strings.TrimPrefix(args[0], "--rules=")
 			args = args[1:]
 			continue
 		}
-		if args[0] == "-k" || args[0] == "--key" {
+		if args[0] == "-r" || args[0] == "--rules" {
 			if len(args) > 1 {
-				cfg.APIKey = args[1]
+				cfg.RulesPath = args[1]
 				args = args[2:]
 				continue
 			}
 		}
+		if strings.HasPrefix(args[0], "--bpf-map=") {
+			cfg.BPFMap = strings.TrimPrefix(args[0], "--bpf-map=")
+			args = args[1:]
+			continue
+		}
+		if args[0] == "-m" || args[0] == "--bpf-map" {
+			if len(args) > 1 {
+				cfg.BPFMap = args[1]
+				args = args[2:]
+				continue
+			}
+		}
+		if strings.HasPrefix(args[0], "--listen=") {
+			listenAddr = strings.TrimPrefix(args[0], "--listen=")
+			args = args[1:]
+			continue
+		}
+		if args[0] == "--listen" {
+			if len(args) > 1 {
+				listenAddr = args[1]
+				args = args[2:]
+				continue
+			}
+		}
+		if args[0] == "--daemon" || args[0] == "-d" {
+			isDaemon = true
+			args = args[1:]
+			continue
+		}
 		break
+	}
+
+	if isDaemon || (len(args) > 0 && (args[0] == "daemon" || args[0] == "run" || args[0] == "serve" || args[0] == "gateway")) {
+		subArgs := args
+		if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+			subArgs = args[1:]
+		}
+		for i := 0; i < len(subArgs); i++ {
+			arg := subArgs[i]
+			if strings.HasPrefix(arg, "--listen=") {
+				listenAddr = strings.TrimPrefix(arg, "--listen=")
+			} else if arg == "--listen" && i+1 < len(subArgs) {
+				listenAddr = subArgs[i+1]
+				i++
+			} else if strings.HasPrefix(arg, "--rules=") {
+				cfg.RulesPath = strings.TrimPrefix(arg, "--rules=")
+			} else if (arg == "--rules" || arg == "-r") && i+1 < len(subArgs) {
+				cfg.RulesPath = subArgs[i+1]
+				i++
+			} else if strings.HasPrefix(arg, "--bpf-map=") {
+				cfg.BPFMap = strings.TrimPrefix(arg, "--bpf-map=")
+			} else if (arg == "--bpf-map" || arg == "-m") && i+1 < len(subArgs) {
+				cfg.BPFMap = subArgs[i+1]
+				i++
+			}
+		}
+		runDaemon(cfg.RulesPath, cfg.BPFMap, listenAddr)
+		return
 	}
 
 	if len(args) == 0 {
@@ -163,10 +216,37 @@ func main() {
 		printHelp()
 	case "version", "-v", "--version":
 		printVersion()
+	case "daemon", "run", "serve", "gateway":
+		for i := 0; i < len(cmdArgs); i++ {
+			arg := cmdArgs[i]
+			if strings.HasPrefix(arg, "--listen=") {
+				listenAddr = strings.TrimPrefix(arg, "--listen=")
+			} else if arg == "--listen" && i+1 < len(cmdArgs) {
+				listenAddr = cmdArgs[i+1]
+				i++
+			} else if strings.HasPrefix(arg, "--rules=") {
+				cfg.RulesPath = strings.TrimPrefix(arg, "--rules=")
+			} else if (arg == "--rules" || arg == "-r") && i+1 < len(cmdArgs) {
+				cfg.RulesPath = cmdArgs[i+1]
+				i++
+			} else if strings.HasPrefix(arg, "--bpf-map=") {
+				cfg.BPFMap = strings.TrimPrefix(arg, "--bpf-map=")
+			} else if (arg == "--bpf-map" || arg == "-m") && i+1 < len(cmdArgs) {
+				cfg.BPFMap = cmdArgs[i+1]
+				i++
+			}
+		}
+		runDaemon(cfg.RulesPath, cfg.BPFMap, listenAddr)
+	case "block":
+		handleBlock(cfg, cmdArgs)
+	case "unblock":
+		handleUnblock(cfg, cmdArgs)
+	case "list", "blocks", "list-blocks":
+		handleListBlocks(cfg)
+	case "reload-rules", "sync-rules":
+		handleReloadRules(cfg, cmdArgs)
 	case "status", "st":
 		handleStatus(cfg)
-	case "apikey", "key", "token":
-		handleAPIKey(cfg, cmdArgs)
 	case "web", "dashboard", "ui":
 		handleWeb(cfg)
 	case "ban":
@@ -218,13 +298,14 @@ func printHelp() {
 	fmt.Printf("%sUSAGE:%s\n", cBold+cWhite, cReset)
 	fmt.Printf("  %scopsec%s %s<command>%s [arguments]\n\n", cCyan, cReset, cYellow, cReset)
 
-	fmt.Printf("%sCORE COMMANDS:%s\n", cBold+cWhite, cReset)
+	fmt.Printf("%sCORE & OFFLINE FILTERING COMMANDS:%s\n", cBold+cWhite, cReset)
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
 	fmt.Fprintf(w, "  %sstatus%s (st)\tCheck health, services, XDP status, EPS & active bans\n", cGreen, cReset)
-	fmt.Fprintf(w, "  %sapikey%s (key)\tShow Master API key and one-click Web SOC login URL\n", cGreen, cReset)
-	fmt.Fprintf(w, "  %sapikey set <key>%s\tUpdate Master API key and restart daemon\n", cGreen, cReset)
-	fmt.Fprintf(w, "  %sapikey generate%s\tGenerate fresh 32-byte key, save and restart daemon\n", cGreen, cReset)
-	fmt.Fprintf(w, "  %sweb%s (ui)\tPrint Web SOC Cockpit URL and token login link\n", cGreen, cReset)
+	fmt.Fprintf(w, "  %sblock <CIDR> [reason]%s\tInsert CIDR prefix into kernel LPM trie blocklist\n", cGreen, cReset)
+	fmt.Fprintf(w, "  %sunblock <CIDR>%s\tEvict CIDR prefix from kernel LPM trie blocklist\n", cGreen, cReset)
+	fmt.Fprintf(w, "  %slist%s (blocks)\tDump active kernel-level CIDR blocks from LPM trie\n", cGreen, cReset)
+	fmt.Fprintf(w, "  %sreload-rules%s [path]\tReload and synchronize local firewall rules into kernel\n", cGreen, cReset)
+	fmt.Fprintf(w, "  %sweb%s (ui)\tPrint Web SOC Cockpit URL\n", cGreen, cReset)
 	w.Flush()
 
 	fmt.Printf("\n%sDEFENSE & QUARANTINE (eBPF/XDP):%s\n", cBold+cWhite, cReset)
@@ -232,6 +313,7 @@ func printHelp() {
 	fmt.Fprintf(w, "  %sban <ip> [ttl] [reason]%s\tInstantly quarantine IP in kernel XDP (e.g. copsec ban 1.2.3.4 1h)\n", cYellow, cReset)
 	fmt.Fprintf(w, "  %sunban <ip>%s\tEvict IP from kernel quarantine list\n", cYellow, cReset)
 	fmt.Fprintf(w, "  %sbans%s (quarantine)\tList all active kernel quarantine bans & TTLs\n", cYellow, cReset)
+	fmt.Fprintf(w, "  %semergency-flush%s\tEmergency panic flush of all active quarantines\n", cRed, cReset)
 	w.Flush()
 
 	fmt.Printf("\n%sTELEMETRY & INTELLIGENCE:%s\n", cBold+cWhite, cReset)
@@ -244,6 +326,7 @@ func printHelp() {
 
 	fmt.Printf("\n%sSYSTEM & DAEMON MANAGEMENT:%s\n", cBold+cWhite, cReset)
 	w = tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
+	fmt.Fprintf(w, "  %sdaemon%s (run, serve)\tBootstrap CoPSeC standalone daemon with web dashboard\n", cGreen, cReset)
 	fmt.Fprintf(w, "  %slogs [svc] [-f] [n]%s\tView service logs (controller, collector, cockpit)\n", cWhite, cReset)
 	fmt.Fprintf(w, "  %srestart [svc]%s\tRestart CoPSeC service(s) (all, controller, collector)\n", cWhite, cReset)
 	fmt.Fprintf(w, "  %sstart [svc]%s\tStart CoPSeC service(s)\n", cWhite, cReset)
@@ -253,11 +336,18 @@ func printHelp() {
 	w.Flush()
 
 	fmt.Printf("\n%sOPTIONS:%s\n", cBold+cWhite, cReset)
-	fmt.Printf("  %s-u, --url <url>%s       Controller base address (Default: http://127.0.0.1:8080)\n", cGray, cReset)
-	fmt.Printf("  %s-k, --key <key>%s       Explicit API Key override\n", cGray, cReset)
+	fmt.Printf("  %s-u, --url <url>%s        Controller base address (Default: http://127.0.0.1:8080)\n", cGray, cReset)
+	fmt.Printf("  %s-r, --rules <path>%s     Path to rules.yaml/json (Default: /etc/copsec/rules.yaml)\n", cGray, cReset)
+	fmt.Printf("  %s-m, --bpf-map <path>%s   Path to pinned BPF LPM trie map\n", cGray, cReset)
+	fmt.Printf("  %s--listen <addr>%s        Web dashboard listen address (Default: :8080)\n", cGray, cReset)
+	fmt.Printf("  %s-d, --daemon%s           Run in standalone daemon mode\n", cGray, cReset)
 	fmt.Printf("\n%sEXAMPLES:%s\n", cBold+cWhite, cReset)
 	fmt.Printf("  copsec status\n")
-	fmt.Printf("  copsec apikey\n")
+	fmt.Printf("  copsec block 192.0.2.0/24 \"Malicious subnet\"\n")
+	fmt.Printf("  copsec unblock 192.0.2.0/24\n")
+	fmt.Printf("  copsec list\n")
+	fmt.Printf("  copsec reload-rules /etc/copsec/rules.yaml\n")
+	fmt.Printf("  copsec daemon --listen :8080\n")
 	fmt.Printf("  copsec ban 198.51.100.4 2h \"brute-force attempt\"\n")
 	fmt.Printf("  copsec unban 198.51.100.4\n")
 	fmt.Printf("  copsec bans\n")
@@ -286,9 +376,6 @@ func apiRequest(cfg Config, method, endpoint string, body interface{}) (*http.Re
 		return nil, nil, err
 	}
 
-	if cfg.APIKey != "" {
-		req.Header.Set("X-API-Key", cfg.APIKey)
-	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -356,30 +443,11 @@ func handleStatus(cfg Config) {
 	fmt.Printf("  • copsec-collector  : %s\n", checkServiceActive("copsec-collector"))
 	fmt.Printf("  • copsec-cockpit    : %s\n", checkServiceActive("copsec-cockpit"))
 
-	// 2. Credentials
-	fmt.Printf("\n%s[AUTHENTICATION & ACCESS]%s\n", cBold+cWhite, cReset)
+	// 2. Web Management
+	fmt.Printf("\n%s[MANAGEMENT & DASHBOARD]%s\n", cBold+cWhite, cReset)
 	ip := getServerIP()
-	if os.Geteuid() == 0 {
-		if cfg.APIKey != "" {
-			masked := cfg.APIKey
-			if len(masked) > 8 {
-				masked = masked[:4] + strings.Repeat("*", len(masked)-8) + masked[len(masked)-4:]
-			}
-			fmt.Printf("  • Master API Key    : %s%s%s (configured)\n", cGreen, masked, cReset)
-			fmt.Printf("  • Credential File   : %s/etc/copsec/api_key%s\n", cWhite, cReset)
-		} else {
-			fmt.Printf("  • Master API Key    : %s[NOT CONFIGURED - Set via 'copsec apikey set <key>']%s\n", cRed, cReset)
-		}
-		fmt.Printf("  • Web SOC Cockpit   : %shttp://%s:8080%s\n", cCyan, ip, cReset)
-		if cfg.APIKey != "" {
-			fmt.Printf("  • Direct Login URL  : %shttp://%s:8080/?token=%s%s\n", cCyan, ip, cfg.APIKey, cReset)
-		}
-	} else {
-		fmt.Printf("  • Master API Key    : %s[PROTECTED - View via 'sudo copsec apikey']%s\n", cYellow, cReset)
-		fmt.Printf("  • Credential File   : %s/etc/copsec/api_key%s (mode 0600 root)\n", cWhite, cReset)
-		fmt.Printf("  • Web SOC Cockpit   : %shttp://%s:8080%s\n", cCyan, ip, cReset)
-		fmt.Printf("  • Direct Login URL  : %s[PROTECTED - View via 'sudo copsec apikey']%s\n", cYellow, cReset)
-	}
+	fmt.Printf("  • Web SOC Cockpit   : %shttp://%s:8080%s (or http://127.0.0.1:8080)\n", cCyan, ip, cReset)
+	fmt.Printf("  • Local Rules File  : %s%s%s\n", cWhite, cfg.RulesPath, cReset)
 
 	// 3. Query Controller Health & Stats
 	fmt.Printf("\n%s[REAL-TIME TELEMETRY]%s\n", cBold+cWhite, cReset)
@@ -441,7 +509,7 @@ func ensureSudo(reason string) {
 		os.Exit(1)
 	}
 
-	fmt.Printf("%s[🔒] Root/Sudo authentication required to %s...%s\n", cBold+cYellow, reason, cReset)
+	fmt.Printf("%s[[SECURE]] Root/Sudo authentication required to %s...%s\n", cBold+cYellow, reason, cReset)
 
 	selfPath, err := os.Executable()
 	if err != nil {
@@ -471,117 +539,12 @@ func ensureSudo(reason string) {
 	os.Exit(0)
 }
 
-func handleAPIKey(cfg Config, args []string) {
-	sub := ""
-	if len(args) > 0 {
-		sub = strings.ToLower(args[0])
-	}
-
-	switch sub {
-	case "set":
-		if len(args) < 2 || strings.TrimSpace(args[1]) == "" {
-			fmt.Printf("%s[!] Error:%s Please provide an API key. Usage: %scopsec apikey set <new-key>%s\n", cRed, cReset, cCyan, cReset)
-			os.Exit(1)
-		}
-		ensureSudo("change Master API Key")
-		newKey := strings.TrimSpace(args[1])
-		applyNewAPIKey(newKey)
-
-	case "generate", "gen", "reset":
-		ensureSudo("generate and save new Master API Key")
-		buf := make([]byte, 32)
-		if _, err := rand.Read(buf); err != nil {
-			fmt.Printf("%s[!] Error generating crypto random bytes: %v%s\n", cRed, err, cReset)
-			os.Exit(1)
-		}
-		newKey := hex.EncodeToString(buf)
-		fmt.Printf("%s[+] Generated new 32-byte Master API Key: %s%s%s\n", cGreen, cBold+cYellow, newKey, cReset)
-		applyNewAPIKey(newKey)
-
-	default: // get or show
-		// Enforce sudo authentication to view active Master API key and token
-		ensureSudo("view Master API Key and direct login URL")
-
-		if cfg.APIKey == "" {
-			cfg = resolveConfig()
-		}
-
-		if cfg.APIKey == "" {
-			fmt.Printf("%s[!] No Master API Key currently configured.%s\n", cYellow, cReset)
-			fmt.Printf("To set a key, run: %scopsec apikey set <your_key>%s\n", cCyan, cReset)
-			fmt.Printf("To generate one, run: %scopsec apikey generate%s\n", cCyan, cReset)
-			return
-		}
-
-		ip := getServerIP()
-		fmt.Printf("%s=== CoPSeC Master API Key Configuration ===%s\n\n", cBold+cCyan, cReset)
-		fmt.Printf("  • Active API Key    : %s%s%s\n", cBold+cYellow, cfg.APIKey, cReset)
-		fmt.Printf("  • Stored In         : %s/etc/copsec/api_key%s and %s/etc/copsec/copsec.env%s\n", cWhite, cReset, cWhite, cReset)
-		fmt.Printf("  • Single-Click URL  : %shttp://%s:8080/?token=%s%s\n\n", cCyan, ip, cfg.APIKey, cReset)
-		fmt.Printf("%sTip:%s You can copy and paste the Single-Click URL directly into your browser to log in without prompting!\n\n", cGray, cReset)
-	}
-}
-
-func applyNewAPIKey(newKey string) {
-	if os.Geteuid() != 0 {
-		fmt.Printf("%s[!] Note:%s Writing to /etc/copsec requires root/sudo privileges.\n", cYellow, cReset)
-	}
-
-	_ = os.MkdirAll("/etc/copsec", 0755)
-
-	if err := os.WriteFile("/etc/copsec/api_key", []byte(newKey+"\n"), 0600); err != nil {
-		fmt.Printf("%s[!] Failed to write /etc/copsec/api_key: %v (try with sudo)%s\n", cRed, err, cReset)
-		os.Exit(1)
-	}
-
-	envContent := fmt.Sprintf("COPSEC_API_KEY=%s\n", newKey)
-	if err := os.WriteFile("/etc/copsec/copsec.env", []byte(envContent), 0600); err != nil {
-		fmt.Printf("%s[!] Warning: Failed to write /etc/copsec/copsec.env: %v%s\n", cYellow, err, cReset)
-	}
-
-	fmt.Printf("%s[✓] Master API Key persisted to /etc/copsec/api_key and copsec.env (mode 0600).%s\n", cGreen, cReset)
-
-	// Restart service
-	fmt.Printf("[*] Reloading copsec-controller service...\n")
-	restarted := false
-	if _, err := exec.LookPath("systemctl"); err == nil {
-		if err := exec.Command("systemctl", "restart", "copsec-controller").Run(); err == nil {
-			fmt.Printf("%s[✓] Successfully restarted copsec-controller via systemd.%s\n", cGreen, cReset)
-			restarted = true
-		}
-	}
-	if !restarted {
-		if _, err := exec.LookPath("rc-service"); err == nil {
-			if err := exec.Command("rc-service", "copsec-controller", "restart").Run(); err == nil {
-				fmt.Printf("%s[✓] Successfully restarted copsec-controller via OpenRC.%s\n", cGreen, cReset)
-				restarted = true
-			}
-		}
-	}
-	if !restarted {
-		fmt.Printf("%s[!] Please restart copsec-controller manually to load the new key:%s\n", cYellow, cReset)
-		fmt.Printf("    sudo systemctl restart copsec-controller  OR  sudo rc-service copsec-controller restart\n")
-	}
-
-	ip := getServerIP()
-	fmt.Printf("\n%sNew Direct Login URL:%s %shttp://%s:8080/?token=%s%s\n\n", cBold+cWhite, cReset, cCyan, ip, newKey, cReset)
-}
-
 func handleWeb(cfg Config) {
-	ensureSudo("view Web SOC login credentials and direct token")
-	if cfg.APIKey == "" {
-		cfg = resolveConfig()
-	}
-
 	ip := getServerIP()
 	fmt.Printf("%s=== CoPSeC Web SOC Cockpit ===%s\n\n", cBold+cCyan, cReset)
 	fmt.Printf("  • Localhost URL     : %shttp://127.0.0.1:8080%s\n", cCyan, cReset)
 	fmt.Printf("  • Network IP URL    : %shttp://%s:8080%s\n", cCyan, ip, cReset)
-	if cfg.APIKey != "" {
-		fmt.Printf("  • One-Click Token   : %shttp://%s:8080/?token=%s%s\n\n", cGreen, ip, cfg.APIKey, cReset)
-	} else {
-		fmt.Printf("  • API Key           : %s[Not configured - run 'copsec apikey generate']%s\n\n", cYellow, cReset)
-	}
+	fmt.Printf("  • Status            : %sUnconditionally Enabled (Standalone Open-Source)%s\n\n", cGreen, cReset)
 }
 
 func parseDurationSeconds(durStr string) int64 {
@@ -648,7 +611,7 @@ func handleBan(cfg Config, args []string) {
 		os.Exit(1)
 	}
 
-	fmt.Printf("%s[✓] IP %s successfully quarantined in kernel eBPF/XDP map!%s\n", cGreen, ip, cReset)
+	fmt.Printf("%s[[OK]] IP %s successfully quarantined in kernel eBPF/XDP map!%s\n", cGreen, ip, cReset)
 	fmt.Printf("    Duration : %d seconds (~%s)\n", durationSec, time.Duration(durationSec)*time.Second)
 	fmt.Printf("    Reason   : %s\n", reason)
 }
@@ -679,7 +642,7 @@ func handleUnban(cfg Config, args []string) {
 		os.Exit(1)
 	}
 
-	fmt.Printf("%s[✓] IP %s successfully unbanned and evicted from kernel XDP quarantine.%s\n", cGreen, ip, cReset)
+	fmt.Printf("%s[[OK]] IP %s successfully unbanned and evicted from kernel XDP quarantine.%s\n", cGreen, ip, cReset)
 }
 
 func handleListBans(cfg Config) {
@@ -1008,7 +971,7 @@ func handleService(action string, args []string) {
 		if err := cmd.Run(); err != nil {
 			fmt.Printf("%s[!] Failed to %s %s: %v%s\n", cRed, action, svc, err, cReset)
 		} else {
-			fmt.Printf("%s[✓] %s %s completed successfully.%s\n", cGreen, svc, action, cReset)
+			fmt.Printf("%s[[OK]] %s %s completed successfully.%s\n", cGreen, svc, action, cReset)
 		}
 	}
 }
@@ -1106,7 +1069,7 @@ func handleUpdate(args []string) {
 	}
 
 	if checkOnly {
-		fmt.Printf("\n%s[✓] Update check complete.%s To apply this update, run: %scopsec update%s\n\n", cGreen, cReset, cCyan, cReset)
+		fmt.Printf("\n%s[[OK]] Update check complete.%s To apply this update, run: %scopsec update%s\n\n", cGreen, cReset, cCyan, cReset)
 		return
 	}
 
@@ -1151,7 +1114,7 @@ func handleUpdate(args []string) {
 		if pullErr != nil {
 			fmt.Printf("%s[!] Note during git pull:%s %s\n", cYellow, cReset, string(pullOut))
 		} else {
-			fmt.Printf("%s[✓] Repository updated successfully.%s\n", cGreen, cReset)
+			fmt.Printf("%s[[OK]] Repository updated successfully.%s\n", cGreen, cReset)
 		}
 	} else {
 		tmpDir, err := os.MkdirTemp("", "copsec_update_*")
@@ -1202,7 +1165,7 @@ func handleUpdate(args []string) {
 	// Cockpit is controller binary
 	_ = copyFile(buildDir+"/bin/copsec-controller", buildDir+"/bin/copsec-cockpit")
 
-	fmt.Printf("%s[✓] All binaries compiled successfully.%s\n", cGreen, cReset)
+	fmt.Printf("%s[[OK]] All binaries compiled successfully.%s\n", cGreen, cReset)
 
 	// 6. Detect active services before installing
 	activeController := isServiceActive("copsec-controller")
@@ -1247,7 +1210,7 @@ func handleUpdate(args []string) {
 		fmt.Printf("  • Updated kernel eBPF/XDP bytecode at /etc/copsec/copsec_xdp.bpf.o\n")
 	}
 
-	fmt.Printf("%s[✓] Binary deployment complete.%s\n", cGreen, cReset)
+	fmt.Printf("%s[[OK]] Binary deployment complete.%s\n", cGreen, cReset)
 
 	// 8. Restart active services if requested
 	if !noRestart {
@@ -1277,12 +1240,11 @@ func handleUpdate(args []string) {
 	}
 
 	fmt.Printf("\n%s================================================================================%s\n", cBold+cGreen, cReset)
-	fmt.Printf("%s CoPSeC Pro Upgrade Succeeded! Active Version: %s%s\n", cBold+cGreen, Version, cReset)
+	fmt.Printf("%s CoPSeC Upgrade Succeeded! Active Version: %s%s\n", cBold+cGreen, Version, cReset)
 	if len(remoteCommit) >= 8 {
 		fmt.Printf("  • Commit Hash       : %s%s%s\n", cYellow, remoteCommit[:8], cReset)
 	}
 	fmt.Printf("  • Preserved Ledger  : %s/var/lib/copsec/vault.db%s\n", cWhite, cReset)
-	fmt.Printf("  • Preserved API Key : %s/etc/copsec/api_key%s\n", cWhite, cReset)
 	fmt.Printf("  • Verify Health     : %scopsec status%s\n", cCyan, cReset)
 	fmt.Printf("%s================================================================================%s\n\n", cBold+cGreen, cReset)
 }
@@ -1296,16 +1258,13 @@ func handleEmergencyFlush(cfg Config) {
 	req, err := http.NewRequest(http.MethodPost, apiURL, strings.NewReader(`{"confirm":"CONFIRM-FLUSH"}`))
 	if err == nil {
 		req.Header.Set("Content-Type", "application/json")
-		if cfg.APIKey != "" {
-			req.Header.Set("X-API-Key", cfg.APIKey)
-		}
 		client := &http.Client{Timeout: 5 * time.Second}
 		resp, rErr := client.Do(req)
 		if rErr == nil {
 			defer resp.Body.Close()
 			body, _ := io.ReadAll(resp.Body)
 			if resp.StatusCode == http.StatusOK {
-				fmt.Printf("%s[✓] Controller Central Vault quarantine purged successfully.%s\n", cGreen, cReset)
+				fmt.Printf("%s[[OK]] Controller Central Vault quarantine purged successfully.%s\n", cGreen, cReset)
 				fmt.Printf("    Response: %s\n", string(body))
 			} else {
 				fmt.Printf("%s[!] Controller returned HTTP %d: %s%s\n", cYellow, resp.StatusCode, string(body), cReset)
@@ -1328,12 +1287,240 @@ func handleEmergencyFlush(cfg Config) {
 	cmd := exec.Command(collectorBin, "--panic-unban-all")
 	out, err := cmd.CombinedOutput()
 	if err == nil {
-		fmt.Printf("%s[✓] Direct Kernel eBPF/XDP map purge completed successfully.%s\n", cGreen, cReset)
+		fmt.Printf("%s[[OK]] Direct Kernel eBPF/XDP map purge completed successfully.%s\n", cGreen, cReset)
 		fmt.Printf("    Output: %s\n", strings.TrimSpace(string(out)))
 	} else {
 		fmt.Printf("%s[i] Note on local kernel flush: %v (%s)%s\n", cGray, err, strings.TrimSpace(string(out)), cReset)
 	}
 
-	fmt.Printf("\n%s[✓] Break-Glass Emergency Flush finished. Zero administrative lockouts guaranteed.%s\n", cBold+cGreen, cReset)
+	fmt.Printf("\n%s[[OK]] Break-Glass Emergency Flush finished. Zero administrative lockouts guaranteed.%s\n", cBold+cGreen, cReset)
 }
+
+// handleBlock inserts a CIDR prefix into the kernel LPM trie blocklist
+func handleBlock(cfg Config, args []string) {
+	if len(args) == 0 {
+		fmt.Printf("%s[!] Error: CIDR prefix required%s\n", cRed, cReset)
+		fmt.Printf("Usage: %scopsec block <CIDR> [description]%s\n", cCyan, cReset)
+		fmt.Printf("Example: copsec block 192.0.2.0/24 \"Malicious subnet\"\n")
+		os.Exit(1)
+	}
+
+	cidr := strings.TrimSpace(args[0])
+	desc := "Manual CLI block"
+	if len(args) > 1 {
+		desc = strings.Join(args[1:], " ")
+	}
+
+	// 1. Attempt to notify running controller via REST API
+	reqBody := map[string]string{
+		"cidr":        cidr,
+		"description": desc,
+	}
+	resp, _, err := apiRequest(cfg, "POST", "/api/v1/blocks", reqBody)
+	if err == nil && (resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusCreated) {
+		fmt.Printf("%s[+] Successfully blocked %s in kernel LPM trie (via active controller)%s\n", cGreen, cidr, cReset)
+		return
+	}
+
+	// 2. Offline / Standalone direct execution via pkg/rules
+	rm, err := rules.NewRuleManager(cfg.BPFMap, cfg.RulesPath)
+	if err != nil {
+		fmt.Printf("%s[!] Failed to initialize RuleManager: %v%s\n", cRed, err, cReset)
+		os.Exit(1)
+	}
+	defer rm.Close()
+
+	if err := rm.BlockCIDR(cidr, desc); err != nil {
+		fmt.Printf("%s[!] Failed to block CIDR %s: %v%s\n", cRed, cidr, err, cReset)
+		os.Exit(1)
+	}
+
+	if err := rm.SaveRuleFile(cfg.RulesPath); err != nil {
+		fmt.Printf("%s[WARN] Blocked in memory/kernel, but failed to save to %s: %v%s\n", cYellow, cfg.RulesPath, err, cReset)
+	}
+
+	fmt.Printf("%s[+] Successfully blocked prefix %s in kernel LPM trie%s\n", cGreen, cidr, cReset)
+	if rm.IsEmulated() {
+		fmt.Printf("    (Mode: Userspace LPM emulation - run as root for hardware/eBPF XDP enforcement)\n")
+	}
+	fmt.Printf("    Reason: %s\n", desc)
+	fmt.Printf("    Rules file: %s\n", cfg.RulesPath)
+}
+
+// handleUnblock evicts a CIDR prefix from the kernel LPM trie blocklist
+func handleUnblock(cfg Config, args []string) {
+	if len(args) == 0 {
+		fmt.Printf("%s[!] Error: CIDR prefix required%s\n", cRed, cReset)
+		fmt.Printf("Usage: %scopsec unblock <CIDR>%s\n", cCyan, cReset)
+		fmt.Printf("Example: copsec unblock 192.0.2.0/24\n")
+		os.Exit(1)
+	}
+
+	cidr := strings.TrimSpace(args[0])
+
+	// 1. Attempt to notify running controller via REST API
+	endpoint := fmt.Sprintf("/api/v1/blocks?cidr=%s", cidr)
+	resp, _, err := apiRequest(cfg, "DELETE", endpoint, nil)
+	if err == nil && resp.StatusCode == http.StatusOK {
+		fmt.Printf("%s[+] Successfully evicted prefix %s from kernel LPM trie (via active controller)%s\n", cGreen, cidr, cReset)
+		return
+	}
+
+	// 2. Offline / Standalone direct execution via pkg/rules
+	rm, err := rules.NewRuleManager(cfg.BPFMap, cfg.RulesPath)
+	if err != nil {
+		fmt.Printf("%s[!] Failed to initialize RuleManager: %v%s\n", cRed, err, cReset)
+		os.Exit(1)
+	}
+	defer rm.Close()
+
+	if err := rm.UnblockCIDR(cidr); err != nil {
+		fmt.Printf("%s[!] Failed to unblock CIDR %s: %v%s\n", cRed, cidr, err, cReset)
+		os.Exit(1)
+	}
+
+	if err := rm.SaveRuleFile(cfg.RulesPath); err != nil {
+		fmt.Printf("%s[WARN] Evicted from memory/kernel, but failed to save to %s: %v%s\n", cYellow, cfg.RulesPath, err, cReset)
+	}
+
+	fmt.Printf("%s[+] Successfully evicted prefix %s from kernel LPM trie%s\n", cGreen, cidr, cReset)
+}
+
+// handleListBlocks dumps all active kernel LPM trie blocks
+func handleListBlocks(cfg Config) {
+	var blockList []rules.BlockEntry
+
+	// 1. Try querying running controller
+	resp, body, err := apiRequest(cfg, "GET", "/api/v1/blocks", nil)
+	if err == nil && resp.StatusCode == http.StatusOK {
+		_ = json.Unmarshal(body, &blockList)
+	} else {
+		// 2. Fallback to reading from local RuleManager / rules file
+		rm, err := rules.NewRuleManager(cfg.BPFMap, cfg.RulesPath)
+		if err == nil {
+			blockList = rm.ListBlocks()
+			rm.Close()
+		}
+	}
+
+	fmt.Printf("%s=== Active Kernel LPM Trie Blocklist ===%s\n\n", cBold+cCyan, cReset)
+	if len(blockList) == 0 {
+		fmt.Printf("%s[*] No active CIDR prefix blocks found in kernel LPM trie.%s\n\n", cGray, cReset)
+		return
+	}
+
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
+	fmt.Fprintf(w, "%sCIDR PREFIX%s\t%sADDED AT%s\t%sDESCRIPTION%s\n", cBold+cWhite, cReset, cBold+cWhite, cReset, cBold+cWhite, cReset)
+	for _, b := range blockList {
+		addedStr := b.AddedAt.Format("2006-01-02 15:04:05")
+		if b.AddedAt.IsZero() {
+			addedStr = "-"
+		}
+		fmt.Fprintf(w, "%s%s%s\t%s\t%s\n", cYellow, b.CIDR, cReset, addedStr, b.Description)
+	}
+	w.Flush()
+	fmt.Printf("\nTotal prefixes in kernel LPM trie: %s%d%s\n\n", cBold+cGreen, len(blockList), cReset)
+}
+
+// handleReloadRules reloads local rule definition files into kernel maps
+func handleReloadRules(cfg Config, args []string) {
+	rulesPath := cfg.RulesPath
+	if len(args) > 0 && strings.TrimSpace(args[0]) != "" {
+		rulesPath = strings.TrimSpace(args[0])
+	}
+
+	// 1. Attempt to trigger reload on controller if running
+	resp, body, err := apiRequest(cfg, "POST", "/api/v1/rules/reload", nil)
+	if err == nil && (resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusCreated) {
+		fmt.Printf("%s[+] Controller successfully reloaded rules: %s%s\n", cGreen, string(body), cReset)
+		return
+	}
+
+	// 2. Direct reload via RuleManager
+	rm, err := rules.NewRuleManager(cfg.BPFMap, rulesPath)
+	if err != nil {
+		fmt.Printf("%s[!] Failed to initialize RuleManager: %v%s\n", cRed, err, cReset)
+		os.Exit(1)
+	}
+	defer rm.Close()
+
+	ruleCfg, err := rm.LoadRuleFile(rulesPath)
+	if err != nil {
+		fmt.Printf("%s[!] Failed to load rules file %s: %v%s\n", cRed, rulesPath, err, cReset)
+		os.Exit(1)
+	}
+
+	if err := rm.SyncRules(ruleCfg); err != nil {
+		fmt.Printf("%s[!] Failed to synchronize rules to kernel LPM trie: %v%s\n", cRed, err, cReset)
+		os.Exit(1)
+	}
+
+	blocks := rm.ListBlocks()
+	fwRules := rm.ListRules()
+	fmt.Printf("%s[+] Successfully reloaded and synchronized rules into kernel LPM trie%s\n", cGreen, cReset)
+	fmt.Printf("    Rules File:      %s\n", rulesPath)
+	fmt.Printf("    CIDR Blocks:     %d prefixes active\n", len(blocks))
+	fmt.Printf("    Firewall Rules:  %d rules active\n", len(fwRules))
+}
+
+// runDaemon bootstraps the 100% standalone, offline-first CoPSeC Security Engine
+func runDaemon(rulesPath string, bpfMapPath string, listenAddr string) {
+	printBanner()
+	fmt.Printf("%s[+] Bootstrapping CoPSeC Standalone Security Engine...%s\n", cGreen, cReset)
+
+	// 1. Initialize Standalone Rule Manager (BPF LPM Trie)
+	rm, err := rules.NewRuleManager(bpfMapPath, rulesPath)
+	if err != nil {
+		log.Printf("[INIT] [WARN] RuleManager initialization note: %v", err)
+	}
+	defer rm.Close()
+
+	rootCtx, rootCancel := context.WithCancel(context.Background())
+	defer rootCancel()
+
+	// 2. Initialize and Start Telemetry & SIEM Event Streamer (Unconditionally Enabled)
+	siemStreamer := streamer.NewSIEMStreamer(4, 10000, os.Stdout)
+	if err := siemStreamer.Start(rootCtx); err != nil {
+		log.Fatalf("[FATAL] Failed to start SIEM event streamer: %v", err)
+	}
+
+	// 3. Initialize and Start Web Management Dashboard (Unconditionally Enabled)
+	serverCfg := &server.ServerConfig{
+		ListenAddr: listenAddr,
+	}
+	webServer := server.NewWebServer(serverCfg, rm)
+	if err := webServer.Start(); err != nil {
+		log.Fatalf("[FATAL] Failed to start Web Management Dashboard: %v", err)
+	}
+
+	fmt.Printf("%s[+] CoPSeC Packet Filtering Engine: RUNNING (Kernel XDP / LPM Trie)%s\n", cGreen, cReset)
+	fmt.Printf("%s[+] Web Management Cockpit: http://127.0.0.1%s%s\n", cGreen, listenAddr, cReset)
+	fmt.Printf("%s[+] Local Rules File: %s (%d prefixes loaded)%s\n", cCyan, rulesPath, len(rm.ListBlocks()), cReset)
+	if rm.IsEmulated() {
+		fmt.Printf("%s[i] Note: Running in userspace LPM emulation mode. Run with sudo for hardware/eBPF XDP attachment.%s\n", cGray, cReset)
+	}
+	fmt.Printf("%s[*] Press Ctrl+C or send SIGTERM to gracefully shut down.%s\n", cGray, cReset)
+
+	// 4. Signal Handling & Graceful Shutdown Orchestration
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	sig := <-sigChan
+	fmt.Printf("\n%s[!] Received signal %v. Initiating graceful shutdown...%s\n", cYellow, sig, cReset)
+
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
+
+	if err := webServer.Shutdown(shutdownCtx); err != nil {
+		log.Printf("[SHUTDOWN] [WARN] Web server shutdown notice: %v", err)
+	}
+
+	if err := siemStreamer.Stop(); err != nil {
+		log.Printf("[SHUTDOWN] [WARN] Event streamer shutdown notice: %v", err)
+	}
+
+	rootCancel()
+	fmt.Printf("%s[+] Graceful shutdown completed cleanly.%s\n", cGreen, cReset)
+}
+
 
