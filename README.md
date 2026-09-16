@@ -929,7 +929,7 @@ ctest --test-dir build --output-on-failure
 
 ## Production Benchmark Scorecard & Hardware Boundary Resilience
 
-CoPSeC Pro has been subjected to aggressive hardware boundary stress testing (`copsec_dualstack_autonomous_test.sh` and `copsec_hardcore_resilience_test.sh`) executed from dedicated adversary nodes (`kali` / `192.168.1.12` / `fd00::12`) against frontline edge sensors (`pardus1` / `192.168.1.8` / `fd00::8`).
+CoPSeC Pro has been subjected to aggressive hardware boundary stress testing (`tests/lab/copsec_dualstack_autonomous_test.sh` and `tests/lab/copsec_hardcore_resilience_test.sh`) executed from dedicated adversary nodes (`kali` / `192.168.1.12` / `fd00::12`) against frontline edge sensors (`pardus1` / `192.168.1.8` / `fd00::8`).
 
 ### Production Resilience & Throughput Scorecard
 
@@ -981,10 +981,10 @@ To verify the dual-stack autonomous mitigation engine and validate line-rate fas
 
 ```bash
 # Execute standalone test suite from adversary node (kali):
-sudo ./copsec_dualstack_autonomous_test.sh
+sudo ./tests/lab/copsec_dualstack_autonomous_test.sh
 
 # Or run the hardcore resilience stress suite:
-sudo ./copsec_hardcore_resilience_test.sh
+sudo ./tests/lab/copsec_hardcore_resilience_test.sh
 ```
 
 ---
