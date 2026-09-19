@@ -41,6 +41,7 @@ log_metric()  { printf "${CLR_GRAY}  ├─ %-38s :${CLR_RESET} ${CLR_WHITE}%s${
 TARGET_IP="192.168.1.10"
 TARGET_PORT="80"
 DURATION=10
+BENCH_MODE="standard"
 SSH_USER=""
 SSH_PASS=""
 TMP_DIR=$(mktemp -d /tmp/ebpf_bench_XXXXXX)
@@ -51,12 +52,13 @@ show_help() {
 Usage: bash $(basename "$0") [OPTIONS]
 
 Options:
-  --target <IP>           Target host IP to benchmark (default: 192.168.1.10)
-  --port <PORT>           Target TCP service port (default: 80)
-  --duration <SEC>        Stress test duration in seconds (default: 10)
-  --ssh-user <USER>       (Optional) SSH username to collect remote target CPU metrics
-  --ssh-pass <PASS>       (Optional) SSH password for remote target
-  --help, -h              Show this help message and exit
+  --target <IP>                   Target host IP to benchmark (default: 192.168.1.10)
+  --port <PORT>                   Target TCP service port (default: 80)
+  --duration <SEC>                Stress test duration in seconds (default: 10)
+  --mode <standard|hard|extreme>  Stress profile: standard (10k PPS), hard (wire-rate --flood), extreme (flood + tarpit + shannon)
+  --ssh-user <USER>               (Optional) SSH username to collect remote target CPU metrics
+  --ssh-pass <PASS>               (Optional) SSH password for remote target
+  --help, -h                      Show this help message and exit
 
 Description:
   Executes an isolated 3-phase network performance benchmark:
@@ -80,6 +82,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --duration)
       DURATION="$2"
+      shift 2
+      ;;
+    --mode)
+      BENCH_MODE="$2"
       shift 2
       ;;
     --ssh-user)
@@ -232,7 +238,13 @@ REMOTE_CPU_START=$(get_remote_cpu)
 # Background traffic generation
 FLOOD_PID=""
 if [[ "$HPING_CMD" == "hping3" ]]; then
-  $SUDO_CMD hping3 -q -n -S -p "$TARGET_PORT" -i u100 "$TARGET_IP" 2>/dev/null &
+  if [[ "$BENCH_MODE" == "hard" || "$BENCH_MODE" == "extreme" ]]; then
+    log_info "Stress Profile: ${BENCH_MODE^^} -> Launching wire-rate SYN flood (--flood)..."
+    $SUDO_CMD hping3 -q -n -S -p "$TARGET_PORT" --flood "$TARGET_IP" 2>/dev/null &
+  else
+    log_info "Stress Profile: STANDARD -> Launching rate-limited SYN stream (-i u100)..."
+    $SUDO_CMD hping3 -q -n -S -p "$TARGET_PORT" -i u100 "$TARGET_IP" 2>/dev/null &
+  fi
   FLOOD_PID=$!
   BACKGROUND_PIDS+=("$FLOOD_PID")
 else
@@ -255,6 +267,31 @@ except Exception:
 PY_EOF
   FLOOD_PID=$!
   BACKGROUND_PIDS+=("$FLOOD_PID")
+fi
+
+# Extreme Profile: Launch concurrent TCP Tarpit probes on :2223
+if [[ "$BENCH_MODE" == "extreme" ]]; then
+  log_info "Extreme Profile: Concurrently launching 100 TCP probes against Tarpit (:2223)..."
+  python3 - << PY_EOF &
+import socket, time
+socks = []
+end_t = time.time() + float("${DURATION}")
+for i in range(100):
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(1.0)
+        s.connect(("${TARGET_IP}", 2223))
+        socks.append(s)
+    except Exception:
+        pass
+while time.time() < end_t:
+    time.sleep(0.5)
+for s in socks:
+    try: s.close()
+    except: pass
+PY_EOF
+  TARPIT_PID=$!
+  BACKGROUND_PIDS+=("$TARPIT_PID")
 fi
 
 sleep 1

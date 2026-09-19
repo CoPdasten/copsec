@@ -160,6 +160,13 @@ for tool in "${TOOLS[@]}"; do
   fi
 done
 
+SUDO_CMD=""
+if [[ "$EUID" -ne 0 ]]; then
+  if command -v sudo &>/dev/null; then
+    SUDO_CMD="sudo"
+  fi
+fi
+
 HPING_AVAILABLE=false
 if command -v hping3 &>/dev/null; then
   HPING_AVAILABLE=true
@@ -196,7 +203,7 @@ for target in "${G1_TARGETS[@]}"; do
 
   FLOOD_PID=""
   if [[ "$HPING_AVAILABLE" == "true" ]]; then
-    hping3 -q -n -S -p 80 --flood "$target" 2>/dev/null &
+    $SUDO_CMD hping3 -q -n -S -p 80 --flood "$target" 2>/dev/null &
     FLOOD_PID=$!
     BACKGROUND_PIDS+=("$FLOOD_PID")
   else
