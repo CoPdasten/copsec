@@ -34,7 +34,7 @@ flowchart TD
         subgraph KernelSpace [" Linux Çekirdek Alanı (Kernel Space)"]
             XDP["eBPF / XDP Sürücü Kancası"]
             BPF_MAP["banned_ips (BPF Hash Map)"]
-            XDP_DROP["XDP_DROP (<10µs Line-Rate)"]
+            XDP_DROP["XDP_DROP (Sub-10us Line-Rate)"]
             PASS["XDP_PASS (İzin Verilen Paketler)"]
         end
 
@@ -71,9 +71,10 @@ flowchart TD
     TAILERS -->|Yerel gRPC Akışı| GRPC
     GRPC --> SOAR
     SOAR -->|Tetikle / Ban| BPF_MAP
-    SOAR -->|Yaz (Append-Only)| DB
-    WEBSOC <-->|Veri Oku / WebSocket| DB
-    CLI <-->|Yönetim| ControllerSvc
+    SOAR -->|Yaz Append-Only| DB
+    WEBSOC -->|Veri Oku / WebSocket| DB
+    DB -->|Veri Akışı| WEBSOC
+    CLI -->|Yönetim| ControllerSvc
 ```
 
 ### Kurulum Adımları
@@ -137,12 +138,14 @@ flowchart TD
     ATTACK --> Node2
     ATTACK --> NodeN
 
-    COLL1 <-->| Gossip Mesh (:7946)\nLine-Rate Ban Senkronizasyonu| COLL2
-    COLL2 <-->| Gossip Mesh (:7946)| COLLN
+    COLL1 -->|Gossip Mesh Port 7946| COLL2
+    COLL2 -->|Gossip Mesh Port 7946| COLL1
+    COLL2 -->|Gossip Mesh Port 7946| COLLN
+    COLLN -->|Gossip Mesh Port 7946| COLL2
 
-    COLL1 -->|mTLS gRPC Akışı (:50051)| GRPC_HUB
-    COLL2 -->|mTLS gRPC Akışı (:50051)| GRPC_HUB
-    COLLN -->|mTLS gRPC Akışı (:50051)| GRPC_HUB
+    COLL1 -->|mTLS gRPC Akisi Port 50051| GRPC_HUB
+    COLL2 -->|mTLS gRPC Akisi Port 50051| GRPC_HUB
+    COLLN -->|mTLS gRPC Akisi Port 50051| GRPC_HUB
 
     GRPC_HUB --> SOAR_ENGINE
     SOAR_ENGINE --> SQLITE_VAULT
@@ -150,7 +153,8 @@ flowchart TD
     SIEM_EXPORT --> WAZUH
     SIEM_EXPORT --> SPLUNK
 
-    WEB_COCKPIT <--> SQLITE_VAULT
+    WEB_COCKPIT --> SQLITE_VAULT
+    SQLITE_VAULT --> WEB_COCKPIT
 ```
 
 ### Kurulum Adımları
@@ -224,9 +228,10 @@ flowchart TD
     SOAR_CORE --> VAULT_DB
     SOAR_CORE --> FIM
 
-    VAULT_DB <-->|Kasa Arayüzü| Firewall2
-    Firewall2 <--> SSH_TUNNEL
-    SSH_TUNNEL <--> ANALYST
+    VAULT_DB -->|Kasa Arayüzü| Firewall2
+    Firewall2 --> SSH_TUNNEL
+    SSH_TUNNEL --> ANALYST
+    ANALYST --> SSH_TUNNEL
 ```
 
 ### Kurulum Adımları
@@ -262,7 +267,10 @@ flowchart LR
     ATTACKER["Saldırgan IP"] -->|Engellenir / Tarpit| P2223["TCP :2223 (Tarpit)"]
     ATTACKER -->|Aldatılır| P8088["TCP :8088 (Shadow Honeypot)"]
     
-    SENSOR1["Sensör 1"] <-->|Dedikodu Ağı| P7946["TCP/UDP :7946 (Gossip Mesh)"] <--> SENSOR2["Sensör 2"]
+    SENSOR1["Sensör 1"] -->|Gossip Mesh Port 7946| P7946["TCP/UDP :7946 (Gossip Mesh)"]
+    P7946 --> SENSOR1
+    SENSOR2["Sensör 2"] -->|Gossip Mesh Port 7946| P7946
+    P7946 --> SENSOR2
     
     SENSOR1 -->|Telemetri Akışı| P50051["TCP :50051 (gRPC Fleet mTLS)"] --> CONTROLLER["Controller / Kasa"]
     SENSOR2 -->|Telemetri Akışı| P50051

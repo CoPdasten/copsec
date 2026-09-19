@@ -514,7 +514,7 @@ flowchart TD
     PASS --> HONEY
     PASS --> PCAP
 
-    CollectorSvc -->|Loopback gRPC (127.0.0.1:50051)| GRPC
+    CollectorSvc -->|Loopback gRPC Port 50051| GRPC
     GRPC --> SOAR
     SOAR -->|Quarantine Ban| BPF_MAP
     SOAR -->|Append-Only| DB
@@ -574,7 +574,7 @@ flowchart TD
     RINGBUF --> AUTONOMOUS
     AUTONOMOUS -->|Closed-Loop Quarantine| XDP_FAST
 
-    RINGBUF -->|Bidirectional gRPC Stream (:50051)| GRPC_SINK
+    RINGBUF -->|Bidirectional gRPC Stream Port 50051| GRPC_SINK
     GRPC_SINK --> SQLITE_WAL
     SQLITE_WAL --> MERKLE
     SQLITE_WAL --> SOC_COCKPIT
@@ -630,10 +630,10 @@ flowchart TD
     DMZ_XDP --> DMZ_BUFF
 
     DMZ_XDP -->|Volumetric Flood Trigger| DMZ_BGP
-    DMZ_BGP -->|RFC 7999 UPDATE (65535:666)| PEER_ROUTER
+    DMZ_BGP -->|RFC 7999 UPDATE Community 65535:666| PEER_ROUTER
     PEER_ROUTER --> UPSTREAM_DROP
 
-    DMZ_BUFF -->|mTLS Stream (:50051)| VAULT_GRPC
+    DMZ_BUFF -->|mTLS Stream Port 50051| VAULT_GRPC
     VAULT_GRPC --> VAULT_DB
     VAULT_GRPC --> FIM
 
