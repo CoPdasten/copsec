@@ -50,28 +50,41 @@ func (m *mockReader) Close() error {
 	return nil
 }
 
-func makeSampleDropEvent(ip uint32, port uint16, reason DropReason) []byte {
+func makeSampleDropEvent(srcIP, dstIP uint32, srcPort, dstPort uint16, proto uint8, reason DropReason) []byte {
 	buf := make([]byte, DropEventSize)
-	binary.NativeEndian.PutUint32(buf[0:4], ip)
-	binary.NativeEndian.PutUint16(buf[4:6], port)
-	binary.NativeEndian.PutUint16(buf[6:8], 6) // TCP
-	buf[8] = byte(reason)
-	buf[9] = 4 // IPv4
+	binary.NativeEndian.PutUint32(buf[0:4], srcIP)
+	binary.NativeEndian.PutUint32(buf[4:8], dstIP)
+	binary.NativeEndian.PutUint16(buf[8:10], srcPort)
+	binary.NativeEndian.PutUint16(buf[10:12], dstPort)
+	buf[12] = proto
+	buf[13] = byte(reason)
+	buf[14] = 0 // pad[0]
+	buf[15] = 0 // pad[1]
 	binary.NativeEndian.PutUint64(buf[16:24], 1234567890)
 	return buf
+}
+
+func TestDropEventSize(t *testing.T) {
+	if DropEventSize != 24 {
+		t.Fatalf("expected DropEventSize to be exactly 24 bytes, got %d", DropEventSize)
+	}
 }
 
 func TestSyncPoolZeroAllocation(t *testing.T) {
 	// Leased object must have clean state
 	e1 := AcquireDropEvent()
 	e1.SrcIP = 0x01020304
+	e1.DstIP = 0x0A000001
 	e1.SrcPort = 8080
+	e1.DstPort = 443
+	e1.Protocol = 6
 	e1.DropReason = DropReasonSynFlood
+	e1.TimestampNs = 123456789
 
 	ReleaseDropEvent(e1)
 
 	e2 := AcquireDropEvent()
-	if e2.SrcIP != 0 || e2.SrcPort != 0 || e2.DropReason != 0 {
+	if e2.SrcIP != 0 || e2.DstIP != 0 || e2.SrcPort != 0 || e2.DstPort != 0 || e2.Protocol != 0 || e2.DropReason != 0 || e2.TimestampNs != 0 {
 		t.Errorf("AcquireDropEvent did not return a zeroed struct: %+v", e2)
 	}
 	ReleaseDropEvent(e2)
@@ -83,7 +96,10 @@ func BenchmarkDropEventPool(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		e := AcquireDropEvent()
 		e.SrcIP = uint32(i)
+		e.DstIP = 0x0A000001
 		e.SrcPort = 443
+		e.DstPort = 80
+		e.Protocol = 6
 		e.DropReason = DropReasonRateLimit
 		ReleaseDropEvent(e)
 	}
@@ -96,7 +112,7 @@ func TestConsumerWorkerPoolProcessing(t *testing.T) {
 	}
 
 	for i := 0; i < totalEvents; i++ {
-		mock.records[i] = makeSampleDropEvent(0x0A000001+uint32(i), uint16(1000+i), DropReasonSynFlood)
+		mock.records[i] = makeSampleDropEvent(0x0A000001+uint32(i), 0xC0A80101, uint16(1000+i), 443, 6, DropReasonLPMBlock)
 	}
 
 	var processedCount atomic.Uint64
@@ -104,6 +120,9 @@ func TestConsumerWorkerPoolProcessing(t *testing.T) {
 		processedCount.Add(1)
 		if event.ProtocolString() != "TCP" {
 			t.Errorf("expected protocol TCP, got %s", event.ProtocolString())
+		}
+		if event.ReasonString() != "LPM_BLOCK" {
+			t.Errorf("expected reason LPM_BLOCK, got %s", event.ReasonString())
 		}
 	}
 
@@ -160,7 +179,7 @@ func TestConsumerNonBlockingBackpressure(t *testing.T) {
 		records: make([][]byte, totalEvents),
 	}
 	for i := 0; i < totalEvents; i++ {
-		mock.records[i] = makeSampleDropEvent(0x0A000001, 80, DropReasonRateLimit)
+		mock.records[i] = makeSampleDropEvent(0x0A000001, 0xC0A80101, 80, 8080, 6, DropReasonRateLimit)
 	}
 
 	// Handler is artificially slow to saturate the queue
@@ -198,39 +217,26 @@ func TestConsumerNonBlockingBackpressure(t *testing.T) {
 }
 
 func TestDropEventHelpers(t *testing.T) {
-	// IPv4 test
-	e4 := &DropEvent{
+	e := &DropEvent{
 		SrcIP:       binary.NativeEndian.Uint32(net.ParseIP("192.168.1.50").To4()),
-		SrcPort:     443,
+		DstIP:       binary.NativeEndian.Uint32(net.ParseIP("10.0.0.1").To4()),
+		SrcPort:     54321,
+		DstPort:     443,
 		Protocol:    6,
-		DropReason:  DropReasonL7Dpi,
-		IPVersion:   4,
+		DropReason:  DropReasonLPMBlock,
 		TimestampNs: 1000,
 	}
 
-	if e4.IP().String() != "192.168.1.50" {
-		t.Errorf("e4.IP() = %s; want 192.168.1.50", e4.IP().String())
+	if e.SrcNetIP().String() != "192.168.1.50" {
+		t.Errorf("e.SrcNetIP() = %s; want 192.168.1.50", e.SrcNetIP().String())
 	}
-	if e4.ReasonString() != "L7_DPI" {
-		t.Errorf("e4.ReasonString() = %s; want L7_DPI", e4.ReasonString())
+	if e.DstNetIP().String() != "10.0.0.1" {
+		t.Errorf("e.DstNetIP() = %s; want 10.0.0.1", e.DstNetIP().String())
 	}
-	if e4.ProtocolString() != "TCP" {
-		t.Errorf("e4.ProtocolString() = %s; want TCP", e4.ProtocolString())
+	if e.ReasonString() != "LPM_BLOCK" {
+		t.Errorf("e.ReasonString() = %s; want LPM_BLOCK", e.ReasonString())
 	}
-
-	// IPv6 test
-	ip6 := net.ParseIP("2001:db8::1").To16()
-	e6 := &DropEvent{
-		Protocol:   17,
-		DropReason: DropReasonEntropyAnomaly,
-		IPVersion:  6,
-	}
-	copy(e6.SrcIP6[:], ip6)
-
-	if e6.IP().String() != "2001:db8::1" {
-		t.Errorf("e6.IP() = %s; want 2001:db8::1", e6.IP().String())
-	}
-	if e6.ProtocolString() != "UDP" {
-		t.Errorf("e6.ProtocolString() = %s; want UDP", e6.ProtocolString())
+	if e.ProtocolString() != "TCP" {
+		t.Errorf("e.ProtocolString() = %s; want TCP", e.ProtocolString())
 	}
 }

@@ -20,49 +20,43 @@ import (
 type DropReason uint8
 
 const (
-	DropReasonUnknown        DropReason = 0
-	DropReasonSynFlood       DropReason = 1
-	DropReasonL7Dpi          DropReason = 2
-	DropReasonEntropyAnomaly DropReason = 3
-	DropReasonRateLimit      DropReason = 4
-	DropReasonTarpit         DropReason = 5
-	DropReasonSynCookieFail  DropReason = 6
+	DropReasonUnknown   DropReason = 0
+	DropReasonLPMBlock  DropReason = 1
+	DropReasonRateLimit DropReason = 2
+	DropReasonSynFlood  DropReason = 3
+	DropReasonMalformed DropReason = 4
 )
 
 // String returns human-readable name of the drop reason.
 func (r DropReason) String() string {
 	switch r {
-	case DropReasonSynFlood:
-		return "SYN_FLOOD"
-	case DropReasonL7Dpi:
-		return "L7_DPI"
-	case DropReasonEntropyAnomaly:
-		return "ENTROPY_ANOMALY"
+	case DropReasonLPMBlock:
+		return "LPM_BLOCK"
 	case DropReasonRateLimit:
 		return "RATE_LIMIT"
-	case DropReasonTarpit:
-		return "TARPIT"
-	case DropReasonSynCookieFail:
-		return "SYN_COOKIE_FAIL"
+	case DropReasonSynFlood:
+		return "SYN_FLOOD"
+	case DropReasonMalformed:
+		return "MALFORMED"
 	default:
 		return "UNKNOWN"
 	}
 }
 
-// DropEvent binary layout matches struct drop_event_t (strictly aligned to 64-bit boundaries).
-// Total binary size: 4 + 2 + 2 + 1 + 1 + 6 + 8 + 16 = 40 bytes.
+// DropEvent binary layout matches kernel struct drop_event_t (strictly aligned to 64-bit boundaries).
+// Total binary size: 4 (src_ip) + 4 (dst_ip) + 2 (src_port) + 2 (dst_port) + 1 (protocol) + 1 (drop_reason) + 2 (pad) + 8 (timestamp_ns) = 24 bytes.
 type DropEvent struct {
-	SrcIP       uint32     // IPv4 source address in network order (or 0 if IPv6)
-	SrcPort     uint16     // L4 source port (host order)
-	Protocol    uint16     // L4 protocol (e.g. 6=TCP, 17=UDP, 58=ICMPv6)
-	DropReason  DropReason // Reason classification
-	IPVersion   uint8      // 4 for IPv4, 6 for IPv6
-	Pad         [6]byte    // 64-bit alignment padding
-	TimestampNs uint64     // Kernel monotonic timestamp in nanoseconds (bpf_ktime_get_ns)
-	SrcIP6      [16]byte   // Full 128-bit IPv6 address if IPVersion == 6
+	SrcIP       uint32     // 4 bytes: IPv4 source address in network order
+	DstIP       uint32     // 4 bytes: IPv4 destination address in network order
+	SrcPort     uint16     // 2 bytes: L4 source port (host order)
+	DstPort     uint16     // 2 bytes: L4 destination port (host order)
+	Protocol    uint8      // 1 byte:  IP protocol (e.g. 6=TCP, 17=UDP, 1=ICMP)
+	DropReason  DropReason // 1 byte:  Drop reason classification
+	Pad         [2]byte    // 2 bytes: 64-bit alignment padding
+	TimestampNs uint64     // 8 bytes: Monotonic nanosecond timestamp (bpf_ktime_get_ns)
 }
 
-// DropEventSize defines the exact binary byte size of struct drop_event_t.
+// DropEventSize defines the exact binary byte size of struct drop_event_t (24 bytes).
 const DropEventSize = int(unsafe.Sizeof(DropEvent{}))
 
 // Reset clears all fields of DropEvent for clean reuse in sync.Pool.
@@ -70,16 +64,23 @@ func (e *DropEvent) Reset() {
 	*e = DropEvent{}
 }
 
-// IP returns standard net.IP representation supporting both IPv4 and IPv6.
-func (e *DropEvent) IP() net.IP {
-	if e.IPVersion == 6 {
-		ip := make(net.IP, 16)
-		copy(ip, e.SrcIP6[:])
-		return ip
-	}
+// SrcNetIP returns standard net.IP representation of the IPv4 source address.
+func (e *DropEvent) SrcNetIP() net.IP {
 	var b [4]byte
 	binary.NativeEndian.PutUint32(b[:], e.SrcIP)
 	return net.IPv4(b[0], b[1], b[2], b[3])
+}
+
+// DstNetIP returns standard net.IP representation of the IPv4 destination address.
+func (e *DropEvent) DstNetIP() net.IP {
+	var b [4]byte
+	binary.NativeEndian.PutUint32(b[:], e.DstIP)
+	return net.IPv4(b[0], b[1], b[2], b[3])
+}
+
+// IP returns standard net.IP representation of SrcIP for compatibility.
+func (e *DropEvent) IP() net.IP {
+	return e.SrcNetIP()
 }
 
 // ProtocolString returns human-readable L4 protocol name.
@@ -91,8 +92,6 @@ func (e *DropEvent) ProtocolString() string {
 		return "UDP"
 	case 1:
 		return "ICMP"
-	case 58:
-		return "ICMPv6"
 	default:
 		return fmt.Sprintf("IPPROTO_%d", e.Protocol)
 	}
@@ -105,8 +104,8 @@ func (e *DropEvent) ReasonString() string {
 
 // String returns formatted event representation.
 func (e *DropEvent) String() string {
-	return fmt.Sprintf("DropEvent{IP=%s, Port=%d, Proto=%s, Reason=%s, TimeNs=%d}",
-		e.IP(), e.SrcPort, e.ProtocolString(), e.DropReason, e.TimestampNs)
+	return fmt.Sprintf("DropEvent{Src=%s:%d, Dst=%s:%d, Proto=%s, Reason=%s, TimeNs=%d}",
+		e.SrcNetIP(), e.SrcPort, e.DstNetIP(), e.DstPort, e.ProtocolString(), e.DropReason, e.TimestampNs)
 }
 
 // =============================================================================
@@ -334,12 +333,12 @@ func (c *Consumer) readerLoop(ctx context.Context) {
 		// Zero-allocation: lease DropEvent from sync.Pool
 		event := AcquireDropEvent()
 
-		// Zero-copy type reinterpretation directly from kernel memory buffer
+		// Zero-copy type reinterpretation directly from kernel memory buffer without reflection
 		*event = *(*DropEvent)(unsafe.Pointer(&record.RawSample[0]))
 
 		// Non-blocking backpressure pipeline:
-		// If workers or slow SIEM handlers saturate the queue, drop event and immediately
-		// return struct to sync.Pool rather than blocking the kernel reader loop.
+		// If worker channels are saturated, drop event non-blockingly, increment atomic
+		// dropped-event counter, and return the pooled struct to avoid memory leaks.
 		select {
 		case c.eventChan <- event:
 			c.eventsRx.Add(1)

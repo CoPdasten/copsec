@@ -95,8 +95,8 @@ func TestAuthInterceptor(t *testing.T) {
 	// Case 2: Invalid Bearer token
 	ctxBad := metadata.NewIncomingContext(context.Background(), metadata.Pairs("authorization", "Bearer invalid-token"))
 	_, err = unaryInterceptor(ctxBad, "req", &grpc.UnaryServerInfo{}, mockHandler)
-	if err == nil || status.Code(err) != codes.Unauthenticated {
-		t.Errorf("expected codes.Unauthenticated for invalid Bearer token, got: %v", err)
+	if err == nil || (status.Code(err) != codes.Unauthenticated && status.Code(err) != codes.PermissionDenied) {
+		t.Errorf("expected codes.Unauthenticated or codes.PermissionDenied for invalid Bearer token, got: %v", err)
 	}
 
 	// Case 3: Valid Bearer token

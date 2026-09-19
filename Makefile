@@ -12,8 +12,8 @@ BPF_DIR := bpf
 BIN_DIR := bin
 PROTO_DIR := proto
 
-BPF_SOURCES := $(BPF_DIR)/copsec_xdp.bpf.c $(BPF_DIR)/copsec_kprobe.bpf.c $(BPF_DIR)/copsec_ringbuf.bpf.c
-BPF_OBJECTS := $(BPF_DIR)/copsec_xdp.bpf.o $(BPF_DIR)/copsec_kprobe.bpf.o $(BPF_DIR)/copsec_ringbuf.bpf.o
+BPF_SOURCES := $(BPF_DIR)/copsec_xdp.bpf.c $(BPF_DIR)/copsec_kprobe.bpf.c $(BPF_DIR)/copsec_ringbuf.bpf.c $(BPF_DIR)/copsec_advanced.bpf.c
+BPF_OBJECTS := $(BPF_DIR)/copsec_xdp.bpf.o $(BPF_DIR)/copsec_kprobe.bpf.o $(BPF_DIR)/copsec_ringbuf.bpf.o $(BPF_DIR)/copsec_advanced.bpf.o
 
 .PHONY: all bpf collector controller cockpit cli test vet proto clean help
 
@@ -34,6 +34,10 @@ $(BPF_DIR)/copsec_kprobe.bpf.o: $(BPF_DIR)/copsec_kprobe.bpf.c
 
 $(BPF_DIR)/copsec_ringbuf.bpf.o: $(BPF_DIR)/copsec_ringbuf.bpf.c
 	@echo "==> Compiling eBPF ring buffer event target..."
+	$(CC) $(CLANG_BPF_FLAGS) -c $< -o $@
+
+$(BPF_DIR)/copsec_advanced.bpf.o: $(BPF_DIR)/copsec_advanced.bpf.c
+	@echo "==> Compiling unified eBPF XDP/TC ingress/egress target..."
 	$(CC) $(CLANG_BPF_FLAGS) -c $< -o $@
 
 proto:

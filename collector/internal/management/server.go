@@ -161,7 +161,7 @@ func NewAuthInterceptor(authSecret string) (grpc.UnaryServerInterceptor, grpc.St
 
 		// Constant-time comparison to prevent timing side-channel attacks
 		if subtle.ConstantTimeCompare([]byte(providedToken), secretBytes) != 1 {
-			return status.Errorf(codes.Unauthenticated, "management authentication failed: invalid management credentials")
+			return status.Errorf(codes.PermissionDenied, "management authentication failed: invalid management credentials")
 		}
 
 		return nil
