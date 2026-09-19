@@ -8,6 +8,7 @@ import (
 	"net"
 	"sync"
 	"sync/atomic"
+	"time"
 	"unsafe"
 
 	"github.com/cilium/ebpf"
@@ -179,6 +180,7 @@ func (p *TelemetryProcessor) workerLoop(ctx context.Context) {
 				return
 			}
 			p.errCount.Add(1)
+			time.Sleep(20 * time.Millisecond)
 			continue
 		}
 

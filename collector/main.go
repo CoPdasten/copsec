@@ -205,7 +205,7 @@ func main() {
 
 	// 5. Start Defensive Subsystems (FIM, Tarpit, Honeypot, YARA, Integrity Guard, DNS Sinkhole)
 	fimEngine := healing.GetDefaultFIMEngine()
-	go fimEngine.StartWatchLoop(ctx, 5*time.Second)
+	go fimEngine.StartWatchLoop(ctx, 30*time.Second)
 
 	// 5b. Start Real-Time Fleet Telemetry Heartbeat Engine
 	hbWorker := network.NewHeartbeatWorker(network.HeartbeatConfig{

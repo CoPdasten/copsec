@@ -256,7 +256,7 @@ func (hw *HeartbeatWorker) ReadCPUUsage() float64 {
 	if hw.prevTotal == 0 {
 		hw.prevTotal = total
 		hw.prevIdle = idle
-		return 2.5
+		return 0.0
 	}
 
 	totalDelta := total - hw.prevTotal

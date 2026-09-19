@@ -24,6 +24,14 @@ func sendSIGKILL(pid int) error {
 // RefreshKernelSocketMap scans /proc/net/tcp, /proc/net/tcp6, /proc/net/udp and /proc/*/fd
 // to correlate active network sockets with process PIDs and command lines.
 func (e *EDREngine) RefreshKernelSocketMap() error {
+	e.scanMu.Lock()
+	if !e.lastScanTime.IsZero() && time.Since(e.lastScanTime) < 5*time.Second {
+		e.scanMu.Unlock()
+		return nil
+	}
+	e.lastScanTime = time.Now()
+	e.scanMu.Unlock()
+
 	inodeToSocket := make(map[string]SocketTuple)
 
 	// 1. Parse /proc/net/tcp and /proc/net/tcp6

@@ -72,6 +72,8 @@ type EDREngine struct {
 	scannedCount      uint64
 	onEDREvent        func(event EDRTelemetryEvent)
 	stopChan          chan struct{}
+	lastScanTime      time.Time
+	scanMu            sync.Mutex
 }
 
 var (
@@ -144,7 +146,7 @@ func (e *EDREngine) Stop() {
 }
 
 func (e *EDREngine) runCorrelationLoop(ctx context.Context) {
-	ticker := time.NewTicker(2 * time.Second)
+	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
 
 	// Initial scan

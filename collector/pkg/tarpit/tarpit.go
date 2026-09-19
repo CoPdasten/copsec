@@ -92,6 +92,7 @@ func (t *TarpitEngine) acceptLoop(ctx context.Context) {
 			if strings.Contains(err.Error(), "closed") {
 				return
 			}
+			time.Sleep(50 * time.Millisecond)
 			continue
 		}
 

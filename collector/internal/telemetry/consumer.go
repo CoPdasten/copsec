@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"sync"
 	"sync/atomic"
+	"time"
 	"unsafe"
 
 	"github.com/cilium/ebpf"
@@ -319,6 +320,7 @@ func (c *Consumer) readerLoop(ctx context.Context) {
 				return
 			}
 			c.readErrors.Add(1)
+			time.Sleep(20 * time.Millisecond)
 			continue
 		}
 

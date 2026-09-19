@@ -48,27 +48,26 @@ func (t *Tailer) tailLoopPlatform(ctx context.Context, file *os.File, reader *bu
 			_ = t.offsetManager.Flush()
 
 		default:
-			// File rotation / truncation check
-			if currentFi, statErr := os.Stat(t.filePath); statErr != nil || !os.SameFile(stat, currentFi) || currentFi.Size() < currentOffset {
-				log.Printf("[TAILER_RESET] File rotated or recreated for %s (%s). Rehooking...", t.source, t.filePath)
-				t.offsetManager.SetOffset(t.filePath, 0)
-				_ = t.offsetManager.Flush()
-				return nil
-			}
-
 			if inotifyFd < 0 {
 				select {
 				case <-ctx.Done():
 					return nil
-				case <-time.After(100 * time.Millisecond):
+				case <-time.After(500 * time.Millisecond):
 					currentOffset = t.readLines(reader, file, currentOffset)
 					t.offsetManager.SetOffset(t.filePath, currentOffset)
+					if currentFi, statErr := os.Stat(t.filePath); statErr != nil || !os.SameFile(stat, currentFi) || currentFi.Size() < currentOffset {
+						log.Printf("[TAILER_RESET] File rotated or recreated for %s (%s). Rehooking...", t.source, t.filePath)
+						t.offsetManager.SetOffset(t.filePath, 0)
+						_ = t.offsetManager.Flush()
+						return nil
+					}
 					continue
 				}
 			}
 
-			// Event-driven wait: returns immediately (0ms delay) on inotify events
-			nEvents, err := unix.Poll(pollFds, 200)
+			// Event-driven wait: returns immediately (0ms delay) on inotify events,
+			// or sleeps in kernel for up to 1000ms when idle to avoid CPU wakeups.
+			nEvents, err := unix.Poll(pollFds, 1000)
 			if err != nil {
 				if errors.Is(err, unix.EINTR) {
 					continue
@@ -77,6 +76,7 @@ func (t *Tailer) tailLoopPlatform(ctx context.Context, file *os.File, reader *bu
 				case <-ctx.Done():
 					return nil
 				default:
+					time.Sleep(50 * time.Millisecond)
 					continue
 				}
 			}
@@ -103,7 +103,7 @@ func (t *Tailer) tailLoopPlatform(ctx context.Context, file *os.File, reader *bu
 						offset += unix.SizeofInotifyEvent + int(rawEvent.Len)
 					}
 
-					// Read newly available lines immediately
+					// Read newly available lines immediately (0ms latency)
 					currentOffset = t.readLines(reader, file, currentOffset)
 					t.offsetManager.SetOffset(t.filePath, currentOffset)
 
@@ -111,6 +111,14 @@ func (t *Tailer) tailLoopPlatform(ctx context.Context, file *os.File, reader *bu
 						log.Printf("[INFO] Inotify detected rotation/deletion on %s. Reopening file...", t.filePath)
 						return nil
 					}
+				}
+			} else {
+				// On 1000ms idle poll timeout: perform lazy file rotation & truncation check
+				if currentFi, statErr := os.Stat(t.filePath); statErr != nil || !os.SameFile(stat, currentFi) || currentFi.Size() < currentOffset {
+					log.Printf("[TAILER_RESET] File rotated or recreated for %s (%s). Rehooking...", t.source, t.filePath)
+					t.offsetManager.SetOffset(t.filePath, 0)
+					_ = t.offsetManager.Flush()
+					return nil
 				}
 			}
 		}

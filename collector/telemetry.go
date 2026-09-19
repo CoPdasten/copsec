@@ -5,6 +5,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -60,47 +61,70 @@ func CollectSystemMetrics() SystemMetrics {
 	return m
 }
 
+var (
+	cpuMu         sync.Mutex
+	lastStatIdle  uint64
+	lastStatTotal uint64
+	lastStatUsage float32
+)
+
 func calculateCPUUsage() float32 {
-	readStat := func() (idle, total uint64) {
+	cpuMu.Lock()
+	defer cpuMu.Unlock()
+
+	readStat := func() (idle, total uint64, ok bool) {
 		f, err := os.Open("/proc/stat")
 		if err != nil {
-			return
+			return 0, 0, false
 		}
 		defer f.Close()
 		scanner := bufio.NewScanner(f)
 		if scanner.Scan() {
 			fields := strings.Fields(scanner.Text())
-			if len(fields) > 4 {
+			if len(fields) > 4 && fields[0] == "cpu" {
 				var sum uint64
 				for i, val := range fields[1:] {
 					num, _ := strconv.ParseUint(val, 10, 64)
 					sum += num
-					if i == 3 { // idle field
+					if i == 3 { // idle field (fields[4])
 						idle = num
 					}
 				}
 				total = sum
+				return idle, total, true
 			}
 		}
-		return
+		return 0, 0, false
 	}
 
-	idle0, total0 := readStat()
-	time.Sleep(80 * time.Millisecond)
-	idle1, total1 := readStat()
+	idle, total, ok := readStat()
+	if !ok {
+		return lastStatUsage
+	}
 
-	totalDiff := float64(total1 - total0)
-	idleDiff := float64(idle1 - idle0)
+	if lastStatTotal == 0 {
+		lastStatTotal = total
+		lastStatIdle = idle
+		return 0.0
+	}
+
+	totalDiff := float64(total - lastStatTotal)
+	idleDiff := float64(idle - lastStatIdle)
+
+	lastStatTotal = total
+	lastStatIdle = idle
 
 	if totalDiff <= 0 {
-		return 0
+		return lastStatUsage
 	}
-	usage := (1.0 - (idleDiff / totalDiff)) * 100
+
+	usage := float32((1.0 - (idleDiff / totalDiff)) * 100)
 	if usage < 0 {
 		usage = 0
 	}
 	if usage > 100 {
 		usage = 100
 	}
-	return float32(usage)
+	lastStatUsage = usage
+	return usage
 }

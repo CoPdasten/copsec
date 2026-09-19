@@ -19,6 +19,8 @@ type FIMTarget struct {
 	BaselineContent []byte      `json:"-"`
 	Permissions     os.FileMode `json:"permissions"`
 	LastCheckedMs   int64       `json:"last_checked_ms"`
+	LastModTimeNano int64       `json:"last_mod_time_nano"`
+	LastSizeBytes   int64       `json:"last_size_bytes"`
 }
 
 // FIMDriftEvent records a detected configuration tampering incident and its automated self-healing action.
@@ -99,12 +101,21 @@ func (e *FIMHealingEngine) RegisterTarget(path string, content []byte, mode os.F
 	contentCopy := make([]byte, len(content))
 	copy(contentCopy, content)
 
+	var modTimeNano int64
+	var sizeBytes int64
+	if info, err := os.Stat(path); err == nil {
+		modTimeNano = info.ModTime().UnixNano()
+		sizeBytes = info.Size()
+	}
+
 	e.targets[path] = &FIMTarget{
 		Path:            path,
 		BaselineSHA256:  hashStr,
 		BaselineContent: contentCopy,
 		Permissions:     mode,
 		LastCheckedMs:   time.Now().UnixMilli(),
+		LastModTimeNano: modTimeNano,
+		LastSizeBytes:   sizeBytes,
 	}
 }
 
@@ -118,10 +129,21 @@ func (e *FIMHealingEngine) VerifyAndHeal(path string) (*FIMDriftEvent, bool) {
 		return nil, false
 	}
 
-	currentData, err := os.ReadFile(path)
-	if err != nil {
+	info, statErr := os.Stat(path)
+	if statErr != nil {
 		// File was deleted or moved: Trigger emergency self-healing restoration
 		return e.executeHealing(target, "FILE_DELETED", fmt.Sprintf("Critical config %s was removed. Instantly recreated from immutable baseline.", path)), true
+	}
+
+	// Zero-overhead fast path: If file mtime and size match last verified state, skip reading and SHA-256
+	if target.LastModTimeNano != 0 && info.ModTime().UnixNano() == target.LastModTimeNano && info.Size() == target.LastSizeBytes {
+		target.LastCheckedMs = time.Now().UnixMilli()
+		return nil, false
+	}
+
+	currentData, err := os.ReadFile(path)
+	if err != nil {
+		return e.executeHealing(target, "FILE_READ_ERR", fmt.Sprintf("Critical config %s read failure: %v. Restoring from baseline.", path, err)), true
 	}
 
 	currentHash := sha256.Sum256(currentData)
@@ -134,6 +156,8 @@ func (e *FIMHealingEngine) VerifyAndHeal(path string) (*FIMDriftEvent, bool) {
 		return e.executeHealing(target, currentHashStr, details), true
 	}
 
+	target.LastModTimeNano = info.ModTime().UnixNano()
+	target.LastSizeBytes = info.Size()
 	target.LastCheckedMs = time.Now().UnixMilli()
 	return nil, false
 }
@@ -159,7 +183,7 @@ func (e *FIMHealingEngine) VerifyAll() []*FIMDriftEvent {
 // StartWatchLoop periodically checks file hashes in the background.
 func (e *FIMHealingEngine) StartWatchLoop(ctx context.Context, interval time.Duration) {
 	if interval == 0 {
-		interval = 5 * time.Second
+		interval = 30 * time.Second
 	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -182,6 +206,10 @@ func (e *FIMHealingEngine) executeHealing(target *FIMTarget, tamperedHash, detai
 	remediated := err == nil
 	if remediated {
 		atomic.AddUint64(&e.healedTotal, 1)
+		if fi, statErr := os.Stat(target.Path); statErr == nil {
+			target.LastModTimeNano = fi.ModTime().UnixNano()
+			target.LastSizeBytes = fi.Size()
+		}
 		log.Printf("[FIM_HEALING]  SELF-HEALED CONFIG DRIFT on %s (Restored to SHA256: %s)", target.Path, target.BaselineSHA256[:8])
 	} else {
 		log.Printf("[FIM_HEALING] [WARN] Failed to auto-restore %s: %v", target.Path, err)
