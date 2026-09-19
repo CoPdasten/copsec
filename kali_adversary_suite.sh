@@ -331,7 +331,7 @@ log_header "GATE 3: HIGH-ENTROPY PAYLOAD INJECTION (H >= 6.5, <50ms KERNEL BAN)"
 log_info "Generating mathematically verified high-entropy payload simulating encrypted webshell/stager."
 log_info "Target SLA: Autonomous Shannon engine must enforce kernel-level XDP ban in < 50ms."
 
-python3 - << 'PY_EOF' > "$TMP_DIR/shannon_test.py"
+cat << 'PY_EOF' > "$TMP_DIR/shannon_test.py"
 import math, os, time, urllib.request, urllib.error, sys
 
 def calculate_shannon_entropy(data: bytes) -> float:
@@ -506,4 +506,3 @@ printf "%-10s | %-50s | %s\n" "GATE 5" "Decentralized Gossip Mesh Sync (<100ms C
 echo "--------------------------------------------------------------------------------"
 
 echo -e "\n${CLR_GREEN}${CLR_BOLD}Adversary audit and resilience benchmarks concluded successfully.${CLR_RESET}\n"
-EOF
