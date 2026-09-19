@@ -5,7 +5,8 @@
 
 CC := clang
 GO ?= go
-CLANG_BPF_FLAGS ?= -target bpf -O2 -g -Wall
+ARCH ?= $(shell uname -m)
+CLANG_BPF_FLAGS ?= -target bpf -O2 -g -Wall -I/usr/include/$(ARCH)-linux-gnu -I/usr/include
 
 BPF_DIR := bpf
 BIN_DIR := bin

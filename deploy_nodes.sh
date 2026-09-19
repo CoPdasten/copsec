@@ -393,6 +393,11 @@ log_step "Compiling eBPF Kernel Targets & Go Executables"
 
 cd "$SCRIPT_DIR"
 
+# Ensure multiarch asm headers are accessible for eBPF toolchains
+if [[ ! -e /usr/include/asm && -d /usr/include/"$(uname -m)"-linux-gnu/asm ]]; then
+  ln -sf /usr/include/"$(uname -m)"-linux-gnu/asm /usr/include/asm 2>/dev/null || true
+fi
+
 log_info "Building eBPF C bytecode (make bpf)..."
 make bpf
 
@@ -543,4 +548,3 @@ fi
 # --- 10. Final Verification & Summary ---
 log_step "Deployment Complete"
 echo -e "${CLR_GREEN}${CLR_BOLD}CoPSeC node deployment finished successfully for role: ${NODE_ROLE^^}${CLR_RESET}\n"
-EOF
