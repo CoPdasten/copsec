@@ -270,7 +270,6 @@ case "$OS_FAMILY" in
       clang \
       llvm \
       libbpf-dev \
-      linux-headers-"$(uname -r)" \
       libpcap-dev \
       libelf-dev \
       pkg-config \
@@ -281,6 +280,11 @@ case "$OS_FAMILY" in
       ethtool \
       ca-certificates
     
+    # Install kernel headers with graceful fallbacks
+    apt-get install -y --no-install-recommends linux-headers-"$(uname -r)" 2>/dev/null || \
+      apt-get install -y --no-install-recommends linux-headers-amd64 2>/dev/null || \
+      log_warn "Kernel headers package not found in repos; proceeding with system headers."
+
     # Check if Go compiler is installed and available
     if ! command -v go &>/dev/null; then
       log_info "Go binary not found; installing golang package..."
@@ -294,7 +298,6 @@ case "$OS_FAMILY" in
       clang \
       llvm \
       libbpf-devel \
-      kernel-devel-"$(uname -r)" \
       kernel-headers \
       libpcap-devel \
       elfutils-libelf-devel \
@@ -307,6 +310,10 @@ case "$OS_FAMILY" in
       ethtool \
       ca-certificates
     
+    dnf install -y kernel-devel-"$(uname -r)" 2>/dev/null || \
+      dnf install -y kernel-devel 2>/dev/null || \
+      log_warn "kernel-devel package not found; proceeding with system headers."
+
     if ! command -v go &>/dev/null; then
       log_info "Go binary not found; installing golang..."
       dnf install -y golang || true
