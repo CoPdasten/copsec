@@ -496,12 +496,21 @@ if [[ "$INIT_SYSTEM" == "openrc" ]] && ! grep -q "bpf /sys/fs/bpf" /etc/fstab 2>
   echo "bpf /sys/fs/bpf bpf defaults 0 0" >> /etc/fstab
 fi
 
-# Persist Master API Key
+# Persist Master API Key & Controller URL for CLI tools
 echo "$API_KEY" > "${CONF_DIR}/api_key"
 chmod 644 "${CONF_DIR}/api_key"
 
+local_ctrl_url="http://127.0.0.1:${WEB_PORT:-8080}"
+if [[ "$ROLE" == "collector" && -n "$CONTROLLER_IP" ]]; then
+  local_ctrl_url="http://${CONTROLLER_IP}:${WEB_PORT:-8080}"
+fi
+echo "$local_ctrl_url" > "${CONF_DIR}/controller_url"
+chmod 644 "${CONF_DIR}/controller_url"
+
 cat << ENV_EOF > "${CONF_DIR}/copsec.env"
 COPSEC_API_KEY="${API_KEY}"
+COPSEC_CONTROLLER_URL="${local_ctrl_url}"
+COPSEC_CONTROLLER_ENDPOINT="${local_ctrl_url}"
 ENV_EOF
 chmod 600 "${CONF_DIR}/copsec.env"
 
@@ -540,12 +549,14 @@ log_success "Pre-flight sanitization complete."
 log_step "Step 4: Resolving & Compiling Autonomous Binaries"
 
 SRC_ROOT=""
-if [[ -d "/home/copdasten/copsec/collector" && -d "/home/copdasten/copsec/controller" ]]; then
-  SRC_ROOT="/home/copdasten/copsec"
-elif [[ -d "./collector" && -d "./controller" ]]; then
+if [[ -d "./collector" && -d "./controller" ]]; then
   SRC_ROOT="$(pwd)"
+elif [[ -n "${BASH_SOURCE[0]:-}" && -d "$(dirname "${BASH_SOURCE[0]}")/../collector" && -d "$(dirname "${BASH_SOURCE[0]}")/../controller" ]]; then
+  SRC_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 elif [[ -d "../collector" && -d "../controller" ]]; then
   SRC_ROOT="$(cd .. && pwd)"
+elif [[ -d "/tmp/copsec/collector" && -d "/tmp/copsec/controller" ]]; then
+  SRC_ROOT="/tmp/copsec"
 else
   TEMP_REPO="/tmp/copsec_repo_$$"
   mkdir -p "$TEMP_REPO"

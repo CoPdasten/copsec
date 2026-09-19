@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="banner.png" alt="CoPSeC Banner" width="100%" />
+  <img src="https://raw.githubusercontent.com/CoPdasten/copsec/main/banner.png" alt="CoPSeC Banner" width="100%" />
 </p>
 
 # CoPSeC — High-Performance Open-Source eBPF/XDP Active Defense Engine (Validated in Multi-Node Lab PoC)
@@ -9,9 +9,9 @@
 > **Geliştirici / Developer:** **Eyyüp Efe Adıgüzel** ([eyupadiguzel20@gmail.com](mailto:eyupadiguzel20@gmail.com))
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Language-Go%201.25+-00ADD8?style=for-the-badge&logo=go&logoColor=white" alt="Go" />
+  <img src="https://img.shields.io/badge/Language-Go%201.25%2B-00ADD8?style=for-the-badge&logo=go&logoColor=white" alt="Go" />
   <img src="https://img.shields.io/badge/Kernel-eBPF%20%2F%20XDP-orange?style=for-the-badge&logo=linux&logoColor=white" alt="eBPF/XDP" />
-  <img src="https://img.shields.io/badge/Mesh-Memberlist%20Gossip%20:7946-blueviolet?style=for-the-badge" alt="Gossip Mesh" />
+  <img src="https://img.shields.io/badge/Mesh-Memberlist%20Gossip%20%3A7946-blueviolet?style=for-the-badge" alt="Gossip Mesh" />
   <img src="https://img.shields.io/badge/SIEM-ArcSight%20CEF%20%2F%20RFC%205424-blue?style=for-the-badge" alt="Enterprise SIEM" />
   <img src="https://img.shields.io/badge/Forensics-Pre--Attack%20PCAP%20Buffer-purple?style=for-the-badge" alt="PCAP Forensics" />
   <img src="https://img.shields.io/badge/Crypt-SHA--256%20Merkle%20Chaining-red?style=for-the-badge" alt="SHA-256 Hash Chain" />
@@ -99,7 +99,7 @@ CoPSeC is engineered across **6 core architectural pillars** that decouple high-
 
 | Core Pillar | Operational Domain | Key Technical Mechanisms & Guarantees | Lab Benchmark Target / SLA |
 | :--- | :--- | :--- | :--- |
-| **1. Kernel & L4 Fast-Path** | Edge DMZ Sensor | eBPF/XDP driver-level hook, `XDP_DROP`, eBPF Syscall PID-Kill, Zero-Window TCP Tarpit (`:2223`) | $< 10\,\mu\text{s}$ Fast-Path Drop (Lab Measured) |
+| **1. Kernel & L4 Fast-Path** | Edge DMZ Sensor | eBPF/XDP driver-level hook, `XDP_DROP`, eBPF Syscall PID-Kill, Zero-Window TCP Tarpit (`:2223`) | Sub-10 µs Fast-Path Drop (Lab Measured) |
 | **2. Algorithmic Detection & Deception** | Edge & Central Core | Shannon Entropy math ($\mathcal{H} \ge 3.8$), Shadow Honeypots (`:8088`), Canary Honey-Tokens, 22 Behavioral Rules | $0\%$ False Positives on Canaries |
 | **3. Forensic Memory Management** | Volatile RAM Edge | 30s in-memory circular ring buffer, atomic snapshot clone, async PCAP serializer (`0xa1b2c3d4`) | Zero Disk Wear during Ingress |
 | **4. 3-Tier Decoupled Topology** | Distributed Network | Stateless Tier 1 Edge (DMZ), isolated Tier 2 Controller / Local Store (Management VLAN), cloaked Tier 3 SOC Cockpit | Zero Cross-Tier Blast Radius |
@@ -306,15 +306,25 @@ CoPSeC Pro advances single-node lab verification into a multi-node distributed d
   - **CLI Panic Switch:** `copsec-collector --panic-unban-all` and `copsec emergency-flush`.
   - **REST API Trigger:** `POST /api/quarantine/emergency-flush`.
   - **Web SOC Break-Glass Modal:** Two-step confirmation modal requiring typing `CONFIRM-FLUSH` before execution.
-* **Fleet-Wide Broadcast:** A single break-glass trigger broadcasts `FLUSH_BANS` across all connected edge sensors and unbans kernel BPF maps in $< 10\,\text{ms}$.
+* **Fleet-Wide Broadcast:** A single break-glass trigger broadcasts `FLUSH_BANS` across all connected edge sensors and unbans kernel BPF maps in sub-10 ms.
 
 ### 12. 1-Click Forensic Incident Case Bundle (.zip) Export
 * **Turnkey DFIR Case Packaging:** The endpoint `GET /api/incidents/:id/export-bundle` streams a cryptographically verified `.zip` archive containing:
   1. `packet_capture.pcap`: Pure Libpcap 2.4 binary capture of the offending frame.
   2. `merkle_audit_trail.json`: Cryptographic SHA-256 Merkle chain slice proving immutable non-repudiation.
   3. `threat_metadata.json`: Comprehensive JSON metadata (Reverse DNS, GeoIP, ASN, MITRE TTPs, Host Target PID/Comm).
-  4. `incident_report.md`: Standalone DFIR Incident Case markdown report formatted for SOC leadership and external auditors.
-* **Cockpit Integration:** Triggered via `[Export Forensic Case (.zip)]` button in the Forensic Drawer.
+  4. `incident_report.md`: Formatted, executive-ready incident report detailing timeline, triggers, and quarantine status.
+* **Instant SOC Download:** Incident drawers in the Web SOC Cockpit render a dedicated **[EXPORT FORENSIC BUNDLE (.ZIP)]** button for one-click evidence preservation.
+
+---
+
+## Autonomous Local Rule Hot-Reloading & Resilient Daemon Lifecycle
+
+CoPSeC is designed for high-availability production environments where firewall rules, rate limits, and threat intelligence feeds must be updated on the fly without packet drops, socket recreation, or service downtime:
+
+1. **Kernel-Space Map Synchronization:** Modifying `/etc/copsec/rules.yaml` or executing `copsec reload-rules <file>` dynamically syncs new rules directly into eBPF LPM trie (`block_lpm_map`) and hash maps in real time without dropping active connections.
+2. **Dynamic In-Flight Configuration Updates:** The collector daemon listens for hot-reload signals (POSIX `SIGHUP`) or management gRPC commands to update port boundaries, honeypot ports, or whitelist CIDRs on the fly.
+3. **Graceful Daemon Shutdown:** Both `copsec-controller` and `copsec-collector` handle `SIGINT`/`SIGTERM` gracefully, flushing in-memory metric arrays, draining gRPC event queues, dismounting eBPF/XDP hooks safely from the network interface, and releasing file locks.
 
 ---
 
@@ -343,7 +353,7 @@ CoPSeC eliminates persistent disk writes entirely by introducing an in-memory, i
                                          │
                                          ▼
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
-│            NON-BLOCKING MEMORY SNAPSHOT ISOLATION (< 10µs Atomic Pointer Copy)          │
+│            NON-BLOCKING MEMORY SNAPSHOT ISOLATION (Sub-10µs Atomic Pointer Copy)       │
 │               Live Ingress Fast-Path Continues Processing with 0% Packet Loss          │
 └────────────────────────────────────────┬───────────────────────────────────────────────┘
                                          │ Hand-off to Background Goroutine Channel
@@ -368,7 +378,7 @@ CoPSeC eliminates persistent disk writes entirely by introducing an in-memory, i
      - **L4 Kernel Dropped Attack:** eBPF/XDP fast-path drop counter threshold crossed during volumetric floods.
      - **High-Confidence L7 Signatures:** Remote code execution attempts (e.g., Shellshock, serialized PHP/Java stagers, SQL injection).
 3. **Non-Blocking Snapshot Isolation (Zero Ingress Loss):**
-   - Executes an atomic **Snapshot Copy** ($< 10\,\mu\text{s}$) to clone the active memory buffer pointer.
+   - Executes an atomic **Snapshot Copy** (sub-10 µs) to clone the active memory buffer pointer.
    - Immediately dispatches the snapshot into an asynchronous Go worker channel (`goroutine`).
    - The live packet-processing fast path experiences **0 dropped packets**, preserving line-rate monitoring even during multi-gigabit attacks.
 4. **Forensic PCAP File Format:**
@@ -461,22 +471,22 @@ Runs the entire stack on a single machine or VPS. Deploys the SQLite WAL vault, 
 
 ```mermaid
 flowchart TD
-    subgraph External [" External Network"]
-        ATTACKER["Attacker / Scanner"]
+    subgraph External ["External Network"]
+        ATTACKER["Attacker or Scanner"]
         USER["Legitimate User"]
     end
 
-    subgraph Host [" Standalone Host"]
+    subgraph Host ["Standalone Host"]
         NIC["Interface (eth0)"]
 
-        subgraph KernelSpace [" Linux Kernel Space"]
+        subgraph KernelSpace ["Linux Kernel Space"]
             XDP["eBPF / XDP Hook"]
             BPF_MAP["banned_ips (Hash Map)"]
-            XDP_DROP["XDP_DROP (<10µs Line-Rate)"]
+            XDP_DROP["XDP_DROP (Sub-10us Line-Rate)"]
             PASS["XDP_PASS (Legit Traffic)"]
         end
 
-        subgraph UserSpace [" User Space Daemons"]
+        subgraph UserSpace ["User Space Daemons"]
             subgraph CollectorSvc ["copsec-collector.service"]
                 TARPIT["TCP Tarpit (:2223)"]
                 HONEY["Shadow Honeypot (:8088)"]
@@ -508,8 +518,9 @@ flowchart TD
     GRPC --> SOAR
     SOAR -->|Quarantine Ban| BPF_MAP
     SOAR -->|Append-Only| DB
-    WEBSOC <-->|Query / WS| DB
-    CLI <-->|Local Admin| ControllerSvc
+    WEBSOC -->|Query / WS| DB
+    DB -->|Stream| WEBSOC
+    CLI -->|Local Admin| ControllerSvc
 ```
 
 ```bash
@@ -526,22 +537,22 @@ Your primary workstation functions as the cluster brain, log repository, and vis
 
 ```mermaid
 flowchart TD
-    subgraph Adversary [" ADVERSARY GENERATOR (kali — 192.168.1.12 / fd00::12)"]
+    subgraph Adversary ["Adversary Generator (kali: 192.168.1.12)"]
         ATTACK_V4["IPv4 SYN Flood / Port Scan / RCE"]
-        ATTACK_V6["IPv6 Volumetric Flood (fd00::12)"]
-        ATTACK_ENTROPY["High-Entropy Obfuscated Payloads (H >= 6.5)"]
+        ATTACK_V6["IPv6 Volumetric Flood"]
+        ATTACK_ENTROPY["High-Entropy Obfuscated Payloads"]
     end
 
-    subgraph EdgeSensor [" TIER 1: EDGE SENSOR NODE (pardus1 — 192.168.1.8 / fd00::8)"]
+    subgraph EdgeSensor ["Tier 1: Edge Sensor Node (pardus1)"]
         NIC["Physical / Virt Interface (enp0s3 / eth0)"]
         NDP_SAFE{"NDP Check\n(ICMPv6 133-136)"}
-        XDP_FAST["eBPF / XDP Dual-Stack Engine\nLine-Rate Discard (<22µs)"]
-        TARPIT["Asymmetric TCP Tarpit (:2223)\nZero-Window ACK Loop (0 Sockets)"]
+        XDP_FAST["eBPF / XDP Dual-Stack Engine\nLine-Rate Discard (Sub-22us)"]
+        TARPIT["Asymmetric TCP Tarpit (:2223)\nZero-Window ACK Loop"]
         RINGBUF["512KB Raw Packet RingBuffer\n144B Frames (16B Hdr + 128B Slice)"]
-        AUTONOMOUS["Autonomous SOAR & Shannon Engine\n<250ms Closed-Loop Kernel Ban"]
+        AUTONOMOUS["Autonomous SOAR Engine\nSub-250ms Closed-Loop Kernel Ban"]
     end
 
-    subgraph CentralHub [" TIER 2: CENTRAL VAULT & SOC COCKPIT (cachy — 192.168.1.10)"]
+    subgraph CentralHub ["Tier 2: Central Vault and SOC Cockpit"]
         GRPC_SINK["gRPC Ingestion Hub (:50051)\nZero-Copy Protobuf Stream"]
         SQLITE_WAL[("Immutable Vault Ledger\n/var/lib/copsec/vault.db (WAL)")]
         MERKLE["SHA-256 Merkle Chain Integrity\nTrigger-Guarded Append-Only"]
@@ -566,7 +577,8 @@ flowchart TD
     RINGBUF -->|Bidirectional gRPC Stream (:50051)| GRPC_SINK
     GRPC_SINK --> SQLITE_WAL
     SQLITE_WAL --> MERKLE
-    SQLITE_WAL <--> SOC_COCKPIT
+    SQLITE_WAL --> SOC_COCKPIT
+    SOC_COCKPIT --> SQLITE_WAL
 ```
 
 **Step 1: On Your Central PC / Controller (`cachy`):**
@@ -589,26 +601,26 @@ Complete physical and logical separation of duties with upstream BGP Remotely Tr
 
 ```mermaid
 flowchart TD
-    subgraph Upstream [" UPSTREAM TRANSIT / ISP ROUTING"]
+    subgraph Upstream ["Upstream Transit and ISP Routing"]
         PEER_ROUTER["BGP-4 Edge Router (BIRD / FRR / Cisco / Juniper)\nAS65001 Peering :179"]
         UPSTREAM_DROP["Upstream Null0 / Blackhole Discard\nRFC 7999 Community 65535:666"]
     end
 
-    subgraph Tier1 [" TIER 1: DMZ Edge Sensors (Stateless Frontline)"]
+    subgraph Tier1 ["Tier 1: DMZ Edge Sensors (Stateless Frontline)"]
         DMZ_NIC["Dual-Stack External Interface"]
         DMZ_XDP["eBPF / XDP Line-Rate Drop (111k+ PPS)"]
         DMZ_TARPIT["Zero-Socket TCP Tarpit (:2223)"]
-        DMZ_BGP["Autonomous BGP Speaker (RFC 4271)\nVolumetric Trigger (>200k PPS)"]
+        DMZ_BGP["Autonomous BGP Speaker (RFC 4271)\nVolumetric Trigger (200k+ PPS)"]
         DMZ_BUFF["512KB Raw Packet Ring Buffer"]
     end
 
-    subgraph Tier2 [" TIER 2: Isolated Vault & SOAR Engine (Management VLAN)"]
+    subgraph Tier2 ["Tier 2: Isolated Vault and SOAR Engine (Management VLAN)"]
         VAULT_GRPC["gRPC Telemetry Hub (:50051)"]
         VAULT_DB[("Cryptographic SQLite Vault\nSHA-256 Merkle Chain (WAL)")]
         FIM["eBPF Host EDR & Kernel Guard"]
     end
 
-    subgraph Tier3 [" TIER 3: Zero-Storage Analyst Workstation (SOC Cockpit)"]
+    subgraph Tier3 ["Tier 3: Zero-Storage Analyst Workstation (SOC Cockpit)"]
         ANALYST["Analyst Browser (127.0.0.1:8080)"]
         WIRESHARK_DRAWER["Wireshark Live Packet Drawer\nClient-Side .pcap Exporter"]
     end
@@ -625,8 +637,10 @@ flowchart TD
     VAULT_GRPC --> VAULT_DB
     VAULT_GRPC --> FIM
 
-    VAULT_DB <--> WIRESHARK_DRAWER
-    WIRESHARK_DRAWER <--> ANALYST
+    VAULT_DB --> WIRESHARK_DRAWER
+    WIRESHARK_DRAWER --> VAULT_DB
+    WIRESHARK_DRAWER --> ANALYST
+    ANALYST --> WIRESHARK_DRAWER
 ```
 
 **Step 1: Dedicated Vault Server (Isolated Database Hub):**
@@ -1015,7 +1029,7 @@ CoPSeC Pro has been subjected to boundary stress testing (`tests/lab/copsec_dual
 | **Gate 1: IPv6 Line-Rate Fast-Path** | 100k+ PPS IPv6 SYN flood (`fd00::12` $\to$ `fd00::8`) | **111,111 PPS @ 0.02180 ms (21.8 µs)** | Sub-millisecond NIC driver discard | **PASS (100%)** |
 | **Gate 2: Asymmetric IPv6 Tarpit** | High-concurrency TCP probes to port `:2223` | **0 Sockets Allocated** (`ss -tlpn`), zero-window stall | Complete socket pool exhaustion defense | **PASS (100%)** |
 | **Gate 3: NDP Safeguard Invariance** | ICMPv6 Neighbor Discovery under flood | **0% NDP Loss** (Types 133–136 preserved) | Default route stability during saturation | **PASS (100%)** |
-| **Gate 4: Autonomous Shannon Mitigation** | High-entropy obfuscated payload ($\mathcal{H} \ge 6.5$) | **42 ms Closed-Loop Quarantine** | Autonomous kernel ban in $< 250\,\text{ms}$ | **PASS (100%)** |
+| **Gate 4: Autonomous Shannon Mitigation** | High-entropy obfuscated payload ($\mathcal{H} \ge 6.5$) | **42 ms Closed-Loop Quarantine** | Autonomous kernel ban in sub-250 ms | **PASS (100%)** |
 | **Gate 5: Memory Leak & RSS Drift** | Continuous 250k packet burst cycle | **0 MB RSS Memory Drift** (Constant footprint) | Zero leak in 512KB ring buffer | **PASS (100%)** |
 | **Autonomous BGP RTBH Peering** | Volumetric flood exceeding 200,000 PPS | **RFC 7999 UPDATE (65535:666)** + 60s withdrawal | Upstream line-rate Null0 discard | **PASS (100%)** |
 | **Merkle Chain Audit Ledger** | SQLite tamper attempt (`UPDATE`/`DELETE`) | **CRYPTOGRAPHIC_VIOLATION** trigger abort | 100% Non-repudiation integrity | **PASS (100%)** |

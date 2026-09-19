@@ -289,13 +289,13 @@ setup_user_and_directories() {
   mkdir -p "${COPSEC_LOG_DIR}/forensics"
 
   # Permissions:
-  # - Conf and Install directories: read/execute for service user, read-only for general users (chmod 750)
+  # - Conf and Install directories: 0755 to allow local users to read CLI api_key/controller_url
   chown -R root:"${COPSEC_USER}" "${COPSEC_INSTALL_DIR}"
-  chmod 0750 "${COPSEC_INSTALL_DIR}"
-  chmod 0750 "${COPSEC_INSTALL_DIR}/bin"
+  chmod 0755 "${COPSEC_INSTALL_DIR}"
+  chmod 0755 "${COPSEC_INSTALL_DIR}/bin"
 
   chown -R root:"${COPSEC_USER}" "${COPSEC_CONF_DIR}"
-  chmod 0750 "${COPSEC_CONF_DIR}"
+  chmod 0755 "${COPSEC_CONF_DIR}"
 
   # - Data and Log directories: owned exclusively by COPSEC_USER with chmod 700 to prevent leaks
   chown -R "${COPSEC_USER}":"${COPSEC_USER}" "${COPSEC_DATA_DIR}"
@@ -305,8 +305,8 @@ setup_user_and_directories() {
   chmod 0700 "${COPSEC_LOG_DIR}"
 
   echo -e "  ${CLR_GREEN}[OK] Directory boundaries and permission masks established:${CLR_RESET}"
-  echo -e "    • Install  : ${COPSEC_INSTALL_DIR} [0750 root:${COPSEC_USER}]"
-  echo -e "    • Config   : ${COPSEC_CONF_DIR} [0750 root:${COPSEC_USER}]"
+  echo -e "    • Install  : ${COPSEC_INSTALL_DIR} [0755 root:${COPSEC_USER}]"
+  echo -e "    • Config   : ${COPSEC_CONF_DIR} [0755 root:${COPSEC_USER}]"
   echo -e "    • Data     : ${COPSEC_DATA_DIR} [0700 ${COPSEC_USER}:${COPSEC_USER}] (Database isolation)"
   echo -e "    • Logs     : ${COPSEC_LOG_DIR} [0700 ${COPSEC_USER}:${COPSEC_USER}]"
 }
@@ -317,8 +317,38 @@ setup_user_and_directories() {
 deploy_binaries_and_configs() {
   echo -e "${CLR_MAGENTA}[*] Compiling/Installing CoPSeC binaries and configurations...${CLR_RESET}"
 
-  local script_dir
-  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  local script_dir=""
+  if [ -d "./controller" ] && [ -d "./collector" ]; then
+    script_dir="$(pwd)"
+  elif [ -n "${BASH_SOURCE[0]:-}" ] && [ -d "$(dirname "${BASH_SOURCE[0]}")/controller" ]; then
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  elif [ -d "/tmp/copsec/controller" ]; then
+    script_dir="/tmp/copsec"
+  else
+    local temp_clone="/tmp/copsec_install_$$"
+    echo -e "  ${CLR_BLUE}• Cloning CoPSeC source from GitHub for standalone install...${CLR_RESET}"
+    git clone --depth 1 -b main https://github.com/CoPdasten/copsec.git "$temp_clone" 2>/dev/null || true
+    script_dir="$temp_clone"
+  fi
+
+  # Bootstrap Go compiler if source build is required and Go is absent
+  if ! command -v go >/dev/null 2>&1; then
+    echo -e "  ${CLR_BLUE}• Bootstrapping Go toolchain...${CLR_RESET}"
+    if command -v apt-get >/dev/null 2>&1; then
+      apt-get install -y -qq golang-go 2>/dev/null || true
+    elif command -v dnf >/dev/null 2>&1; then
+      dnf install -y -q golang 2>/dev/null || true
+    fi
+    if ! command -v go >/dev/null 2>&1; then
+      local go_arch="amd64"
+      [ "$(uname -m)" = "aarch64" ] && go_arch="arm64"
+      curl -fsSL "https://go.dev/dl/go1.22.4.linux-${go_arch}.tar.gz" -o "/tmp/go.tar.gz" 2>/dev/null && \
+        tar -C /usr/local -xzf "/tmp/go.tar.gz" && \
+        export PATH=$PATH:/usr/local/go/bin && \
+        ln -sf /usr/local/go/bin/go /usr/bin/go 2>/dev/null && \
+        rm -f "/tmp/go.tar.gz" || true
+    fi
+  fi
 
   # Locate or compile copsec-controller
   local controller_binary="${COPSEC_INSTALL_DIR}/bin/copsec-controller"
@@ -328,8 +358,8 @@ deploy_binaries_and_configs() {
     (cd "${script_dir}/controller" && go build -ldflags="-s -w" -o "${controller_binary}" .)
   elif [ -f "${script_dir}/controller/copsec-controller" ]; then
     cp -f "${script_dir}/controller/copsec-controller" "${controller_binary}"
-  elif [ -f "${script_dir}/copsec-controller" ]; then
-    cp -f "${script_dir}/copsec-controller" "${controller_binary}"
+  elif [ -f "${script_dir}/bin/copsec-controller" ]; then
+    cp -f "${script_dir}/bin/copsec-controller" "${controller_binary}"
   elif [ -f "/usr/local/bin/copsec-controller" ]; then
     cp -f "/usr/local/bin/copsec-controller" "${controller_binary}"
   else
@@ -345,6 +375,8 @@ deploy_binaries_and_configs() {
     (cd "${script_dir}/collector" && go build -ldflags="-s -w" -o "${collector_binary}" .) || true
   elif [ -f "${script_dir}/collector/copsec-collector" ]; then
     cp -f "${script_dir}/collector/copsec-collector" "${collector_binary}" || true
+  elif [ -f "${script_dir}/bin/copsec-collector" ]; then
+    cp -f "${script_dir}/bin/copsec-collector" "${collector_binary}" || true
   fi
 
   # Locate or compile copsec unified CLI
