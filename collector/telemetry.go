@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -63,8 +64,8 @@ func CollectSystemMetrics() SystemMetrics {
 
 var (
 	cpuMu         sync.Mutex
-	lastStatIdle  uint64
 	lastStatTotal uint64
+	lastProcTicks uint64
 	lastStatUsage float32
 )
 
@@ -72,10 +73,23 @@ func calculateCPUUsage() float32 {
 	cpuMu.Lock()
 	defer cpuMu.Unlock()
 
-	readStat := func() (idle, total uint64, ok bool) {
+	var procTicks uint64
+	if statData, err := os.ReadFile("/proc/self/stat"); err == nil {
+		str := string(statData)
+		if idx := strings.LastIndex(str, ")"); idx >= 0 && idx+2 < len(str) {
+			fields := strings.Fields(str[idx+2:])
+			if len(fields) >= 13 {
+				u, _ := strconv.ParseUint(fields[11], 10, 64)
+				s, _ := strconv.ParseUint(fields[12], 10, 64)
+				procTicks = u + s
+			}
+		}
+	}
+
+	readStatTotal := func() (total uint64, ok bool) {
 		f, err := os.Open("/proc/stat")
 		if err != nil {
-			return 0, 0, false
+			return 0, false
 		}
 		defer f.Close()
 		scanner := bufio.NewScanner(f)
@@ -83,48 +97,51 @@ func calculateCPUUsage() float32 {
 			fields := strings.Fields(scanner.Text())
 			if len(fields) > 4 && fields[0] == "cpu" {
 				var sum uint64
-				for i, val := range fields[1:] {
+				for _, val := range fields[1:] {
 					num, _ := strconv.ParseUint(val, 10, 64)
 					sum += num
-					if i == 3 { // idle field (fields[4])
-						idle = num
-					}
 				}
-				total = sum
-				return idle, total, true
+				return sum, true
 			}
 		}
-		return 0, 0, false
+		return 0, false
 	}
 
-	idle, total, ok := readStat()
+	total, ok := readStatTotal()
 	if !ok {
 		return lastStatUsage
 	}
 
-	if lastStatTotal == 0 {
+	if lastStatTotal == 0 || (procTicks > 0 && lastProcTicks == 0) {
 		lastStatTotal = total
-		lastStatIdle = idle
+		lastProcTicks = procTicks
 		return 0.0
 	}
 
 	totalDiff := float64(total - lastStatTotal)
-	idleDiff := float64(idle - lastStatIdle)
-
 	lastStatTotal = total
-	lastStatIdle = idle
 
 	if totalDiff <= 0 {
 		return lastStatUsage
 	}
 
-	usage := float32((1.0 - (idleDiff / totalDiff)) * 100)
-	if usage < 0 {
-		usage = 0
+	if procTicks > 0 && lastProcTicks > 0 {
+		procDiff := float64(procTicks - lastProcTicks)
+		lastProcTicks = procTicks
+		numCPU := float64(runtime.NumCPU())
+		if numCPU <= 0 {
+			numCPU = 1.0
+		}
+		usage := float32((procDiff / totalDiff) * 100.0 * numCPU)
+		if usage < 0 {
+			usage = 0
+		}
+		if usage > 100 {
+			usage = 100
+		}
+		lastStatUsage = usage
+		return usage
 	}
-	if usage > 100 {
-		usage = 100
-	}
-	lastStatUsage = usage
-	return usage
+
+	return lastStatUsage
 }

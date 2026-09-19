@@ -109,23 +109,33 @@ func NewCentralServer(storage *StorageEngine, analyzer *RuleEngine) *CentralServ
 	go func() {
 		ticker := time.NewTicker(1 * time.Second)
 		defer ticker.Stop()
+		var lastMitreRefresh time.Time
+		var cachedMitreStats []MITREStat
+
 		for range ticker.C {
 			count := atomic.SwapUint64(&srv.epsEventsThisSec, 0)
 			atomic.StoreUint64(&srv.currentEPS, count)
 
-			// Broadcast live system stats to Web SOC WebSocket clients
-			if srv.wsHub != nil {
-				mitreStats, _ := srv.storage.GetMITREStats()
+			// Broadcast live system stats to Web SOC WebSocket clients ONLY if clients are active
+			if srv.wsHub != nil && srv.wsHub.HasClients() {
+				// Refresh MITRE stats at most once every 15 seconds to avoid constant SQLite table scans
+				if srv.storage != nil && (time.Since(lastMitreRefresh) > 15*time.Second || cachedMitreStats == nil) {
+					if stats, err := srv.storage.GetMITREStats(); err == nil {
+						cachedMitreStats = stats
+						lastMitreRefresh = time.Now()
+					}
+				}
+
 				activeBansCount := 0
 				if srv.ttlManager != nil {
-					activeBansCount = len(srv.ttlManager.GetActiveBans())
+					activeBansCount = srv.ttlManager.GetActiveBansCount()
 				}
 				srv.wsHub.Broadcast("stats", map[string]interface{}{
 					"eps":          count,
 					"total_events": atomic.LoadUint64(&srv.totalEventsProcessed),
 					"nodes_count":  len(srv.GetNodesSnapshot()),
 					"active_bans":  activeBansCount,
-					"mitre_stats":  mitreStats,
+					"mitre_stats":  cachedMitreStats,
 				})
 			}
 		}

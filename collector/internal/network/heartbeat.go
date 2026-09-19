@@ -39,9 +39,10 @@ type HeartbeatWorker struct {
 	mu         sync.RWMutex
 	conn       *grpc.ClientConn
 	client     copsecproto.CopsecStreamServiceClient
-	startTime  time.Time
-	prevTotal  uint64
-	prevIdle   uint64
+	startTime     time.Time
+	prevTotal     uint64
+	prevIdle      uint64
+	prevProcTicks uint64
 }
 
 // NewHeartbeatWorker instantiates a new edge collector heartbeat worker.
@@ -223,32 +224,48 @@ func (hw *HeartbeatWorker) getClient(ctx context.Context) (copsecproto.CopsecStr
 	return hw.client, nil
 }
 
-// ReadCPUUsage computes current local CPU usage percentage from /proc/stat.
+// ReadCPUUsage computes the current process CPU usage percentage of CoPSeC.
+// It reads /proc/self/stat to obtain process utime+stime and normalizes against total system ticks.
 func (hw *HeartbeatWorker) ReadCPUUsage() float64 {
 	hw.mu.Lock()
 	defer hw.mu.Unlock()
 
+	// 1. Read process utime + stime from /proc/self/stat
+	var procTicks uint64
+	if statData, err := os.ReadFile("/proc/self/stat"); err == nil {
+		str := string(statData)
+		if idx := strings.LastIndex(str, ")"); idx >= 0 && idx+2 < len(str) {
+			fields := strings.Fields(str[idx+2:])
+			if len(fields) >= 13 {
+				u, _ := strconv.ParseUint(fields[11], 10, 64)
+				s, _ := strconv.ParseUint(fields[12], 10, 64)
+				procTicks = u + s
+			}
+		}
+	}
+
+	// 2. Read system total ticks from /proc/stat
 	file, err := os.Open("/proc/stat")
 	if err != nil {
-		return 1.0 // fallback
+		return 0.0
 	}
 	defer file.Close()
 
 	scanner := bufio.NewScanner(file)
 	if !scanner.Scan() {
-		return 1.0
+		return 0.0
 	}
 
 	fields := strings.Fields(scanner.Text())
 	if len(fields) < 5 || fields[0] != "cpu" {
-		return 1.0
+		return 0.0
 	}
 
 	var total, idle uint64
 	for i := 1; i < len(fields); i++ {
 		val, _ := strconv.ParseUint(fields[i], 10, 64)
 		total += val
-		if i == 4 { // idle is 4th index in /proc/stat line
+		if i == 4 {
 			idle = val
 		}
 	}
@@ -256,18 +273,39 @@ func (hw *HeartbeatWorker) ReadCPUUsage() float64 {
 	if hw.prevTotal == 0 {
 		hw.prevTotal = total
 		hw.prevIdle = idle
+		hw.prevProcTicks = procTicks
 		return 0.0
 	}
 
 	totalDelta := total - hw.prevTotal
 	idleDelta := idle - hw.prevIdle
+	procDelta := procTicks - hw.prevProcTicks
+
 	hw.prevTotal = total
 	hw.prevIdle = idle
+	hw.prevProcTicks = procTicks
 
 	if totalDelta == 0 {
 		return 0.0
 	}
 
+	// If process ticks are available, calculate exact CoPSeC daemon CPU percentage
+	if procTicks > 0 {
+		numCPU := float64(runtime.NumCPU())
+		if numCPU <= 0 {
+			numCPU = 1.0
+		}
+		usage := (float64(procDelta) / float64(totalDelta)) * 100.0 * numCPU
+		if usage < 0 {
+			return 0.0
+		}
+		if usage > 100.0 {
+			return 100.0
+		}
+		return usage
+	}
+
+	// Fallback to host CPU percentage
 	usage := 100.0 * (1.0 - (float64(idleDelta) / float64(totalDelta)))
 	if usage < 0 {
 		return 0.0

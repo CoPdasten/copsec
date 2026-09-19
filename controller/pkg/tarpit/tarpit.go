@@ -177,7 +177,7 @@ func (t *TarpitEngine) TrapConnection(conn net.Conn, service string) {
 }
 
 func (t *TarpitEngine) statsTicker(ctx context.Context) {
-	ticker := time.NewTicker(5 * time.Second)
+	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
 
 	for {
@@ -188,9 +188,11 @@ func (t *TarpitEngine) statsTicker(ctx context.Context) {
 			return
 		case <-ticker.C:
 			t.mu.Lock()
-			now := time.Now().UnixMilli()
-			for _, s := range t.activeSessions {
-				s.DurationSec = (now - s.ConnectedAtMs) / 1000
+			if len(t.activeSessions) > 0 {
+				now := time.Now().UnixMilli()
+				for _, s := range t.activeSessions {
+					s.DurationSec = (now - s.ConnectedAtMs) / 1000
+				}
 			}
 			t.mu.Unlock()
 		}

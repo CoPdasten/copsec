@@ -86,6 +86,13 @@ func (h *WSHub) run() {
 	}
 }
 
+// HasClients returns true if there is at least one active connected client.
+func (h *WSHub) HasClients() bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return len(h.clients) > 0
+}
+
 // SendNonBlocking sends data to a client or drops if buffer is full (Zero Backpressure).
 func (c *WSClient) SendNonBlocking(msg []byte) {
 	c.mu.Lock()

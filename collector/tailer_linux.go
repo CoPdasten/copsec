@@ -28,7 +28,7 @@ func (t *Tailer) tailLoopPlatform(ctx context.Context, file *os.File, reader *bu
 		}
 	}
 
-	flushTicker := time.NewTicker(5 * time.Second)
+	flushTicker := time.NewTicker(30 * time.Second)
 	defer flushTicker.Stop()
 
 	pollFds := []unix.PollFd{

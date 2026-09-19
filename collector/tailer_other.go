@@ -11,10 +11,10 @@ import (
 )
 
 func (t *Tailer) tailLoopPlatform(ctx context.Context, file *os.File, reader *bufio.Reader, stat os.FileInfo, currentOffset int64) error {
-	flushTicker := time.NewTicker(5 * time.Second)
+	flushTicker := time.NewTicker(30 * time.Second)
 	defer flushTicker.Stop()
 
-	pollTicker := time.NewTicker(100 * time.Millisecond)
+	pollTicker := time.NewTicker(1000 * time.Millisecond)
 	defer pollTicker.Stop()
 
 	for {

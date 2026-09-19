@@ -320,9 +320,16 @@ func (tm *TTLBanManager) GetActiveBans() []DetailedBanRecord {
 	return list
 }
 
+// GetActiveBansCount returns the total number of currently active quarantines with zero allocations.
+func (tm *TTLBanManager) GetActiveBansCount() int {
+	tm.mu.RLock()
+	defer tm.mu.RUnlock()
+	return len(tm.activeBans)
+}
+
 // startTTLPruningLoop continuously inspects active bans and cleans up expired ones with zero latency.
 func (tm *TTLBanManager) startTTLPruningLoop() {
-	ticker := time.NewTicker(1 * time.Second)
+	ticker := time.NewTicker(3 * time.Second)
 	defer ticker.Stop()
 
 	for {

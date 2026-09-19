@@ -24,6 +24,7 @@ type OffsetManager struct {
 	mu       sync.RWMutex
 	filePath string
 	offsets  map[string]int64
+	dirty    bool
 }
 
 // NewOffsetManager initializes an OffsetManager with offset persistence.
@@ -60,17 +61,26 @@ func (om *OffsetManager) GetOffset(path string) int64 {
 func (om *OffsetManager) SetOffset(path string, offset int64) {
 	om.mu.Lock()
 	defer om.mu.Unlock()
-	om.offsets[path] = offset
+	if om.offsets[path] != offset {
+		om.offsets[path] = offset
+		om.dirty = true
+	}
 }
 
-// Flush persists in-memory offsets to disk atomically.
+// Flush persists in-memory offsets to disk atomically only when dirty.
 func (om *OffsetManager) Flush() error {
-	om.mu.RLock()
+	om.mu.Lock()
+	if !om.dirty {
+		om.mu.Unlock()
+		return nil
+	}
 	data, err := json.MarshalIndent(om.offsets, "", "  ")
-	om.mu.RUnlock()
 	if err != nil {
+		om.mu.Unlock()
 		return err
 	}
+	om.dirty = false
+	om.mu.Unlock()
 
 	dir := filepath.Dir(om.filePath)
 	if err := os.MkdirAll(dir, 0750); err != nil {
