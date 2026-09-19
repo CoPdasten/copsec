@@ -486,6 +486,32 @@ func (s *StorageEngine) initSchema() error {
 		last_triggered_ms INTEGER DEFAULT 0,
 		metadata TEXT DEFAULT ''
 	);
+
+	CREATE TABLE IF NOT EXISTS security_audit_trail (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+		actor_identity TEXT NOT NULL,
+		actor_ip TEXT NOT NULL,
+		action_type TEXT NOT NULL,
+		target_entity TEXT NOT NULL,
+		justification TEXT NOT NULL,
+		cryptographic_hash TEXT NOT NULL
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON security_audit_trail(timestamp);
+	CREATE INDEX IF NOT EXISTS idx_audit_actor ON security_audit_trail(actor_identity);
+
+	CREATE TRIGGER IF NOT EXISTS prevent_audit_update
+	BEFORE UPDATE ON security_audit_trail
+	BEGIN
+		SELECT RAISE(FAIL, 'SECURITY VIOLATION: Updates to security_audit_trail are prohibited by Zero-Trust policy');
+	END;
+
+	CREATE TRIGGER IF NOT EXISTS prevent_audit_delete
+	BEFORE DELETE ON security_audit_trail
+	BEGIN
+		SELECT RAISE(FAIL, 'SECURITY VIOLATION: Deletions from security_audit_trail are prohibited by Zero-Trust policy');
+	END;
 	`
 	if _, err := s.db.Exec(baseTables); err != nil {
 		return err

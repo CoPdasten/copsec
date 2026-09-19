@@ -109,11 +109,10 @@ func TestGRPCServerInterceptors(t *testing.T) {
 		t.Fatalf("Failed to listen: %v", err)
 	}
 	addr := lis.Addr().String()
-	_ = lis.Close()
 
-	grpcServer, err := StartGRPCServer(addr, server)
+	grpcServer, err := StartGRPCServerWithListener(lis, server)
 	if err != nil {
-		t.Fatalf("StartGRPCServer failed: %v", err)
+		t.Fatalf("StartGRPCServerWithListener failed: %v", err)
 	}
 	defer grpcServer.Stop()
 

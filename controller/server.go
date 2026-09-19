@@ -349,14 +349,16 @@ func (s *CentralServer) authenticate(ctx context.Context) (string, error) {
 		} else {
 			// New node enrollment: verify fleet key credentials or local loopback connection
 			authorized := false
-			isLoopback := strings.HasPrefix(remoteAddr, "127.0.0.1:") || strings.HasPrefix(remoteAddr, "[::1]:") || remoteAddr == "127.0.0.1" || remoteAddr == "::1" || remoteAddr == ""
-			if isLoopback {
-				authorized = true
-			} else if expectedFleetKey != "" {
+			if expectedFleetKey != "" {
 				fleetKeys := md.Get("x-fleet-key")
 				if len(fleetKeys) > 0 && subtle.ConstantTimeCompare([]byte(fleetKeys[0]), []byte(expectedFleetKey)) == 1 {
 					authorized = true
 				} else if subtle.ConstantTimeCompare([]byte(apiKey), []byte(expectedFleetKey)) == 1 {
+					authorized = true
+				}
+			} else {
+				isLoopback := strings.HasPrefix(remoteAddr, "127.0.0.1:") || strings.HasPrefix(remoteAddr, "[::1]:") || remoteAddr == "127.0.0.1" || remoteAddr == "::1"
+				if isLoopback {
 					authorized = true
 				}
 			}
@@ -1235,6 +1237,13 @@ func StartGRPCServer(addr string, server *CentralServer, extraOpts ...grpc.Serve
 	if err != nil {
 		return nil, fmt.Errorf("failed to listen on %s: %w", addr, err)
 	}
+	return StartGRPCServerWithListener(lis, server, extraOpts...)
+}
+
+// StartGRPCServerWithListener initializes the gRPC server on an existing net.Listener with CopsecStreamServiceServer
+// registration, authentication interceptors, aggressive keepalive policies, and TLS 1.3 / mTLS transport security.
+func StartGRPCServerWithListener(lis net.Listener, server *CentralServer, extraOpts ...grpc.ServerOption) (*grpc.Server, error) {
+	addr := lis.Addr().String()
 
 	keepaliveParams := grpc.KeepaliveParams(keepalive.ServerParameters{
 		MaxConnectionIdle:     15 * time.Minute,

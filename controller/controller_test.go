@@ -136,10 +136,12 @@ func TestCentralServerAuthAndHeartbeat(t *testing.T) {
 
 	analyzer := NewRuleEngine("")
 	server := NewCentralServer(store, analyzer)
+	server.SetFleetKey("cps_live_secret123")
 
 	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs(
 		"x-node-id", "node-vps-test",
 		"x-api-key", "cps_live_secret123",
+		"x-fleet-key", "cps_live_secret123",
 	))
 
 	hb := &copsecproto.Heartbeat{
