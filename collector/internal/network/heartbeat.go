@@ -160,12 +160,28 @@ func (hw *HeartbeatWorker) sendPulse(ctx context.Context) {
 	defer cancel()
 
 	apiKey := strings.TrimSpace(os.Getenv("COPSEC_API_KEY"))
+	fleetKey := strings.TrimSpace(os.Getenv("COPSEC_FLEET_KEY"))
+	if apiKey == "" {
+		for _, p := range []string{"/etc/copsec/api_key", "/etc/copsec/fleet_key"} {
+			if data, err := os.ReadFile(p); err == nil {
+				if k := strings.TrimSpace(string(data)); k != "" {
+					apiKey = k
+					break
+				}
+			}
+		}
+	}
 	if apiKey == "" {
 		apiKey = "copsec_default_secret_key"
 	}
+	if fleetKey == "" {
+		fleetKey = apiKey
+	}
+
 	callCtx = metadata.AppendToOutgoingContext(callCtx,
 		"x-node-id", hb.NodeId,
 		"x-api-key", apiKey,
+		"x-fleet-key", fleetKey,
 		"x-node-group", hb.NodeGroup,
 	)
 

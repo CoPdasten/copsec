@@ -124,10 +124,22 @@ func (m *IdentityManager) GetRequestMetadata(ctx context.Context, uri ...string)
 		"x-api-key":    m.identity.APIKey,
 		"x-node-group": m.GetGroup(),
 	}
-	if fleetKey := strings.TrimSpace(os.Getenv("COPSEC_FLEET_KEY")); fleetKey != "" {
+	fleetKey := strings.TrimSpace(os.Getenv("COPSEC_FLEET_KEY"))
+	if fleetKey == "" {
+		fleetKey = strings.TrimSpace(os.Getenv("COPSEC_API_KEY"))
+	}
+	if fleetKey == "" {
+		for _, p := range []string{"/etc/copsec/fleet_key", "/etc/copsec/api_key"} {
+			if data, err := os.ReadFile(p); err == nil {
+				if k := strings.TrimSpace(string(data)); k != "" {
+					fleetKey = k
+					break
+				}
+			}
+		}
+	}
+	if fleetKey != "" {
 		md["x-fleet-key"] = fleetKey
-	} else if apiKey := strings.TrimSpace(os.Getenv("COPSEC_API_KEY")); apiKey != "" {
-		md["x-fleet-key"] = apiKey
 	}
 	return md, nil
 }

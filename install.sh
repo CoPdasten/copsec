@@ -500,6 +500,7 @@ COPSEC_LOG_DIR="${COPSEC_LOG_DIR}"
 COPSEC_CONF_DIR="${COPSEC_CONF_DIR}"
 COPSEC_RULES_FILE="${COPSEC_CONF_DIR}/rules.json"
 COPSEC_DB_PATH="${COPSEC_DATA_DIR}/copsec.db"
+COPSEC_FLEET_KEY="${COPSEC_API_KEY}"
 ENV_EOF
 
   # Lock down environment file permissions to 0600 (owner read/write only)

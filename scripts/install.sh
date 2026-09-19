@@ -511,6 +511,7 @@ cat << ENV_EOF > "${CONF_DIR}/copsec.env"
 COPSEC_API_KEY="${API_KEY}"
 COPSEC_CONTROLLER_URL="${local_ctrl_url}"
 COPSEC_CONTROLLER_ENDPOINT="${local_ctrl_url}"
+COPSEC_FLEET_KEY="${API_KEY}"
 ENV_EOF
 chmod 600 "${CONF_DIR}/copsec.env"
 
@@ -902,6 +903,7 @@ Wants=network-online.target
 Type=simple
 User=root
 WorkingDirectory=/opt/copsec
+EnvironmentFile=-/etc/copsec/copsec.env
 ExecStart=${BIN_DIR}/copsec-collector \
   --controller=${CONTROLLER_ADDR} \
   --interface=${INTERFACE} \
@@ -995,6 +997,7 @@ Wants=network-online.target copsec-controller.service
 Type=simple
 User=root
 WorkingDirectory=/opt/copsec
+EnvironmentFile=-/etc/copsec/copsec.env
 ExecStart=${BIN_DIR}/copsec-collector \
   --controller=127.0.0.1:${GRPC_PORT} \
   --interface=${INTERFACE} \

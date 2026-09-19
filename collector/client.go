@@ -154,8 +154,10 @@ func (c *ControllerClient) runStreamLoop(ctx context.Context, wg *sync.WaitGroup
 			if c.fallbackEngine != nil {
 				c.fallbackEngine.SetFallbackActive(true)
 			}
-			log.Printf("[WARN] Live gRPC stream disconnected: %v", err)
+			log.Printf("[WARN] Live gRPC stream disconnected: %v. Reconnecting in %v...", err, backoff)
 			c.closeConnection()
+			c.drainIncomingToBuffer(ctx, backoff)
+			backoff = time.Duration(math.Min(float64(backoff*2), float64(maxBackoff)))
 		}
 	}
 }

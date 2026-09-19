@@ -7,7 +7,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 )
 
 // SystemMetrics represents real-time hardware telemetry from Linux kernel.

@@ -347,9 +347,12 @@ func (s *CentralServer) authenticate(ctx context.Context) (string, error) {
 			s.mu.Unlock()
 			log.Printf("[AUTH] Restored edge node session from SQLite registry: %s (Host: %s, Group: %s, Addr: %s)", nodeID, hostname, group, remoteAddr)
 		} else {
-			// New node enrollment: verify fleet key credentials
+			// New node enrollment: verify fleet key credentials or local loopback connection
 			authorized := false
-			if expectedFleetKey != "" {
+			isLoopback := strings.HasPrefix(remoteAddr, "127.0.0.1:") || strings.HasPrefix(remoteAddr, "[::1]:") || remoteAddr == "127.0.0.1" || remoteAddr == "::1" || remoteAddr == ""
+			if isLoopback {
+				authorized = true
+			} else if expectedFleetKey != "" {
 				fleetKeys := md.Get("x-fleet-key")
 				if len(fleetKeys) > 0 && subtle.ConstantTimeCompare([]byte(fleetKeys[0]), []byte(expectedFleetKey)) == 1 {
 					authorized = true
@@ -375,11 +378,24 @@ func (s *CentralServer) authenticate(ctx context.Context) (string, error) {
 			}
 			s.nodes[nodeID] = session
 			s.mu.Unlock()
-			log.Printf("[AUTH] Enrolled and registered new edge node with valid fleet key: %s (Host: %s, Group: %s, Addr: %s)", nodeID, hostname, group, remoteAddr)
+
+			if s.storage != nil {
+				_ = s.storage.RegisterOrUpdateNode(&NodeRegistryRecord{
+					NodeID:          nodeID,
+					APIKey:          apiKey,
+					Hostname:        hostname,
+					GroupName:       group,
+					RemoteAddr:      remoteAddr,
+					LastSeenMs:      time.Now().UnixMilli(),
+					Status:          "ACTIVE",
+				})
+			}
+			log.Printf("[AUTH] Enrolled and registered new edge node: %s (Host: %s, Group: %s, Addr: %s)", nodeID, hostname, group, remoteAddr)
 		}
 	} else {
 		// Storage is nil: check fleetKey or accept with warning
-		if expectedFleetKey != "" {
+		isLoopback := strings.HasPrefix(remoteAddr, "127.0.0.1:") || strings.HasPrefix(remoteAddr, "[::1]:") || remoteAddr == "127.0.0.1" || remoteAddr == "::1" || remoteAddr == ""
+		if !isLoopback && expectedFleetKey != "" {
 			fleetKeys := md.Get("x-fleet-key")
 			if (len(fleetKeys) == 0 || subtle.ConstantTimeCompare([]byte(fleetKeys[0]), []byte(expectedFleetKey)) != 1) &&
 				subtle.ConstantTimeCompare([]byte(apiKey), []byte(expectedFleetKey)) != 1 {
