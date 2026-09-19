@@ -418,7 +418,14 @@ func (s *ManagementServer) GetEngineStatus(ctx context.Context, req *managementp
 }
 
 // StartManagementServer binds and serves the SensorManagementService on the specified listener.
+// In production, management.NewServer should be used to enforce loopback restrictions, Bearer auth, and TLS 1.3.
 func StartManagementServer(lis net.Listener, engine *DynamicEngine, opt ...grpc.ServerOption) (*grpc.Server, error) {
+	addr := lis.Addr().String()
+	host, _, _ := net.SplitHostPort(addr)
+	if host == "0.0.0.0" || host == "[::]" || host == "" {
+		log.Printf("[MANAGEMENT_GRPC] [SECURITY WARNING] StartManagementServer bound to wildcard address %s. In production, use management.NewServer with loopback/mTLS.", addr)
+	}
+
 	grpcServer := grpc.NewServer(opt...)
 	server := NewManagementServer(engine)
 	managementproto.RegisterSensorManagementServiceServer(grpcServer, server)

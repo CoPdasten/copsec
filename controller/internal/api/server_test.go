@@ -52,8 +52,25 @@ func TestCockpitHandlerEndpoints(t *testing.T) {
 
 	handler := NewCockpitHandler(store, tempDir, "test_api_key")
 
-	// 2. Test GET /api/fleet
+	// 2a. Test GET /api/fleet unauthenticated (expect 401)
+	reqFleetUnauth := httptest.NewRequest(http.MethodGet, "/api/fleet", nil)
+	rrFleetUnauth := httptest.NewRecorder()
+	handler.ServeHTTP(rrFleetUnauth, reqFleetUnauth)
+	if rrFleetUnauth.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 Unauthorized for unauthenticated GET /api/fleet, got %d", rrFleetUnauth.Code)
+	}
+
+	// 2b. Test GET /api/fleet with ?token= query parameter (expect 401 - query tokens blocked on REST)
+	reqFleetQuery := httptest.NewRequest(http.MethodGet, "/api/fleet?token=test_api_key", nil)
+	rrFleetQuery := httptest.NewRecorder()
+	handler.ServeHTTP(rrFleetQuery, reqFleetQuery)
+	if rrFleetQuery.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 Unauthorized for query param ?token= on /api/fleet, got %d", rrFleetQuery.Code)
+	}
+
+	// 2c. Test GET /api/fleet authenticated via X-API-Key header (expect 200)
 	reqFleet := httptest.NewRequest(http.MethodGet, "/api/fleet", nil)
+	reqFleet.Header.Set("X-API-Key", "test_api_key")
 	rrFleet := httptest.NewRecorder()
 	handler.ServeHTTP(rrFleet, reqFleet)
 

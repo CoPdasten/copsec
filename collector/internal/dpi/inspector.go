@@ -447,23 +447,47 @@ func InspectPacket(payload []byte) InspectionResult {
 
 // dialSecureClientConn establishes a hardened mTLS gRPC connection to the Tier 2 Controller.
 func dialSecureClientConn(ctx context.Context, targetEndpoint string) (*grpc.ClientConn, error) {
-	caPEM, err := os.ReadFile("/etc/copsec/certs/ca.crt")
+	caPath := "/etc/copsec/certs/ca.crt"
+	if envCA := strings.TrimSpace(os.Getenv("COPSEC_TLS_CA")); envCA != "" {
+		caPath = envCA
+	}
+	caPEM, err := os.ReadFile(caPath)
 	if err != nil {
 		return nil, err
 	}
 	certPool := x509.NewCertPool()
 	if !certPool.AppendCertsFromPEM(caPEM) {
-		return nil, fmt.Errorf("failed to parse root CA PEM")
+		return nil, fmt.Errorf("failed to parse root CA PEM from %s", caPath)
 	}
-	clientCert, err := tls.LoadX509KeyPair("/etc/copsec/certs/client.crt", "/etc/copsec/certs/client.key")
+
+	clientCertPath := "/etc/copsec/certs/client.crt"
+	if envCert := strings.TrimSpace(os.Getenv("COPSEC_TLS_CLIENT_CERT")); envCert != "" {
+		clientCertPath = envCert
+	}
+	clientKeyPath := "/etc/copsec/certs/client.key"
+	if envKey := strings.TrimSpace(os.Getenv("COPSEC_TLS_CLIENT_KEY")); envKey != "" {
+		clientKeyPath = envKey
+	}
+
+	clientCert, err := tls.LoadX509KeyPair(clientCertPath, clientKeyPath)
 	if err != nil {
 		return nil, err
 	}
+
+	host, _, err := net.SplitHostPort(targetEndpoint)
+	if err != nil || host == "" {
+		host = targetEndpoint
+	}
+	serverName := strings.TrimSpace(os.Getenv("COPSEC_TLS_SERVER_NAME"))
+	if serverName == "" {
+		serverName = host
+	}
+
 	tlsConfig := &tls.Config{
 		Certificates: []tls.Certificate{clientCert},
 		RootCAs:      certPool,
 		MinVersion:   tls.VersionTLS13,
-		ServerName:   "pardus1",
+		ServerName:   serverName,
 	}
 	dialOpts := []grpc.DialOption{
 		grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)),

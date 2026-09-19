@@ -2,11 +2,15 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -29,6 +33,7 @@ import (
 	"github.com/copsec/controller/pkg/webhook"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
@@ -68,6 +73,7 @@ type CentralServer struct {
 	eventSubChan    chan *StoredEvent
 	siemForwarder   *siem.SyslogForwarder
 	webhookNotifier *webhook.Notifier
+	fleetKey        string
 
 	// Autonomous Auto-Ban Tracker
 	autoBanMu        sync.Mutex
@@ -95,6 +101,7 @@ func NewCentralServer(storage *StorageEngine, analyzer *RuleEngine) *CentralServ
 		autoBanThreshold: 80,
 		ipHistory:        make(map[string][]int64),
 		autoBanned:       make(map[string]int64),
+		fleetKey:         strings.TrimSpace(os.Getenv("COPSEC_FLEET_KEY")),
 	}
 	srv.soarEngine = NewAutonomousSOAREngine(storage, srv, nil, nil, intelEngine)
 
@@ -225,7 +232,27 @@ func (s *CentralServer) SubscribeEvents() <-chan *StoredEvent {
 	return s.eventSubChan
 }
 
-// authenticate validates headers and maintains active edge node sessions.
+// SetFleetKey configures the authoritative enrollment key for edge nodes.
+func (s *CentralServer) SetFleetKey(key string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.fleetKey = strings.TrimSpace(key)
+}
+
+// GetFleetKey returns the configured fleet key.
+func (s *CentralServer) GetFleetKey() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.fleetKey != "" {
+		return s.fleetKey
+	}
+	if envKey := strings.TrimSpace(os.Getenv("COPSEC_FLEET_KEY")); envKey != "" {
+		return envKey
+	}
+	return GetActiveAPIKey()
+}
+
+// authenticate validates headers and maintains active edge node sessions with key registry checks.
 func (s *CentralServer) authenticate(ctx context.Context) (string, error) {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
@@ -239,11 +266,16 @@ func (s *CentralServer) authenticate(ctx context.Context) (string, error) {
 		return "", status.Errorf(codes.Unauthenticated, "missing node credentials")
 	}
 
-	nodeID := nodeIDs[0]
-	apiKey := apiKeys[0]
+	nodeID := strings.TrimSpace(nodeIDs[0])
+	apiKey := strings.TrimSpace(apiKeys[0])
 
-	if len(strings.TrimSpace(nodeID)) < 3 || len(strings.TrimSpace(apiKey)) < 8 {
+	if len(nodeID) < 3 || len(apiKey) < 8 {
 		return "", status.Errorf(codes.Unauthenticated, "invalid credentials format")
+	}
+
+	remoteAddr := ""
+	if p, ok := peer.FromContext(ctx); ok {
+		remoteAddr = p.Addr.String()
 	}
 
 	group := "DEFAULT_EDGE"
@@ -259,26 +291,19 @@ func (s *CentralServer) authenticate(ctx context.Context) (string, error) {
 		hostname = strings.TrimPrefix(nodeID, "node-")
 	}
 
-	remoteAddr := ""
-	if p, ok := peer.FromContext(ctx); ok {
-		remoteAddr = p.Addr.String()
-	}
-
 	s.mu.Lock()
 	session, exists := s.nodes[nodeID]
-	if !exists {
-		session = &NodeSession{
-			NodeID:      nodeID,
-			APIKey:      apiKey,
-			Hostname:    hostname,
-			Group:       group,
-			RemoteAddr:  remoteAddr,
-			LastSeen:    time.Now(),
-			CommandChan: make(chan *copsecproto.SOARCommand, 128),
+	s.mu.Unlock()
+
+	expectedFleetKey := s.GetFleetKey()
+
+	if exists {
+		// Existing in-memory session: constant-time verify registered apiKey
+		if subtle.ConstantTimeCompare([]byte(apiKey), []byte(session.APIKey)) != 1 {
+			log.Printf("[AUTH_ALERT] [DENIED] Edge node credentials mismatch for %s (remote: %s)", nodeID, remoteAddr)
+			return "", status.Errorf(codes.Unauthenticated, "invalid credentials for node %s", nodeID)
 		}
-		s.nodes[nodeID] = session
-		log.Printf("[AUTH] Registered new edge node: %s (Host: %s, Group: %s, Addr: %s)", nodeID, hostname, group, remoteAddr)
-	} else {
+		s.mu.Lock()
 		session.LastSeen = time.Now()
 		if group != "DEFAULT_EDGE" {
 			session.Group = group
@@ -289,14 +314,87 @@ func (s *CentralServer) authenticate(ctx context.Context) (string, error) {
 		if remoteAddr != "" {
 			session.RemoteAddr = remoteAddr
 		}
+		s.mu.Unlock()
+	} else if s.storage != nil {
+		storedKey, err := s.storage.GetNodeAPIKey(nodeID)
+		if err == nil && storedKey != "" {
+			// Persisted node in SQLite registry: verify registered apiKey
+			if subtle.ConstantTimeCompare([]byte(apiKey), []byte(storedKey)) != 1 {
+				log.Printf("[AUTH_ALERT] [DENIED] Edge node key mismatch against SQLite registry for %s (remote: %s)", nodeID, remoteAddr)
+				return "", status.Errorf(codes.Unauthenticated, "invalid credentials for node %s", nodeID)
+			}
+			s.mu.Lock()
+			session = &NodeSession{
+				NodeID:      nodeID,
+				APIKey:      storedKey,
+				Hostname:    hostname,
+				Group:       group,
+				RemoteAddr:  remoteAddr,
+				LastSeen:    time.Now(),
+				CommandChan: make(chan *copsecproto.SOARCommand, 128),
+			}
+			s.nodes[nodeID] = session
+			s.mu.Unlock()
+			log.Printf("[AUTH] Restored edge node session from SQLite registry: %s (Host: %s, Group: %s, Addr: %s)", nodeID, hostname, group, remoteAddr)
+		} else {
+			// New node enrollment: verify fleet key credentials
+			authorized := false
+			if expectedFleetKey != "" {
+				fleetKeys := md.Get("x-fleet-key")
+				if len(fleetKeys) > 0 && subtle.ConstantTimeCompare([]byte(fleetKeys[0]), []byte(expectedFleetKey)) == 1 {
+					authorized = true
+				} else if subtle.ConstantTimeCompare([]byte(apiKey), []byte(expectedFleetKey)) == 1 {
+					authorized = true
+				}
+			}
+
+			if !authorized {
+				log.Printf("[AUTH_ALERT] [DENIED] Enrollment rejected for unregistered edge node: %s (remote: %s, group: %s) - invalid or missing fleet key", nodeID, remoteAddr, group)
+				return "", status.Errorf(codes.Unauthenticated, "unauthorized edge node enrollment: invalid fleet key")
+			}
+
+			s.mu.Lock()
+			session = &NodeSession{
+				NodeID:      nodeID,
+				APIKey:      apiKey,
+				Hostname:    hostname,
+				Group:       group,
+				RemoteAddr:  remoteAddr,
+				LastSeen:    time.Now(),
+				CommandChan: make(chan *copsecproto.SOARCommand, 128),
+			}
+			s.nodes[nodeID] = session
+			s.mu.Unlock()
+			log.Printf("[AUTH] Enrolled and registered new edge node with valid fleet key: %s (Host: %s, Group: %s, Addr: %s)", nodeID, hostname, group, remoteAddr)
+		}
+	} else {
+		// Storage is nil: check fleetKey or accept with warning
+		if expectedFleetKey != "" {
+			fleetKeys := md.Get("x-fleet-key")
+			if (len(fleetKeys) == 0 || subtle.ConstantTimeCompare([]byte(fleetKeys[0]), []byte(expectedFleetKey)) != 1) &&
+				subtle.ConstantTimeCompare([]byte(apiKey), []byte(expectedFleetKey)) != 1 {
+				return "", status.Errorf(codes.Unauthenticated, "unauthorized edge node credentials")
+			}
+		}
+		s.mu.Lock()
+		session = &NodeSession{
+			NodeID:      nodeID,
+			APIKey:      apiKey,
+			Hostname:    hostname,
+			Group:       group,
+			RemoteAddr:  remoteAddr,
+			LastSeen:    time.Now(),
+			CommandChan: make(chan *copsecproto.SOARCommand, 128),
+		}
+		s.nodes[nodeID] = session
+		s.mu.Unlock()
 	}
-	s.mu.Unlock()
 
 	// Persist to storage node registry
-	if s.storage != nil {
+	if s.storage != nil && session != nil {
 		_ = s.storage.RegisterOrUpdateNode(&NodeRegistryRecord{
 			NodeID:          nodeID,
-			APIKey:          apiKey,
+			APIKey:          session.APIKey,
 			Hostname:        hostname,
 			GroupName:       group,
 			RemoteAddr:      remoteAddr,
@@ -1088,8 +1186,25 @@ func (s *CentralServer) GetTotalEvents() uint64 {
 	return atomic.LoadUint64(&s.totalEventsProcessed)
 }
 
-// StartGRPCServer initializes the gRPC listener with CopsecStreamServiceServer registration and aggressive keepalive policies.
-func StartGRPCServer(addr string, server *CentralServer) (*grpc.Server, error) {
+// UnaryAuthInterceptor validates incoming RPC calls against node credentials.
+func (s *CentralServer) UnaryAuthInterceptor(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+	if _, err := s.authenticate(ctx); err != nil {
+		return nil, err
+	}
+	return handler(ctx, req)
+}
+
+// StreamAuthInterceptor validates incoming streaming RPC calls.
+func (s *CentralServer) StreamAuthInterceptor(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+	if _, err := s.authenticate(ss.Context()); err != nil {
+		return err
+	}
+	return handler(srv, ss)
+}
+
+// StartGRPCServer initializes the gRPC listener with CopsecStreamServiceServer registration,
+// authentication interceptors, aggressive keepalive policies, and TLS 1.3 / mTLS transport security.
+func StartGRPCServer(addr string, server *CentralServer, extraOpts ...grpc.ServerOption) (*grpc.Server, error) {
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to listen on %s: %w", addr, err)
@@ -1108,7 +1223,53 @@ func StartGRPCServer(addr string, server *CentralServer) (*grpc.Server, error) {
 		PermitWithoutStream: true,
 	})
 
-	grpcServer := grpc.NewServer(keepaliveParams, enforcementPolicy)
+	serverOpts := []grpc.ServerOption{
+		keepaliveParams,
+		enforcementPolicy,
+		grpc.UnaryInterceptor(server.UnaryAuthInterceptor),
+		grpc.StreamInterceptor(server.StreamAuthInterceptor),
+	}
+
+	// Check environment variables for TLS configuration
+	tlsCertFile := strings.TrimSpace(os.Getenv("COPSEC_GRPC_TLS_CERT"))
+	tlsKeyFile := strings.TrimSpace(os.Getenv("COPSEC_GRPC_TLS_KEY"))
+	tlsCAFile := strings.TrimSpace(os.Getenv("COPSEC_GRPC_TLS_CA"))
+
+	if tlsCertFile != "" && tlsKeyFile != "" {
+		cert, err := tls.LoadX509KeyPair(tlsCertFile, tlsKeyFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load gRPC TLS keypair (%s, %s): %w", tlsCertFile, tlsKeyFile, err)
+		}
+		tlsConfig := &tls.Config{
+			Certificates: []tls.Certificate{cert},
+			MinVersion:   tls.VersionTLS13,
+		}
+		if tlsCAFile != "" {
+			caPEM, err := os.ReadFile(tlsCAFile)
+			if err != nil {
+				return nil, fmt.Errorf("failed to read gRPC client CA (%s): %w", tlsCAFile, err)
+			}
+			pool := x509.NewCertPool()
+			if !pool.AppendCertsFromPEM(caPEM) {
+				return nil, fmt.Errorf("failed to parse valid PEM certificates from %s", tlsCAFile)
+			}
+			tlsConfig.ClientCAs = pool
+			tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
+			log.Printf("[SECURITY NOTICE] gRPC Control Plane: Enforcing mTLS with Client CA %s", tlsCAFile)
+		} else {
+			log.Printf("[SECURITY NOTICE] gRPC Control Plane: TLS 1.3 transport security active (cert: %s)", tlsCertFile)
+		}
+		serverOpts = append(serverOpts, grpc.Creds(credentials.NewTLS(tlsConfig)))
+	} else {
+		host, _, _ := net.SplitHostPort(addr)
+		if host != "127.0.0.1" && host != "localhost" && host != "::1" && host != "" {
+			log.Printf("[SECURITY WARNING] [ALERT] gRPC Control Plane listening on %s WITHOUT TLS encryption. Set COPSEC_GRPC_TLS_CERT and COPSEC_GRPC_TLS_KEY in production.", addr)
+		}
+	}
+
+	serverOpts = append(serverOpts, extraOpts...)
+
+	grpcServer := grpc.NewServer(serverOpts...)
 	copsecproto.RegisterCopsecStreamServiceServer(grpcServer, server)
 	if server.fleetManager != nil {
 		server.fleetManager.RegisterService(grpcServer)

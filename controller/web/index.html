@@ -1547,6 +1547,25 @@
 
   <!-- Core Dashboard, Routing & SOAR Execution Application Script -->
   <script>
+    // Security & Sanitization Helpers (XSS & Shell Escape)
+    function escapeHTML(str) {
+      if (str === null || str === undefined) return '';
+      return String(str).replace(/[&<>'"]/g, tag => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
+      }[tag] || tag));
+    }
+    const escapeHtml = escapeHTML;
+
+    function sanitizeShellArg(val) {
+      if (!val) return '127.0.0.1';
+      const str = String(val).trim();
+      const safeIpPattern = /^[a-fA-F0-9:.]+$/;
+      if (!safeIpPattern.test(str)) {
+        return '127.0.0.1';
+      }
+      return str.replace(/'/g, "'\\''");
+    }
+
     // Authentication & API Key Management
     function getStoredAPIKey() {
       const urlParams = new URLSearchParams(window.location.search);
@@ -2137,7 +2156,7 @@
         tr.style.cursor = 'pointer';
         tr.onclick = () => navigateTo('alerts', { source_ip: act.ip });
         tr.innerHTML = `
-          <td style="font-weight: 600; color: var(--text);">${act.ip}</td>
+          <td style="font-weight: 600; color: var(--text);">${escapeHTML(act.ip)}</td>
           <td>${getISOBadge(act.country_code)}</td>
           <td style="font-weight: 600;">${act.hits}</td>
           <td>${getSeverityBadge('', act.peak_score)}</td>
@@ -2165,9 +2184,9 @@
       tr.innerHTML = `
         <td style="color: var(--text-muted);">${timeStr}</td>
         <td>${getISOBadge(ev.country_code)}</td>
-        <td style="font-weight: 600; color: var(--text);">${ev.source_ip}</td>
+        <td style="font-weight: 600; color: var(--text);">${escapeHTML(ev.source_ip || '-')}</td>
         <td>${getSeverityBadge(ev.severity, ev.threat_score)}</td>
-        <td>${ev.mitre_id ? `<span class="badge badge-mitre">[${ev.mitre_id}]</span>` : '-'}</td>
+        <td>${ev.mitre_id ? `<span class="badge badge-mitre">[${escapeHTML(ev.mitre_id)}]</span>` : '-'}</td>
         <td style="${ruleStyle}">${escapeHTML(ev.rule_matched)}</td>
       `;
 
@@ -2205,11 +2224,11 @@
       tr.innerHTML = `
         <td style="color: var(--text-muted);">${timeStr}</td>
         <td>${getISOBadge(ev.country_code)}</td>
-        <td style="font-weight: 600; color: var(--text);">${ev.source_ip}</td>
+        <td style="font-weight: 600; color: var(--text);">${escapeHTML(ev.source_ip || '-')}</td>
         <td>${getLayerBadge(ev.layer)}</td>
-        <td>${ev.status_code || '-'}</td>
+        <td>${escapeHTML(ev.status_code || '-')}</td>
         <td>${getSeverityBadge(ev.severity, ev.threat_score)}</td>
-        <td>${ev.mitre_id ? `<span class="badge badge-mitre">[${ev.mitre_id}]</span>` : '-'}</td>
+        <td>${ev.mitre_id ? `<span class="badge badge-mitre">[${escapeHTML(ev.mitre_id)}]</span>` : '-'}</td>
         <td style="${ruleStyle}">${escapeHTML(ev.rule_matched)}</td>
         <td style="max-width: 380px; overflow: hidden; text-overflow: ellipsis; color: var(--text-muted);">${escapeHTML(ev.raw_line)}</td>
       `;
@@ -2405,9 +2424,9 @@
                 tr.innerHTML = `
                   <td style="color: var(--text-muted);">${timeStr}</td>
                   <td>${getISOBadge(ev.country_code)}</td>
-                  <td style="font-weight: 600; color: var(--text);">${ev.source_ip}</td>
+                  <td style="font-weight: 600; color: var(--text);">${escapeHTML(ev.source_ip || '-')}</td>
                   <td>${getSeverityBadge(ev.severity, ev.threat_score)}</td>
-                  <td>${ev.mitre_id ? `<span class="badge badge-mitre">[${ev.mitre_id}]</span>` : '-'}</td>
+                  <td>${ev.mitre_id ? `<span class="badge badge-mitre">[${escapeHTML(ev.mitre_id)}]</span>` : '-'}</td>
                   <td style="${ruleStyle}">${escapeHTML(ev.rule_matched)}</td>
                 `;
                 dashRecent.appendChild(tr);
@@ -2474,14 +2493,14 @@
         let actionButtons = '';
         if (currentAlertsView === 'RESOLVED') {
           actionButtons = `
-            <button class="btn btn-action" onclick="event.stopPropagation(); openDrawerFromAlert('${srcIP}')">[INSPECT CASE]</button>
+            <button class="btn btn-action" onclick="event.stopPropagation(); openDrawerFromAlert(this.closest('tr').dataset.sourceIp)">[INSPECT CASE]</button>
             <button class="btn btn-action" style="color: var(--text-muted);" onclick="event.stopPropagation(); restoreAlert('${a.id || srcIP}')">[REOPEN]</button>
           `;
         } else {
           actionButtons = `
-            <button class="btn btn-action" onclick="event.stopPropagation(); triageAction('ban', '${srcIP}', ${a.id || 0})">[XDP DROP]</button>
-            <button class="btn btn-action" onclick="event.stopPropagation(); triageAction('tarpit', '${srcIP}', ${a.id || 0})">[TARPIT]</button>
-            <button class="btn btn-action" onclick="event.stopPropagation(); openDrawerFromAlert('${srcIP}')">[INSPECT]</button>
+            <button class="btn btn-action" onclick="event.stopPropagation(); triageAction('ban', this.closest('tr').dataset.sourceIp, ${a.id || 0})">[XDP DROP]</button>
+            <button class="btn btn-action" onclick="event.stopPropagation(); triageAction('tarpit', this.closest('tr').dataset.sourceIp, ${a.id || 0})">[TARPIT]</button>
+            <button class="btn btn-action" onclick="event.stopPropagation(); openDrawerFromAlert(this.closest('tr').dataset.sourceIp)">[INSPECT]</button>
             <button class="btn btn-action" style="color: var(--text-muted);" onclick="dismissAlert(event, '${a.id || srcIP}')">[DISMISS]</button>
           `;
         }
@@ -2489,9 +2508,9 @@
         tr.innerHTML = `
           <td style="color: var(--text-muted);">${timeStr}</td>
           <td>${getISOBadge(a.country_code)}</td>
-          <td style="font-weight: 600; color: var(--text); cursor: pointer;" onclick="openDrawerFromAlert('${srcIP}')">${srcIP}</td>
+          <td style="font-weight: 600; color: var(--text); cursor: pointer;" onclick="openDrawerFromAlert(this.parentElement.dataset.sourceIp)">${escapeHTML(srcIP)}</td>
           <td>${getSeverityBadge(a.severity, a.threat_score)}</td>
-          <td>${a.mitre_id ? `<span class="badge badge-mitre">[${a.mitre_id}]</span>` : '-'}</td>
+          <td>${a.mitre_id ? `<span class="badge badge-mitre">[${escapeHTML(a.mitre_id)}]</span>` : '-'}</td>
           <td style="color: var(--text);">${escapeHTML(ruleName)}</td>
           <td>${containmentTag}</td>
           <td style="text-align: right; white-space: nowrap;">
@@ -2826,12 +2845,12 @@
           const bannedDate = new Date(b.banned_at_ms || Date.now()).toLocaleTimeString();
 
           tr.innerHTML = `
-            <td style="font-weight: 600; color: var(--red);">${b.ip}</td>
+            <td style="font-weight: 600; color: var(--red);">${escapeHTML(b.ip)}</td>
             <td style="color: var(--text-muted);">${escapeHTML(b.reason || 'Threshold Exceeded')}</td>
             <td>${bannedDate}</td>
             <td><strong>${remainingSec}s</strong> remaining</td>
             <td style="text-align: right;">
-              <button class="btn btn-green" onclick="unbanQuarantineIP('${b.ip}')">[Unban]</button>
+              <button class="btn btn-green" data-ip="${escapeHTML(b.ip)}" onclick="unbanQuarantineIP(this.dataset.ip)">[Unban]</button>
             </td>
           `;
           tbody.appendChild(tr);
@@ -3033,13 +3052,13 @@
         nodes.forEach(n => {
           const tr = document.createElement('tr');
           tr.innerHTML = `
-            <td style="font-weight: 600; color: var(--accent);">${n.node_id}</td>
-            <td>${n.hostname || '-'}</td>
-            <td>${n.group_name || 'DEFAULT'}</td>
-            <td style="color: var(--text-muted);">${n.remote_addr || '-'}</td>
+            <td style="font-weight: 600; color: var(--accent);">${escapeHTML(n.node_id)}</td>
+            <td>${escapeHTML(n.hostname || '-')}</td>
+            <td>${escapeHTML(n.group_name || 'DEFAULT')}</td>
+            <td style="color: var(--text-muted);">${escapeHTML(n.remote_addr || '-')}</td>
             <td>${(n.cpu_usage || 0).toFixed(1)}%</td>
             <td>${(n.memory_usage || 0).toFixed(1)}%</td>
-            <td><span class="badge badge-low">[${n.status || 'ACTIVE'}]</span></td>
+            <td><span class="badge badge-low">[${escapeHTML(n.status || 'ACTIVE')}]</span></td>
           `;
           fleetBody.appendChild(tr);
         });
@@ -3284,7 +3303,7 @@
       const dScore = document.getElementById('drawerScoreBadge');
       if (dScore) dScore.innerHTML = getSeverityBadge(ev.severity, ev.threat_score);
       const dMitre = document.getElementById('drawerMitreBadge');
-      if (dMitre) dMitre.innerHTML = ev.mitre_id ? `<span class="badge badge-mitre">[${ev.mitre_id}]</span>` : '<span class="badge badge-iso">[-]</span>';
+      if (dMitre) dMitre.innerHTML = ev.mitre_id ? `<span class="badge badge-mitre">[${escapeHTML(ev.mitre_id)}]</span>` : '<span class="badge badge-iso">[-]</span>';
       const dISO = document.getElementById('drawerISOBadge');
       if (dISO) dISO.innerHTML = getISOBadge(ev.country_code);
 
@@ -3468,7 +3487,7 @@
 
     function getCurrentRunbookCommands(ev) {
       if (!ev) return [];
-      const ip = ev.source_ip || '127.0.0.1';
+      const ip = sanitizeShellArg(ev.source_ip);
       const layer = (ev.layer || '').toUpperCase();
       const mitre = (ev.mitre_id || '').toUpperCase();
 

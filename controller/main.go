@@ -40,6 +40,10 @@ func main() {
 	autoBanThreshold := flag.Int("auto-ban-threshold", 80, "Threat score threshold for auto-ban")
 	remoteVaultFlag := flag.String("remote-vault", "", "Remote Vault / Controller address to proxy telemetry from (e.g. 192.168.1.11:50051 or 192.168.1.11:8080)")
 	apiKeyFlag := flag.String("api-key", "", "Master API Key for Web SOC authentication (or set COPSEC_API_KEY)")
+	fleetKeyFlag := flag.String("fleet-key", "", "Shared fleet enrollment key for edge nodes (or set COPSEC_FLEET_KEY)")
+	grpcTLSCertFlag := flag.String("grpc-tls-cert", "", "Path to TLS certificate for gRPC ingestion server (or set COPSEC_GRPC_TLS_CERT)")
+	grpcTLSKeyFlag := flag.String("grpc-tls-key", "", "Path to TLS private key for gRPC ingestion server (or set COPSEC_GRPC_TLS_KEY)")
+	grpcTLSCAFlag := flag.String("grpc-tls-ca", "", "Path to Client CA certificate for gRPC mTLS authentication (or set COPSEC_GRPC_TLS_CA)")
 	siemEndpointFlag := flag.String("siem-endpoint", "", "Upstream SIEM Syslog endpoint host:port (e.g. wazuh.lan:514)")
 	siemTransportFlag := flag.String("siem-transport", "UDP", "SIEM Syslog transport protocol ('UDP', 'TCP', or 'TLS')")
 	siemFormatFlag := flag.String("siem-format", "CEF", "SIEM Syslog format ('CEF' or 'JSON')")
@@ -50,6 +54,18 @@ func main() {
 	if *apiKeyFlag != "" {
 		_ = os.Setenv("COPSEC_API_KEY", *apiKeyFlag)
 		SetActiveAPIKey(*apiKeyFlag)
+	}
+	if *fleetKeyFlag != "" {
+		_ = os.Setenv("COPSEC_FLEET_KEY", *fleetKeyFlag)
+	}
+	if *grpcTLSCertFlag != "" {
+		_ = os.Setenv("COPSEC_GRPC_TLS_CERT", *grpcTLSCertFlag)
+	}
+	if *grpcTLSKeyFlag != "" {
+		_ = os.Setenv("COPSEC_GRPC_TLS_KEY", *grpcTLSKeyFlag)
+	}
+	if *grpcTLSCAFlag != "" {
+		_ = os.Setenv("COPSEC_GRPC_TLS_CA", *grpcTLSCAFlag)
 	}
 
 	isStandalone := *standaloneFlag || *pcFlag || strings.EqualFold(strings.TrimSpace(*modeFlag), "standalone")
@@ -208,6 +224,9 @@ func main() {
 
 	// 3. Central gRPC Server & WebSocket Hub
 	centralServer := NewCentralServer(storage, analyzer)
+	if *fleetKeyFlag != "" {
+		centralServer.SetFleetKey(*fleetKeyFlag)
+	}
 	centralServer.SetSigmaEngine(sigmaEngine)
 	centralServer.SetAutoBanPolicy(*autoBan, *autoBanThreshold)
 

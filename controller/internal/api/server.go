@@ -2,7 +2,9 @@ package api
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -214,7 +216,11 @@ func NewCockpitHandler(store *storage.SecurityStorage, forensicsDir, apiKey stri
 		apiKey = strings.TrimSpace(os.Getenv("LAB_PASSWORD"))
 	}
 	if strings.TrimSpace(apiKey) == "" {
-		apiKey = "2951453"
+		buf := make([]byte, 24)
+		if _, err := rand.Read(buf); err == nil {
+			apiKey = hex.EncodeToString(buf)
+			log.Printf("[SECURITY NOTICE] Ephemeral API key initialized for CockpitHandler: %s", apiKey)
+		}
 	}
 	if forensicsDir == "" {
 		forensicsDir = strings.TrimSpace(os.Getenv("COPSEC_FORENSICS_DIR"))
@@ -254,7 +260,7 @@ func (ch *CockpitHandler) handleHealth(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// authenticateOperator verifies the operator API key credentials from headers or parameters.
+// authenticateOperator verifies the operator API key credentials from headers (strictly headers only, no query params).
 func (ch *CockpitHandler) authenticateOperator(r *http.Request) bool {
 	var token string
 	if key := strings.TrimSpace(r.Header.Get("X-API-Key")); key != "" {
@@ -264,26 +270,32 @@ func (ch *CockpitHandler) authenticateOperator(r *http.Request) bool {
 		if len(parts) == 2 && strings.EqualFold(parts[0], "Bearer") {
 			token = strings.TrimSpace(parts[1])
 		}
-	} else if qToken := strings.TrimSpace(r.URL.Query().Get("token")); qToken != "" {
-		token = qToken
 	}
 
-	if token == "" {
+	if token == "" || ch.apiKey == "" {
 		return false
 	}
 
-	expected := ch.apiKey
-	if expected == "" {
-		expected = "2951453"
-	}
-
-	return subtle.ConstantTimeCompare([]byte(token), []byte(expected)) == 1
+	return subtle.ConstantTimeCompare([]byte(token), []byte(ch.apiKey)) == 1
 }
 
 // handleFleet handles GET /api/fleet returning real-time node telemetry JSON.
+// Enforces operator authentication.
 func (ch *CockpitHandler) handleFleet(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, `{"error":"Method Not Allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	if !ch.authenticateOperator(r) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Header().Set("WWW-Authenticate", `Bearer realm="CoPSeC SOC Control Plane"`)
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": false,
+			"error":   "Authentication required: missing or invalid operator credentials",
+			"code":    http.StatusUnauthorized,
+		})
 		return
 	}
 

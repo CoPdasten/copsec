@@ -16,12 +16,13 @@ import (
 	copsecproto "github.com/copsec/collector/proto"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
 )
 
 const (
 	// DefaultControllerEndpoint is the Tier 2 Controller gRPC service location.
-	DefaultControllerEndpoint = "pardus1:50051"
+	DefaultControllerEndpoint = "127.0.0.1:50051"
 	// DefaultReaperInterval is the standard audit and purge ticker period.
 	DefaultReaperInterval = 15 * time.Second
 )
@@ -312,31 +313,65 @@ func (bm *BanManager) GetAuditHistory() []UnbanAuditEvent {
 	return cp
 }
 
-// dialSecureController creates an authenticated mTLS connection or insecure fallback for testing.
+// dialSecureController creates an authenticated mTLS or TLS 1.3 connection to the controller.
 func dialSecureController(ctx context.Context, endpoint string) (*grpc.ClientConn, error) {
+	host, _, err := net.SplitHostPort(endpoint)
+	if err != nil || host == "" {
+		host = endpoint
+	}
+
+	serverName := strings.TrimSpace(os.Getenv("COPSEC_TLS_SERVER_NAME"))
+	if serverName == "" {
+		serverName = host
+	}
+
 	tlsCfg := TLSConfig{
 		CACertPath:     "/etc/copsec/certs/ca.crt",
 		ClientCertPath: "/etc/copsec/certs/client.crt",
 		ClientKeyPath:  "/etc/copsec/certs/client.key",
-		ServerName:     "pardus1",
+		ServerName:     serverName,
+	}
+	if envCA := strings.TrimSpace(os.Getenv("COPSEC_TLS_CA")); envCA != "" {
+		tlsCfg.CACertPath = envCA
+	}
+	if envCert := strings.TrimSpace(os.Getenv("COPSEC_TLS_CLIENT_CERT")); envCert != "" {
+		tlsCfg.ClientCertPath = envCert
+	}
+	if envKey := strings.TrimSpace(os.Getenv("COPSEC_TLS_CLIENT_KEY")); envKey != "" {
+		tlsCfg.ClientKeyPath = envKey
 	}
 
+	// 1. Try full mTLS connection
 	conn, err := BuildSecureClientConn(ctx, endpoint, tlsCfg, nil)
 	if err == nil {
 		return conn, nil
 	}
 
-	// Fallback to local / insecure dial if certificates are not yet provisioned
+	// 2. Server TLS fallback (verify server root CA)
 	caPEM, err := os.ReadFile(tlsCfg.CACertPath)
 	if err == nil {
 		pool := x509.NewCertPool()
 		if pool.AppendCertsFromPEM(caPEM) {
-			creds := credentials.NewTLS(&tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS13})
-			return grpc.DialContext(ctx, endpoint, grpc.WithTransportCredentials(creds), grpc.WithBlock())
+			creds := credentials.NewTLS(&tls.Config{
+				RootCAs:    pool,
+				MinVersion: tls.VersionTLS13,
+				ServerName: serverName,
+			})
+			return grpc.DialContext(ctx, endpoint,
+				grpc.WithTransportCredentials(creds),
+				grpc.WithBlock(),
+				grpc.WithKeepaliveParams(keepalive.ClientParameters{Time: 10 * time.Second, Timeout: 3 * time.Second}),
+			)
 		}
 	}
 
-	return grpc.DialContext(ctx, endpoint,
-		grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{InsecureSkipVerify: true})),
-		grpc.WithKeepaliveParams(keepalive.ClientParameters{Time: 10 * time.Second, Timeout: 3 * time.Second}))
+	// 3. Insecure dial strictly permitted for loopback / local dev (never InsecureSkipVerify)
+	if host == "127.0.0.1" || host == "localhost" || host == "::1" {
+		return grpc.DialContext(ctx, endpoint,
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+			grpc.WithKeepaliveParams(keepalive.ClientParameters{Time: 10 * time.Second, Timeout: 3 * time.Second}),
+		)
+	}
+
+	return nil, fmt.Errorf("failed to establish secure TLS connection to %s: root CA or certificates missing/invalid", endpoint)
 }

@@ -18,6 +18,7 @@ import (
 	"github.com/copsec/collector/internal/bpf"
 	"github.com/copsec/collector/internal/cluster"
 	"github.com/copsec/collector/internal/dpi"
+	"github.com/copsec/collector/internal/management"
 	"github.com/copsec/collector/internal/network"
 	"github.com/copsec/collector/pkg/bgp"
 	"github.com/copsec/collector/pkg/dns"
@@ -52,7 +53,13 @@ func main() {
 	controllerIPFlag := flag.String("controller-ip", "", "Controller IP address (auto-configures gRPC target)")
 	gossipPortFlag := flag.Int("gossip-port", 7946, "Port for Memberlist Gossip threat replication")
 	gossipJoinFlag := flag.String("gossip-join", "", "Initial Memberlist Gossip peer(s) to join (comma-separated host:port)")
-	mgmtPortFlag := flag.Int("mgmt-port", 50052, "Port for dynamic rule management gRPC service")
+	mgmtPortFlag := flag.Int("mgmt-port", 50052, "Port for dynamic rule management gRPC service (defaults to 127.0.0.1:50052)")
+	mgmtListenFlag := flag.String("mgmt-listen", "", "Address or Unix socket path for dynamic rule management gRPC service (default: 127.0.0.1:<mgmt-port>)")
+	enableRemoteMgmtFlag := flag.Bool("enable-remote-mgmt", false, "Explicitly permit binding dynamic rule management to remote/non-loopback network interfaces")
+	mgmtSecretFlag := flag.String("mgmt-secret", "", "Authoritative pre-shared key or Bearer token for management gRPC service (or via COPSEC_MGMT_KEY env var)")
+	mgmtTLSCertFlag := flag.String("mgmt-tls-cert", "", "Path to TLS certificate PEM for management gRPC service (required if remote management is enabled)")
+	mgmtTLSKeyFlag := flag.String("mgmt-tls-key", "", "Path to TLS private key PEM for management gRPC service (required if remote management is enabled)")
+	mgmtTLSCAFlag := flag.String("mgmt-tls-ca", "", "Path to Client CA certificate PEM for mutual TLS (mTLS) client verification")
 	enableTarpitFlag := flag.Bool("enable-tarpit", true, "Enable Asymmetric Zero-Window XDP Tarpit engine")
 	enableSynProxyFlag := flag.Bool("enable-syn-proxy", true, "Enable Stateful Kernel TCP SYN-Proxy mitigation")
 	enableBGPFlag := flag.Bool("enable-bgp", false, "Enable Autonomous BGP-4 Anycast & RFC 7999 RTBH signaling engine")
@@ -241,14 +248,29 @@ func main() {
 		defer gossipCluster.Shutdown()
 	}
 
-	// 5f. Start Dynamic Rule Reloader Management Endpoint
+	// 5f. Start Dynamic Rule Reloader Management Endpoint (Hardened loopback/TLS gRPC)
 	dynamicEngine := dpi.NewDynamicEngine(dpi.GetEmbeddedSignatures())
-	mgmtLis, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", *mgmtPortFlag))
-	if err == nil {
-		mgmtServer, err := dpi.StartManagementServer(mgmtLis, dynamicEngine)
-		if err == nil {
-			defer mgmtServer.Stop()
-		}
+
+	mgmtListenAddr := strings.TrimSpace(*mgmtListenFlag)
+	if mgmtListenAddr == "" {
+		mgmtListenAddr = fmt.Sprintf("127.0.0.1:%d", *mgmtPortFlag)
+	}
+
+	mgmtCfg := &management.Config{
+		ListenAddr:       mgmtListenAddr,
+		EnableRemoteMgmt: *enableRemoteMgmtFlag,
+		AuthSecret:       *mgmtSecretFlag,
+		TLSCertFile:      *mgmtTLSCertFlag,
+		TLSKeyFile:       *mgmtTLSKeyFlag,
+		ClientCAFile:     *mgmtTLSCAFlag,
+	}
+
+	mgmtServer, err := management.NewServer(mgmtCfg, dpi.NewManagementServer(dynamicEngine))
+	if err != nil {
+		log.Printf("[MANAGEMENT_GRPC] [WARN] Hardened management server initialization note: %v", err)
+	} else {
+		mgmtServer.Start()
+		defer mgmtServer.Stop()
 	}
 
 	if *enableTarpitFlag {

@@ -1,14 +1,16 @@
-# CoPSeC Enterprise Production-Grade IPS/WAF & Threat Intelligence Suite
+# CoPSeC High-Performance eBPF/XDP Active Defense Engine & Architecture Reference
 
 ## Architecture Overview
 
-This document describes the upgraded CoPSeC Agent ecosystem, now featuring:
+This document describes the CoPSeC Agent ecosystem, featuring:
 - **Suricata NIDS/NIPS Ingestion** for real-time signature-based threat detection
 - **eBPF/XDP Kernel-Level Packet Dropping** for high-performance traffic filtering
+- **Hardened Management Plane (`:50052`)** with loopback default, Bearer auth, and TLS 1.3/mTLS
 - **Automated Forensic PCAP Capture** for incident response analysis
 - **Wazuh SIEM Integration** with custom decoders and rules
 - **Systemd Hardening Profile** for production-grade security isolation
-- **Zero-Copy POSIX Shared Memory IPC** for real-time telemetry
+- **Zero-Copy POSIX Shared Memory & eBPF RingBuf IPC** for real-time telemetry
+- **Offline-First SQLite Cache & Ring Buffer** for edge node resilience
 - **Fail2ban Escalation Engine** with automatic CIDR `/24` aggregation
 - **MITRE ATT&CK Threat Intelligence** with offline STIX 2.1 parsing
 
@@ -311,16 +313,42 @@ copsec/
 
 ---
 
-## 13. Future Enhancements
+## 13. Management Plane Security (`SensorManagementService` on `:50052`)
 
-- [ ] Full eBPF bytecode embedding (libbpf integration)
-- [ ] Machine learning anomaly detection
-- [ ] Real-time threat feed aggregation
-- [ ] Multi-node cluster mode
-- [ ] GraphQL API for SOC dashboards
-- [ ] Passive OS fingerprinting (p0f)
-- [ ] Hardware offload (SmartNIC support)
+### Zero-Trust Access Control
+1. **Loopback Default Binding**: The dynamic rule management listener binds exclusively to `127.0.0.1:50052` or UNIX domain socket `/var/run/copsec/mgmt.sock`. Wildcard (`0.0.0.0`) binding is rejected by default.
+2. **Explicit Remote Management**: Remote interface binding strictly requires `--enable-remote-mgmt`.
+3. **Authoritative Interceptors**: gRPC Unary and Stream Server Interceptors authenticate all calls using pre-shared Bearer tokens (`--mgmt-secret` or `COPSEC_MGMT_KEY`). Mismatched or missing credentials return `codes.Unauthenticated`.
+4. **TLS 1.3 & mTLS Enforcement**: All non-loopback management connections mandate TLS 1.3 encryption (`--mgmt-tls-cert` and `--mgmt-tls-key`) with optional mutual TLS client certificate verification (`--mgmt-tls-ca`).
 
 ---
 
-**CoPSeC Agent v1.0.0** | Enterprise Threat Prevention & NIDS/IPS Suite | 2026-08-18
+## 14. Telemetry Architecture & Scalable Storage Realism
+
+### SQLite Boundaries
+- **Edge Cache & Offline Spooling**: SQLite (WAL mode) functions as an ultra-lightweight, zero-dependency local buffer for edge nodes to survive network partitions without memory growth.
+- **Concurrency Ceiling**: Single-writer database locking limits SQLite under sustained high-EPS workloads (>10k EPS).
+
+### Enterprise High-EPS Pipelines
+- **Kafka / Redpanda**: Partitioned message bus for decoupling high-volume edge event streams.
+- **ClickHouse**: Columnar storage for petabyte-scale security telemetry and sub-second analytical queries.
+- **PostgreSQL / TimescaleDB**: Relational case management, MITRE ATT&CK correlation, and incident lifecycle state.
+- **Enterprise SIEM Streaming**: Non-blocking `RingChannelBuffer` streaming CEF and RFC 5424 Syslog over mTLS to Wazuh, Splunk, and Elastic.
+
+---
+
+## 15. Laboratory PoC Validation & Phase 2 Roadmap
+
+### Verified Laboratory PoC Environment
+- Benchmarks (111k PPS, sub-millisecond fast-path drops) were verified in an isolated 4-node virtualized lab environment (CachyOS, Pardus Linux, Kali Linux) using synthetic load generators (`hping3`, `scapy`) and RFC 5737 documentation test blocks (`198.51.100.0/24`).
+
+### Phase 2 Evolution
+- [ ] Multi-region bare-metal & cloud VPS deployments (AWS, Hetzner, Vultr with physical NIC SR-IOV/XDP).
+- [ ] Live internet ingress testing and in-the-wild threat telemetry.
+- [ ] Distributed WAN fuzzing and upstream BGP Anycast flapping resilience.
+- [ ] Native ClickHouse and Kafka direct producer export plugins.
+- [ ] eBPF CO-RE expansion across Linux kernels 5.15 through 6.12+.
+
+---
+
+**CoPSeC** | High-Performance eBPF/XDP Active Defense Engine | Validated in Multi-Node Lab PoC

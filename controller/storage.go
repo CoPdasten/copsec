@@ -1125,6 +1125,20 @@ func (s *StorageEngine) RegisterOrUpdateNode(node *NodeRegistryRecord) error {
 	return err
 }
 
+// GetNodeAPIKey retrieves the registered API key for a given node ID from SQLite.
+func (s *StorageEngine) GetNodeAPIKey(nodeID string) (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	query := `SELECT api_key FROM node_registry WHERE node_id = ?`
+	var key string
+	err := s.db.QueryRow(query, nodeID).Scan(&key)
+	if err != nil {
+		return "", err
+	}
+	return key, nil
+}
+
 // GetRegisteredNodes retrieves all known edge nodes from SQLite.
 func (s *StorageEngine) GetRegisteredNodes() ([]NodeRegistryRecord, error) {
 	s.mu.RLock()

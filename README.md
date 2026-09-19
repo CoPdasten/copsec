@@ -2,9 +2,9 @@
   <img src="banner.png" alt="CoPSeC Banner" width="100%" />
 </p>
 
-# CoPSeC — Enterprise Autonomous XDR & Kernel-Level Threat Prevention Platform
+# CoPSeC — High-Performance Open-Source eBPF/XDP Active Defense Engine (Validated in Multi-Node Lab PoC)
 
-> Autonomous, kernel-native intrusion detection, deception honey-tokens, pre-attack PCAP forensics, cryptographic audit chaining, eBPF EDR, and real-time multi-node SOC triage ecosystem built with Go, eBPF/XDP, C++, and SQLite.
+> High-performance, kernel-native intrusion detection, deception honey-tokens, pre-attack PCAP forensics, cryptographic audit chaining, eBPF EDR, and real-time multi-node SOC triage ecosystem built with Go, eBPF/XDP, C++, and SQLite.
 > 
 > **Geliştirici / Developer:** **Eyyüp Efe Adıgüzel** ([eyupadiguzel20@gmail.com](mailto:eyupadiguzel20@gmail.com))
 
@@ -67,7 +67,7 @@ CoPSeC partitions responsibilities between high-speed kernel edge sensors (**Col
 │ │  └─ 60-Second Sliding Window Multi-Signal Fusion (Scan + Auth + Entropy + Canary)   │ │
 │ ├─────────────────────────────────────────────────────────────────────────────────────┤ │
 │ │  Immutable Storage & Cryptographic Verification                                     │ │
-│ │  ├─ SQLite Forensic State & Incident History Store                                  │ │
+│ │  ├─ SQLite Forensic State & Incident History Store (Offline-First Local Ledger)     │ │
 │ │  ├─ SHA-256 Sequential Hash-Chaining (`prev_hash` -> `entry_hash` Non-Repudiation)  │ │
 │ │  └─ Integrity Audit Verification Engine (`/api/audit/verify-integrity`)             │ │
 │ ├─────────────────────────────────────────────────────────────────────────────────────┤ │
@@ -95,23 +95,23 @@ CoPSeC partitions responsibilities between high-speed kernel edge sensors (**Col
 
 ## Enterprise System Architecture & Core Capabilities Matrix
 
-CoPSeC is engineered across **6 core architectural pillars** that decouple high-speed edge packet handling from hardened central intelligence, delivering banking-grade zero-trust isolation and non-repudiable cryptographic auditability:
+CoPSeC is engineered across **6 core architectural pillars** that decouple high-speed edge packet handling from hardened central intelligence, delivering defense-in-depth zero-trust isolation and non-repudiable cryptographic auditability:
 
-| Core Pillar | Operational Domain | Key Technical Mechanisms & Guarantees | SRE Target / SLA |
+| Core Pillar | Operational Domain | Key Technical Mechanisms & Guarantees | Lab Benchmark Target / SLA |
 | :--- | :--- | :--- | :--- |
-| **1. Kernel & L4 Fast-Path** | Edge DMZ Sensor | eBPF/XDP driver-level hook, `XDP_DROP`, eBPF Syscall PID-Kill, Zero-Window TCP Tarpit (`:2223`) | $< 10\,\mu\text{s}$ Line-Rate Drop |
+| **1. Kernel & L4 Fast-Path** | Edge DMZ Sensor | eBPF/XDP driver-level hook, `XDP_DROP`, eBPF Syscall PID-Kill, Zero-Window TCP Tarpit (`:2223`) | $< 10\,\mu\text{s}$ Fast-Path Drop (Lab Measured) |
 | **2. Algorithmic Detection & Deception** | Edge & Central Core | Shannon Entropy math ($\mathcal{H} \ge 3.8$), Shadow Honeypots (`:8088`), Canary Honey-Tokens, 22 Behavioral Rules | $0\%$ False Positives on Canaries |
 | **3. Forensic Memory Management** | Volatile RAM Edge | 30s in-memory circular ring buffer, atomic snapshot clone, async PCAP serializer (`0xa1b2c3d4`) | Zero Disk Wear during Ingress |
-| **4. 3-Tier Decoupled Topology** | Distributed Network | Stateless Tier 1 Edge (DMZ), isolated Tier 2 Vault (Management VLAN), cloaked Tier 3 SOC Cockpit | Zero Cross-Tier Blast Radius |
-| **5. Zero-Trust & Vault Hardening** | Central Vault / DB | 100% prepared SQL (`?`), append-only audit trail, trigger-enforced `UPDATE`/`DELETE` abort, SHA-256 hash chaining, cloaked listener, TLS 1.3 mTLS | Non-Repudiable Cryptographic Ledger |
-| **6. Automation & SRE Test Suite** | Enterprise CI/CD | `deploy.sh` (`set -euo pipefail`), `stress_copsec.sh` load benchmarker, `orchestrate_copsec_audit.sh` 4-node verification engine | 100% PASS on 9/9 Audit Metrics |
+| **4. 3-Tier Decoupled Topology** | Distributed Network | Stateless Tier 1 Edge (DMZ), isolated Tier 2 Controller / Local Store (Management VLAN), cloaked Tier 3 SOC Cockpit | Zero Cross-Tier Blast Radius |
+| **5. Zero-Trust & Storage Hardening** | Edge Cache / State | 100% prepared SQL (`?`), append-only audit trail, trigger-enforced `UPDATE`/`DELETE` abort, SHA-256 hash chaining, cloaked listener, TLS 1.3 mTLS | Non-Repudiable Cryptographic Ledger |
+| **6. Automation & Lab SRE Suite** | Distributed Testbed | `deploy.sh` (`set -euo pipefail`), `stress_copsec.sh` load benchmarker, `orchestrate_copsec_audit.sh` 4-node verification engine | 100% PASS on 9/9 Audit Metrics |
 
 ---
 
 ### Deep-Dive: The 6 Core Engineering Pillars
 
 #### 1. Kernel & L4 Fast-Path
-* **Driver-Level `XDP_DROP`:** Offloads packet filtering directly into network interface card (NIC) driver rings via eBPF/XDP before Linux kernel socket allocation (`sk_buff`), neutralizing multi-gigabit volumetric attacks at line rate.
+* **Driver-Level `XDP_DROP`:** Offloads packet filtering directly into network interface card (NIC) driver rings via eBPF/XDP before Linux kernel socket allocation (`sk_buff`), neutralizing line-rate volumetric packet floods at the driver layer before socket allocation.
 * **eBPF EDR & Process Injection Termination (`eBPF PID-Kill`):** Attaches kernel kprobes/tracepoints to critical system calls (`ptrace`, `process_vm_writev`, `memfd_create`, `execve`). Instantly identifies unauthorized memory patching, reflective shellcode injection, or fileless execution, and terminates compromised PIDs via `SIGKILL`.
 * **Zero-Window TCP Tarpit (`:2223`):** Exploits TCP window flow control by advertising a window size of `0` upon completing the 3-way handshake. Traps aggressive port scanners and exploit spiders in indefinite wait-states, exhausting attacker connection pools with near-zero host CPU/memory consumption.
 
@@ -128,12 +128,12 @@ CoPSeC is engineered across **6 core architectural pillars** that decouple high-
 * **Non-Blocking Snapshot Isolation:** Decouples packet ingestion from disk serialization through atomic memory copies, delegating disk writes to background Go workers without live traffic drops.
 * **On-Demand & Triggered PCAP Capture:** Generates complete libpcap-compatible captures containing pre-attack, exploitation, and post-attack network packets formatted with standard `0xa1b2c3d4` magic headers.
 
-#### 4. 3-Tier Decoupled Enterprise Topology
-* **Tier 1: Stateless Edge Sensor (DMZ / `chachy`):** Exposes network-facing honeypots, tarpits, and eBPF kernel hooks. Maintains zero persistent state; streams telemetric events over mTLS to the central vault.
-* **Tier 2: Primary Vault & Controller (Management VLAN / `pardus1`):** Ingests telemetry, executes automated SOAR playbooks, maintains state in WAL SQLite, and enforces cryptographic audit chains. Cloaked from external ingress.
+#### 4. 3-Tier Decoupled Distributed Topology
+* **Tier 1: Stateless Edge Sensor (DMZ / `chachy`):** Exposes network-facing honeypots, tarpits, and eBPF kernel hooks. Maintains zero persistent state; streams telemetric events over mTLS to the central controller.
+* **Tier 2: Primary Controller & State Store (Management VLAN / `pardus1`):** Ingests telemetry, executes automated SOAR playbooks, maintains state in an append-only WAL SQLite store (optimized for offline-first single-node resilience), and enforces cryptographic audit chains. Cloaked from external ingress.
 * **Tier 3: SOC Cockpit & Operator Station (Isolated Workstation / `pardus2`):** Accessible exclusively through authorized, encrypted SSH port forwarding tunnels (`127.0.0.1:8080`), ensuring complete zero-trust access control.
 
-#### 5. Zero-Trust Architecture & Vault Hardening
+#### 5. Zero-Trust Architecture & State Hardening
 * **100% Prepared SQLite Statements:** All database interactions strictly employ parameterized queries (`?`), immunizing the platform against SQL injection vulnerabilities.
 * **Append-Only Immutable Audit Ledger:** The `security_audit_trail` table is safeguarded by strict database triggers (`prevent_audit_update`, `prevent_audit_delete`) that raise hard exceptions on any `UPDATE` or `DELETE` attempt.
 * **Sequential SHA-256 Hash Chaining:** Every audit record incorporates the cryptographic hash of the antecedent row:
@@ -209,7 +209,11 @@ CoPSeC Pro advances single-node lab verification into a multi-node distributed d
 ### 2. Zero-Downtime Dynamic DFA Rule Compilation & Hot-Swap (`atomic.Pointer`)
 * **Lock-Free Atomic Pointer Swaps:** `collector/internal/dpi/reloader.go` encapsulates `atomic.Pointer[AhoCorasickDFA]`, completely decoupling high-speed concurrent readers from rule updates.
 * **Deterministic Jump-Table Compilation:** Rule signatures are compiled into an immutable Aho-Corasick automaton with precomputed `[256]*trieNode` jump transitions (`curr.children[b] = curr.fail.children[b]`) via BFS, eliminating fail pointer chaining loops during packet scanning.
-* **Remote gRPC Management Endpoint:** Implements `SensorManagementService` (`proto/management.proto`) on the collector, allowing central controller nodes (e.g. `pardus1`) to remotely push updated threat signature bundles without restarting the sensor.
+* **Hardened gRPC Management Endpoint (`SensorManagementService` on `:50052`):**
+  - **Loopback Default Binding:** Defaults strictly to local loopback (`127.0.0.1:50052`) or Unix Domain Socket (`/var/run/copsec/mgmt.sock`). Binding to `0.0.0.0` or external interfaces is strictly rejected by default to prevent unauthorized network exposure.
+  - **Explicit Remote Management Activation:** Exposing the endpoint to external interfaces strictly requires `--enable-remote-mgmt`.
+  - **Authoritative Bearer Token / PSK Interceptors:** Enforces gRPC Unary and Stream Server Interceptors validating an authoritative pre-shared key (configured via `--mgmt-secret` or `COPSEC_MGMT_KEY` environment variable). Evaluated via constant-time comparison (`subtle.ConstantTimeCompare`) to eliminate timing side channels; all unauthenticated RPCs are rejected with `codes.Unauthenticated`.
+  - **Mandatory TLS 1.3 & mTLS:** Non-loopback listeners strictly require TLS 1.3 (`--mgmt-tls-cert` and `--mgmt-tls-key`). Supports mutual TLS (`--mgmt-tls-ca`) with client certificate verification, preventing unencrypted or unauthorized management access over external networks.
 
 ### 3. Distributed Threat Synchronization (Gossip / Memberlist Protocol)
 * **Decentralized Reputation Propagation:** `collector/internal/cluster/gossip.go` implements a lightweight mesh broadcaster using HashiCorp `memberlist`.
@@ -371,13 +375,72 @@ CoPSeC eliminates persistent disk writes entirely by introducing an in-memory, i
    - Formats memory buffers with valid libpcap global file headers:
      - **Magic Number:** `0xa1b2c3d4` (Standard microsecond libpcap format).
      - **Version:** `2.4` | **Snaplen:** `65535` | **LinkType:** `1` (DLT_EN10MB - Ethernet).
-   - Atomically flushes to the forensic vault:
+   - Atomically flushes to the local forensic directory:
      ```text
      /var/log/copsec/forensics/incident_<ATTACKER_IP>_<TIMESTAMP_MS>.pcap
      ```
    - Instantly ready for deep packet inspection via **Wireshark**, `tshark`, **Zeek**, or automated DFIR sandboxes.
 
 ---
+
+## Telemetry Architecture & Scalability Realism: SQLite Boundaries vs. Enterprise Scale-Out
+
+A critical requirement of resilient systems architecture is aligning data storage backends with realistic data-plane throughput, concurrency patterns, and write characteristics.
+
+### Architectural Positioning of SQLite: Edge Local Cache & Offline Ring Buffer
+* **Edge Node Local Resilience:** In CoPSeC, SQLite (configured with WAL mode, parameterized queries, and cryptographic tamper triggers) is positioned strictly as an **ultra-lightweight, zero-dependency local cache and offline ring buffer** on individual edge nodes and single-host installations.
+* **Offline-First Resilience:** When network partitioning or centralized controller outages occur, edge sensors spool security events into local SQLite storage (`/var/lib/copsec/buffer.db`), preventing memory exhaustion and preserving audit continuity. When network connectivity is restored, events are safely drained and forwarded.
+* **Concurrency & Concurrency Boundaries at High EPS:** SQLite relies on database-level single-writer serialization (even under WAL mode). Under sustained enterprise workloads exceeding thousands of events per second (EPS) across distributed sensor fleets, single-file SQLite encounters:
+  - Writer lock contention and database lock timeouts (`busy_timeout`).
+  - Increased filesystem write amplification and commit latency.
+  - Read query starvation during heavy incident write spikes.
+
+### Enterprise Scale-Out Telemetry Architecture (High-EPS Production)
+For enterprise multi-sensor deployments requiring high-throughput, centralized telemetry ingestion (>50,000 EPS), CoPSeC provides decoupled streaming integration points:
+
+```text
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│                           EDGE COLLECTORS (FLEET NODES)                                 │
+│  [ eBPF / XDP Driver Ring ] ──(zero-copy)──> [ BPF RingBuf (telemetry_ringbuf) ]         │
+│                                                          │                              │
+│                                      Local Queue (Offline-First)                        │
+│                                                          ▼                              │
+│                                            [ SQLite WAL Local Spool ]                   │
+└──────────────────────────────────────────┬──────────────────────────────────────────────┘
+                                           │ gRPC / TLS 1.3 mTLS Stream
+                                           ▼
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│                        ENTERPRISE STREAMING & STORAGE SINK ARCHITECTURE                  │
+│                                                                                         │
+│  ┌────────────────────────┐  ┌────────────────────────┐  ┌───────────────────────────┐  │
+│  │   Apache Kafka /       │  │   ClickHouse OLAP      │  │   PostgreSQL /            │  │
+│  │   Redpanda Message Bus │  │   Columnar Store       │  │   TimescaleDB             │  │
+│  ├────────────────────────┤  ├────────────────────────┤  ├───────────────────────────┤  │
+│  │ • Distributed queue    │  │ • Petabyte-scale logs  │  │ • Relational case tracking│  │
+│  │ • >500k EPS buffering  │  │ • Sub-second queries   │  │ • Hypertables for history │  │
+│  │ • Decoupled consumers  │  │ • Billions of events   │  │ • Structured SOAR state   │  │
+│  └────────────────────────┘  └────────────────────────┘  └───────────────────────────┘  │
+│                                           │                                             │
+│                                           ▼                                             │
+│                      ┌──────────────────────────────────────────┐                       │
+│                      │    Enterprise SIEM Forwarding Pipeline   │                       │
+│                      │   (ArcSight CEF & RFC 5424 Syslog/mTLS)  │                       │
+│                      │   ──> Wazuh / Splunk / Elastic / QRadar  │                       │
+│                      └──────────────────────────────────────────┘                       │
+└─────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+1. **Apache Kafka / Redpanda Distributed Ingestion Bus:**
+   - Decouples high-frequency edge collectors from backend analytic pipelines.
+   - Buffers burst DDoS event floods (>500,000 EPS) with partition-based horizontal scalability, avoiding backpressure on kernel packet hooks.
+2. **ClickHouse High-Performance Analytical Engine:**
+   - Columnar data format with hardware vectorization (SIMD) and aggressive compression.
+   - Designed for sub-second analytical queries over billions of eBPF fast-path events, Shannon entropy scores, and network drop logs.
+3. **PostgreSQL / TimescaleDB Structured Store:**
+   - Relational case management, analyst triage tracking, and MITRE ATT&CK mapping.
+   - TimescaleDB hypertables provide automated time-range chunking and retention policy pruning.
+4. **Enterprise SIEM Streaming Pipeline:**
+   - Non-blocking `RingChannelBuffer` in `controller/internal/export/siem.go` streaming standardized ArcSight CEF and RFC 5424 Syslog messages over TCP/TLS with mutual TLS (mTLS) to Wazuh, Splunk, Elastic, or IBM QRadar.
 
 ## Quick Start & Autonomous Cluster Ignition
 
@@ -641,6 +704,12 @@ The unified installers accept both `--flag=value` and `--flag value` syntaxes:
 | `--gossip-port=<port>` | `7946` | Collector | Port for Memberlist Gossip threat replication |
 | `--gossip-join=<ip:port>` | `""` | Collector | Initial Gossip mesh peer to join (e.g. `192.168.1.8:7946`) |
 | `--ban-reaper-interval=<dur>`| `15s` | Collector / Standalone | Dynamic eBPF ban TTL eviction reaper interval |
+| `--mgmt-listen=<addr>` | `127.0.0.1:50052` | Collector | Dynamic rule management listener address or UDS socket |
+| `--enable-remote-mgmt` | `false` | Collector | Permit binding management gRPC to remote/non-loopback network interfaces |
+| `--mgmt-secret=<token>` | `""` (`$COPSEC_MGMT_KEY`) | Collector | Authoritative Bearer token / pre-shared key for gRPC authentication |
+| `--mgmt-tls-cert=<path>` | `""` | Collector | TLS certificate PEM file for management gRPC service (required if remote) |
+| `--mgmt-tls-key=<path>` | `""` | Collector | TLS private key PEM file for management gRPC service (required if remote) |
+| `--mgmt-tls-ca=<path>` | `""` | Collector | Client CA certificate PEM file for mutual TLS (mTLS) client verification |
 | `--grpc-port=<port>` | `50051` | Controller / Vault | Central gRPC ingestion port |
 | `--port=<port>` | `8080` | Controller / Vault / Cockpit | Web SOC Cockpit HTTP port |
 | `--db-path=<path>` | `/var/lib/copsec/vault.db`| Controller / Vault / Standalone | Immutable SQLite WAL ledger database path |
@@ -922,18 +991,26 @@ ctest --test-dir build --output-on-failure
 | SQLite Trigger Guard                | CRYPTOGRAPHIC_VIOLATION on Edit | PASS         |
 +-------------------------------------+---------------------------------+--------------+
 
->>> FINAL AUDIT VERDICT: 100% PASS - BANKING-GRADE ZERO-TRUST & CRYPTOGRAPHIC COMPLIANCE CERTIFIED <<<
+>>> FINAL AUDIT VERDICT: 100% PASS - 4-NODE LAB POC VERIFIED (ZERO-TRUST ISOLATION & CRYPTOGRAPHIC INTEGRITY PASS) <<<
 ```
 
 ---
 
-## Production Benchmark Scorecard & Hardware Boundary Resilience
+## Laboratory PoC Benchmark Scorecard & Boundary Stress Testing
 
-CoPSeC Pro has been subjected to aggressive hardware boundary stress testing (`tests/lab/copsec_dualstack_autonomous_test.sh` and `tests/lab/copsec_hardcore_resilience_test.sh`) executed from dedicated adversary nodes (`kali` / `192.168.1.12` / `fd00::12`) against frontline edge sensors (`pardus1` / `192.168.1.8` / `fd00::8`).
+CoPSeC Pro has been subjected to boundary stress testing (`tests/lab/copsec_dualstack_autonomous_test.sh` and `tests/lab/copsec_hardcore_resilience_test.sh`) executed across an isolated 4-node virtualized lab cluster.
 
-### Production Resilience & Throughput Scorecard
+> [!IMPORTANT]
+> **Testing Environment & Parameter Transparency**:
+> All benchmark figures (e.g. 111,111 PPS, 21.8 µs drop latency, sub-millisecond drops) were measured in an **isolated 4-node virtualized lab environment** running on local hypervisors:
+> - **Nodes**: `chachy` (CachyOS controller), `pardus1` (Pardus Linux 6.12 seed sensor), `pardus2` (Pardus Linux 6.12 mesh sensor), `kali` (Kali Linux 6.19 adversary).
+> - **Network Topology**: Isolated virtual bridge network utilizing RFC 5737 documentation test blocks (`198.51.100.0/24` TEST-NET-2, `192.0.2.0/24` TEST-NET-1, RFC 3849 `2001:db8::/32`).
+> - **Ingress Generation Tools**: Synthetic packet injectors (`hping3 --flood -S`, `scapy`, and raw Python socket packet synthesizers).
+> - **Operational Boundary**: These results confirm the microsecond-scale efficiency of eBPF/XDP driver fast-path discarding under synthetic packet saturation in a virtualized testbed. True multi-gigabit line-rate throughput in enterprise production environments is subject to physical NIC hardware capabilities (SR-IOV, native driver XDP, RSS multi-queue), PCIe bus limits, and transit network routing conditions.
 
-| Test Gate / Metric | Attack Vector & Conditions | Production Result / Measured SLA | Performance Guarantee | SRE Status |
+### Laboratory Resilience & Throughput Scorecard
+
+| Test Gate / Metric | Attack Vector & Conditions | Lab PoC Result / Measured Latency | Security Mechanism | Status |
 | :--- | :--- | :--- | :--- | :--- |
 | **Gate 1: IPv6 Line-Rate Fast-Path** | 100k+ PPS IPv6 SYN flood (`fd00::12` $\to$ `fd00::8`) | **111,111 PPS @ 0.02180 ms (21.8 µs)** | Sub-millisecond NIC driver discard | **PASS (100%)** |
 | **Gate 2: Asymmetric IPv6 Tarpit** | High-concurrency TCP probes to port `:2223` | **0 Sockets Allocated** (`ss -tlpn`), zero-window stall | Complete socket pool exhaustion defense | **PASS (100%)** |
@@ -986,6 +1063,27 @@ sudo ./tests/lab/copsec_dualstack_autonomous_test.sh
 # Or run the hardcore resilience stress suite:
 sudo ./tests/lab/copsec_hardcore_resilience_test.sh
 ```
+
+---
+
+## Future Roadmap & Phase 2 Evolution
+
+CoPSeC is transitioning from an audited multi-node laboratory proof-of-concept into a globally distributed edge defense ecosystem. Key technical milestones scheduled for Phase 2 include:
+
+1. **Multi-Region Bare-Metal & Cloud VPS Deployments:**
+   - Deploying geographically distributed edge sensors across commercial VPS and bare-metal providers (AWS EC2 c6i/c7g instances with ENA express, Hetzner Cloud, Vultr Bare Metal).
+   - Validating native driver-level XDP performance against physical NICs (Intel `i40e`/`ice`, Mellanox `mlx5_core`, Broadcom `bnxt_en`) under real-world kernel IRQ affinity configurations.
+2. **Real-World Internet Ingress Testing & In-the-Wild Threat Validation:**
+   - Exposing frontline DMZ honeypots and tarpits to public IPv4/IPv6 internet transit to capture authentic, non-synthetic exploit patterns, scanner automation, and distributed botnet waves.
+   - Continuous refinement of Shannon entropy heuristic thresholds against live obfuscated traffic and emerging zero-day stagers.
+3. **Distributed WAN Fuzzing & BGP Anycast Peering Resilience:**
+   - Subjecting the autonomous BGP-4 speaker (`collector/pkg/bgp/speaker.go`) to upstream WAN fuzzing, transit route flapping, and high-latency AS path reconvergence.
+   - Validating RTBH signaling latency across diverse autonomous systems and upstream transit providers.
+4. **Centralized High-EPS Scalable Storage Drivers:**
+   - Implementing native ClickHouse batch ingestion clients directly within the controller daemon for petabyte-scale event analytics.
+   - Implementing native Apache Kafka / Redpanda producer drivers with backpressure-tolerant partitioned streaming for enterprise deployments exceeding 500,000 EPS.
+5. **Dynamic eBPF CO-RE (Compile Once - Run Everywhere) Expansion:**
+   - Transitioning BPF compilation pipelines to leverage BPF Type Format (BTF) and CO-RE across Linux kernels 5.15 LTS through 6.12+ without requiring local host kernel headers or Clang toolchains.
 
 ---
 

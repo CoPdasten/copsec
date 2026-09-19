@@ -124,3 +124,16 @@ func TestManualUnbanAudit(t *testing.T) {
 		t.Errorf("Expected ActionType 'MANUAL_UNBAN', got %s", auditEv.ActionType)
 	}
 }
+
+// TestDialSecureControllerDynamicSNI verifies that dialSecureController derives SNI dynamically
+// and rejects insecure remote endpoints without CA verification (F5).
+func TestDialSecureControllerDynamicSNI(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	// Remote endpoint without CA certificates should fail rather than insecurely skipping verification
+	_, err := dialSecureController(ctx, "remote.threat-intel.corp:50051")
+	if err == nil {
+		t.Fatal("Expected dial to fail for unverified remote host without CA certificates")
+	}
+}

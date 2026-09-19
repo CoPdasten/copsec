@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -19,6 +21,7 @@ import (
 	"github.com/copsec/collector/pkg/honeypot"
 	copsecproto "github.com/copsec/collector/proto"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
 )
@@ -167,8 +170,49 @@ func (c *ControllerClient) connect(ctx context.Context) (*grpc.ClientConn, copse
 		PermitWithoutStream: true,
 	})
 
+	var creds credentials.TransportCredentials = insecure.NewCredentials()
+
+	caPath := strings.TrimSpace(os.Getenv("COPSEC_TLS_CA"))
+	if caPath == "" {
+		for _, p := range []string{"/etc/copsec/certs/ca.crt", "/var/lib/copsec/ca.crt", "./certs/ca.crt"} {
+			if _, err := os.Stat(p); err == nil {
+				caPath = p
+				break
+			}
+		}
+	}
+
+	if caPath != "" {
+		if caPEM, err := os.ReadFile(caPath); err == nil {
+			certPool := x509.NewCertPool()
+			if certPool.AppendCertsFromPEM(caPEM) {
+				host, _, err := net.SplitHostPort(c.cfg.ServerAddress)
+				if err != nil || host == "" {
+					host = c.cfg.ServerAddress
+				}
+				tlsConfig := &tls.Config{
+					RootCAs:    certPool,
+					MinVersion: tls.VersionTLS13,
+					ServerName: host,
+				}
+				if sni := strings.TrimSpace(os.Getenv("COPSEC_TLS_SERVER_NAME")); sni != "" {
+					tlsConfig.ServerName = sni
+				}
+
+				clientCertPath := strings.TrimSpace(os.Getenv("COPSEC_TLS_CLIENT_CERT"))
+				clientKeyPath := strings.TrimSpace(os.Getenv("COPSEC_TLS_CLIENT_KEY"))
+				if clientCertPath != "" && clientKeyPath != "" {
+					if clCert, err := tls.LoadX509KeyPair(clientCertPath, clientKeyPath); err == nil {
+						tlsConfig.Certificates = []tls.Certificate{clCert}
+					}
+				}
+				creds = credentials.NewTLS(tlsConfig)
+			}
+		}
+	}
+
 	opts := []grpc.DialOption{
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithTransportCredentials(creds),
 		grpc.WithPerRPCCredentials(c.identity),
 		keepaliveOpts,
 		grpc.WithBlock(),

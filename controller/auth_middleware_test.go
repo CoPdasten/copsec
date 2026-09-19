@@ -71,6 +71,28 @@ func TestAuthMiddleware(t *testing.T) {
 			path:           "/static/app.js",
 			expectedStatus: http.StatusOK,
 		},
+		{
+			name:           "Unauthenticated /api/fleet is blocked (F4)",
+			path:           "/api/fleet",
+			expectedStatus: http.StatusUnauthorized,
+		},
+		{
+			name:           "Authenticated /api/fleet is permitted (F4)",
+			path:           "/api/fleet",
+			headers:        map[string]string{"X-API-Key": testKey},
+			expectedStatus: http.StatusOK,
+		},
+		{
+			name:           "Unauthenticated /api/pcap/samples is blocked (F4)",
+			path:           "/api/pcap/samples",
+			expectedStatus: http.StatusUnauthorized,
+		},
+		{
+			name:           "Authenticated /api/pcap/samples is permitted (F4)",
+			path:           "/api/pcap/samples",
+			headers:        map[string]string{"X-API-Key": testKey},
+			expectedStatus: http.StatusOK,
+		},
 	}
 
 	for _, tc := range tests {

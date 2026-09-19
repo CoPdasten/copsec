@@ -59,12 +59,14 @@ func InitAPIKey() string {
 			}
 			globalAPIKey = hex.EncodeToString(buf)
 
-			// Attempt to persist generated key so restarts do not invalidate credentials
+			// Attempt to persist generated key with strict 0600 permissions
 			persistedPath := ""
 			for _, target := range []string{"/etc/copsec/api_key", "/var/lib/copsec/api_key", "./data/api_key"} {
 				dir := filepath.Dir(target)
-				if err := os.MkdirAll(dir, 0755); err == nil {
-					if err := os.WriteFile(target, []byte(globalAPIKey+"\n"), 0644); err == nil {
+				if err := os.MkdirAll(dir, 0700); err == nil {
+					_ = os.Chmod(dir, 0700)
+					if err := os.WriteFile(target, []byte(globalAPIKey+"\n"), 0600); err == nil {
+						_ = os.Chmod(target, 0600)
 						persistedPath = target
 						break
 					}
@@ -109,8 +111,8 @@ type AuthErrorResponse struct {
 // isWhitelistedRoute checks if the incoming path is permitted without authentication.
 // Whitelists only static assets (e.g. /, /index.html, /static/*, /favicon.ico, CSS/JS) and health probes (/health).
 func isWhitelistedRoute(path string) bool {
-	// Exact matches for root, health, favicon, and fleet monitoring probes
-	if path == "/" || path == "/index.html" || path == "/favicon.ico" || path == "/health" || path == "/api/fleet" || path == "/api/pcap/samples" {
+	// Exact matches for root, health, and favicon
+	if path == "/" || path == "/index.html" || path == "/favicon.ico" || path == "/health" {
 		return true
 	}
 

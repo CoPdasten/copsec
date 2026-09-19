@@ -55,6 +55,9 @@ func LoadOrCreateIdentity(path string) (*IdentityManager, error) {
 	keyBytes := make([]byte, 24)
 	_, _ = rand.Read(keyBytes)
 	apiKey := fmt.Sprintf("cps_live_%s", hex.EncodeToString(keyBytes))
+	if envKey := strings.TrimSpace(os.Getenv("COPSEC_API_KEY")); envKey != "" {
+		apiKey = envKey
+	}
 
 	hostname, _ := os.Hostname()
 
@@ -115,11 +118,17 @@ func (m *IdentityManager) GetGroup() string {
 func (m *IdentityManager) GetRequestMetadata(ctx context.Context, uri ...string) (map[string]string, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return map[string]string{
+	md := map[string]string{
 		"x-node-id":    m.identity.NodeID,
 		"x-api-key":    m.identity.APIKey,
 		"x-node-group": m.GetGroup(),
-	}, nil
+	}
+	if fleetKey := strings.TrimSpace(os.Getenv("COPSEC_FLEET_KEY")); fleetKey != "" {
+		md["x-fleet-key"] = fleetKey
+	} else if apiKey := strings.TrimSpace(os.Getenv("COPSEC_API_KEY")); apiKey != "" {
+		md["x-fleet-key"] = apiKey
+	}
+	return md, nil
 }
 
 // RequireTransportSecurity implements grpc credentials.PerRPCCredentials interface.
