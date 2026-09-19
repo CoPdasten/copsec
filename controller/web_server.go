@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -45,6 +46,7 @@ var embeddedWebFS embed.FS
 // WebSOCServer hosts the embedded Minimalist Web SOC, REST APIs, and WebSocket hub.
 type WebSOCServer struct {
 	mu          sync.RWMutex
+	startTime   time.Time
 	listenAddr  string
 	server      *CentralServer
 	storage     *StorageEngine
@@ -79,6 +81,7 @@ func NewWebSOCServer(
 	wsHub *WSHub,
 ) *WebSOCServer {
 	ws := &WebSOCServer{
+		startTime:      time.Now(),
 		listenAddr:     listenAddr,
 		server:         server,
 		storage:        storage,
@@ -205,6 +208,9 @@ func (ws *WebSOCServer) Start() error {
 	mux.HandleFunc("/api/rules/reload", ws.handleRulesReload)
 	mux.HandleFunc("/api/nodes", ws.handleNodes)
 	mux.HandleFunc("/api/whitelist", ws.handleWhitelist)
+	mux.HandleFunc("/api/v1/blocks", ws.handleV1Blocks)
+	mux.HandleFunc("/api/blocks", ws.handleV1Blocks)
+	mux.HandleFunc("/api/v1/status", ws.handleV1Status)
 	mux.HandleFunc("/api/geoip/stats", ws.handleGeoIPStats)
 	mux.HandleFunc("/api/geoip/lookup", ws.handleGeoIPLookup)
 	mux.HandleFunc("/api/ipinfo/lookup", ws.handleIPInfoLookup)
@@ -1328,6 +1334,162 @@ func (ws *WebSOCServer) handleWhitelist(w http.ResponseWriter, r *http.Request) 
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+func (ws *WebSOCServer) handleV1Blocks(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	switch r.Method {
+	case http.MethodGet:
+		type BlockEntryDTO struct {
+			CIDR        string    `json:"cidr"`
+			Description string    `json:"description"`
+			AddedAt     time.Time `json:"added_at"`
+		}
+
+		var blocks []BlockEntryDTO
+		if ws.ttlManager != nil {
+			for _, b := range ws.ttlManager.GetActiveBans() {
+				cidr := b.IP
+				if !strings.Contains(cidr, "/") {
+					cidr = cidr + "/32"
+				}
+				blocks = append(blocks, BlockEntryDTO{
+					CIDR:        cidr,
+					Description: b.Reason,
+					AddedAt:     time.UnixMilli(b.BanTimeMs),
+				})
+			}
+		}
+		if blocks == nil {
+			blocks = []BlockEntryDTO{}
+		}
+		_ = json.NewEncoder(w).Encode(blocks)
+
+	case http.MethodPost:
+		var req struct {
+			CIDR        string `json:"cidr"`
+			Description string `json:"description"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, `{"error":"invalid JSON request body"}`, http.StatusBadRequest)
+			return
+		}
+
+		target := strings.TrimSpace(req.CIDR)
+		if target == "" {
+			http.Error(w, `{"error":"missing cidr"}`, http.StatusBadRequest)
+			return
+		}
+
+		cleanTarget := strings.TrimSuffix(target, "/32")
+		if ip := net.ParseIP(cleanTarget); ip != nil {
+			if wlEngine := whitelist.GetDefaultEngine(); wlEngine != nil && wlEngine.IsWhitelisted(cleanTarget) {
+				w.WriteHeader(http.StatusConflict)
+				_ = json.NewEncoder(w).Encode(map[string]string{
+					"error": "action rejected: target IP is protected by active whitelist rule",
+				})
+				return
+			}
+			if ws.ttlManager != nil {
+				desc := req.Description
+				if desc == "" {
+					desc = "Manual CLI block"
+				}
+				_, err := ws.ttlManager.BanIP(cleanTarget, desc, 86400, TierExtendedQuarantine)
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
+			}
+		} else if _, ipNet, err := net.ParseCIDR(target); err == nil {
+			if ws.ttlManager != nil {
+				desc := req.Description
+				if desc == "" {
+					desc = "Manual CLI block"
+				}
+				_, _ = ws.ttlManager.BanIP(ipNet.String(), desc, 86400, TierExtendedQuarantine)
+			}
+		} else {
+			http.Error(w, `{"error":"invalid IP or CIDR format"}`, http.StatusBadRequest)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"cidr":    target,
+		})
+
+	case http.MethodDelete:
+		target := strings.TrimSpace(r.URL.Query().Get("cidr"))
+		if target == "" {
+			var req struct {
+				CIDR string `json:"cidr"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&req)
+			target = strings.TrimSpace(req.CIDR)
+		}
+
+		if target == "" {
+			http.Error(w, `{"error":"missing cidr parameter"}`, http.StatusBadRequest)
+			return
+		}
+
+		cleanTarget := strings.TrimSuffix(target, "/32")
+		if ws.ttlManager != nil {
+			_ = ws.ttlManager.UnbanIP(cleanTarget)
+		}
+
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"cidr":    target,
+		})
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (ws *WebSOCServer) handleV1Status(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	var memStats runtime.MemStats
+	runtime.ReadMemStats(&memStats)
+
+	uptime := time.Since(ws.startTime).Round(time.Second)
+
+	activeBans := 0
+	if ws.ttlManager != nil {
+		activeBans = len(ws.ttlManager.GetActiveBans())
+	}
+
+	eps := uint64(0)
+	if ws.server != nil {
+		eps = ws.server.GetEPS()
+	}
+
+	status := map[string]interface{}{
+		"status":        "operational",
+		"mode":          "enterprise-cluster",
+		"version":       "v1.6.0",
+		"uptime":        uptime.String(),
+		"uptime_sec":    int64(uptime.Seconds()),
+		"active_bans":   activeBans,
+		"lpm_blocks":    activeBans,
+		"ebpf_emulated": false,
+		"eps":           eps,
+		"system": map[string]interface{}{
+			"goroutines": runtime.NumGoroutine(),
+			"num_cpu":    runtime.NumCPU(),
+			"alloc_mb":   memStats.Alloc / (1024 * 1024),
+			"sys_mb":     memStats.Sys / (1024 * 1024),
+		},
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(status)
 }
 
 func (ws *WebSOCServer) handleGeoIPStats(w http.ResponseWriter, r *http.Request) {

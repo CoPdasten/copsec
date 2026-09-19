@@ -406,13 +406,15 @@ make all
 
 # Staging directories
 mkdir -p "$COPSEC_HOME" "$COPSEC_LIB" "$COPSEC_LOG" "${COPSEC_SHARE}/bpf"
-chmod 700 "$COPSEC_HOME" "$COPSEC_LIB" "$COPSEC_LOG"
+chmod 755 "$COPSEC_HOME"
+chmod 700 "$COPSEC_LIB" "$COPSEC_LOG"
 
 # Install binaries
 cp -f bin/copsec-controller /usr/local/bin/ 2>/dev/null || true
 cp -f bin/copsec-collector /usr/local/bin/ 2>/dev/null || true
 cp -f bin/copsec /usr/local/bin/ 2>/dev/null || true
 chmod 755 /usr/local/bin/copsec*
+ln -sf /usr/local/bin/copsec /usr/bin/copsec 2>/dev/null || true
 
 # Install eBPF bytecode objects
 cp -f bpf/*.o "${COPSEC_SHARE}/bpf/"
@@ -426,7 +428,7 @@ if [[ -d "${SCRIPT_DIR}/rules" ]]; then
   cp -rf "${SCRIPT_DIR}/rules" "$COPSEC_HOME/" 2>/dev/null || true
 fi
 
-log_success "Binaries and bytecode installed to /usr/local/bin and ${COPSEC_SHARE}/bpf"
+log_success "Binaries and bytecode installed to /usr/local/bin, /usr/bin, and ${COPSEC_SHARE}/bpf"
 
 # --- 8. Environment File & Credential Hardening ---
 log_step "Generating Hardened Environment & Credentials (/etc/copsec/copsec.env)"
@@ -443,7 +445,11 @@ COPSEC_XDP_MODE="${XDP_MODE}"
 EOF
 
 chmod 600 "$ENV_FILE"
-log_success "Environment file written with chmod 0600 permissions."
+echo "${API_KEY}" > "${COPSEC_HOME}/api_key"
+chmod 644 "${COPSEC_HOME}/api_key"
+echo "http://${CONTROLLER_IP}:8080" > "${COPSEC_HOME}/controller_url"
+chmod 644 "${COPSEC_HOME}/controller_url"
+log_success "Environment file (0600), CLI api_key (0644), and controller_url (0644) written successfully."
 
 # --- 9. Systemd Service Deployment & Service Activation ---
 log_step "Configuring and Starting Background Systemd Service"
@@ -479,6 +485,7 @@ EOF
   log_info "Enabling and launching copsec-controller.service..."
   systemctl daemon-reload
   systemctl enable --now copsec-controller.service
+  systemctl restart copsec-controller.service
   
   sleep 2
   if systemctl is-active --quiet copsec-controller.service; then
@@ -530,6 +537,7 @@ EOF
   log_info "Enabling and launching copsec-collector.service..."
   systemctl daemon-reload
   systemctl enable --now copsec-collector.service
+  systemctl restart copsec-collector.service
 
   sleep 2
   if systemctl is-active --quiet copsec-collector.service; then

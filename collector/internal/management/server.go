@@ -184,6 +184,12 @@ func NewAuthInterceptor(authSecret string) (grpc.UnaryServerInterceptor, grpc.St
 	return unaryInterceptor, streamInterceptor
 }
 
+// NewUnaryAuthInterceptor builds a dedicated gRPC UnaryServerInterceptor enforcing pre-shared Bearer token authentication.
+func NewUnaryAuthInterceptor(authSecret string) grpc.UnaryServerInterceptor {
+	unary, _ := NewAuthInterceptor(authSecret)
+	return unary
+}
+
 // NewTLSConfig constructs a hardened TLS 1.3 configuration with optional mutual TLS (mTLS) client validation.
 func NewTLSConfig(cfg *Config) (*tls.Config, error) {
 	if cfg.TLSCertFile == "" || cfg.TLSKeyFile == "" {

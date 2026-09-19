@@ -46,12 +46,21 @@ struct {
     __type(value, struct ban_entry);
 } banned_ips_v6 SEC(".maps");
 
-// 1c. In-Kernel Longest Prefix Match (LPM) Trie Map (IPv4) for CIDR blocklists
+// 1c. In-Kernel Longest Prefix Match (LPM) Trie Map (IPv4) for CIDR blocklists (block_lpm_map)
 struct lpm_v4_key {
     __u32 prefixlen;
     __u32 data;
 };
 
+struct {
+    __uint(type, BPF_MAP_TYPE_LPM_TRIE);
+    __uint(max_entries, 65536);
+    __uint(map_flags, BPF_F_NO_PREALLOC);
+    __type(key, struct lpm_v4_key);
+    __type(value, __u32); // 1 = drop
+} block_lpm_map SEC(".maps");
+
+// Backward-compatible alias for existing userspace tooling
 struct {
     __uint(type, BPF_MAP_TYPE_LPM_TRIE);
     __uint(max_entries, 65536);
@@ -100,10 +109,10 @@ struct {
     __type(value, __u32);
 } syn_proxy_config SEC(".maps");
 
-// 5. Ring buffer map for zero-copy kernel-to-userspace drop telemetry (256 KB)
+// 5. Ring buffer map for zero-copy kernel-to-userspace drop telemetry (512 KB lockless)
 struct {
     __uint(type, BPF_MAP_TYPE_RINGBUF);
-    __uint(max_entries, 256 * 1024);
+    __uint(max_entries, 512 * 1024);
 } telemetry_ringbuf SEC(".maps");
 
 // 6. Auxiliary Ring buffer for live raw packet stream sampling (512 KB)
@@ -112,7 +121,29 @@ struct {
     __uint(max_entries, 512 * 1024);
 } raw_packet_ringbuf SEC(".maps");
 
-// Telemetry counters
+// High-Performance Per-CPU Array for lockless, contention-free packet metric telemetry
+enum metric_type_t {
+    METRIC_TOTAL   = 0,
+    METRIC_DROPPED = 1,
+    METRIC_PASSED  = 2,
+    METRIC_MAX     = 3
+};
+
+struct {
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __uint(max_entries, METRIC_MAX);
+    __type(key, __u32);
+    __type(value, __u64);
+} metrics_map SEC(".maps");
+
+static __always_inline void increment_metric(__u32 key) {
+    __u64* val = bpf_map_lookup_elem(&metrics_map, &key);
+    if (val) {
+        *val += 1;
+    }
+}
+
+// Global telemetry counters
 struct {
     __uint(type, BPF_MAP_TYPE_ARRAY);
     __uint(max_entries, 6);
@@ -616,9 +647,13 @@ int copsec_xdp(struct xdp_md *ctx) {
     void* data_end = (void *)(long)ctx->data_end;
     void* data = (void *)(long)ctx->data;
     increment_counter(COPSEC_PACKETS_PROCESSED);
+    increment_metric(METRIC_TOTAL);
 
     struct ethhdr* eth = data;
-    if (unlikely((void *)(eth + 1) > data_end)) return XDP_PASS;
+    if (unlikely((void *)(eth + 1) > data_end)) {
+        increment_metric(METRIC_PASSED);
+        return XDP_PASS;
+    }
 
     __u16 proto = bpf_ntohs(eth->h_proto);
 
@@ -627,8 +662,16 @@ int copsec_xdp(struct xdp_md *ctx) {
     // =========================================================================
     if (likely(proto == ETH_P_IP)) {
         struct iphdr* ip = (void *)(eth + 1);
+        if (unlikely((void *)(ip + 1) > data_end)) {
+            increment_metric(METRIC_PASSED);
+            return XDP_PASS;
+        }
+
         __u32 ip_hdr_len = ip->ihl * 4;
-        if (unlikely(ip_hdr_len < sizeof(struct iphdr) || (void *)ip + ip_hdr_len > data_end)) return XDP_PASS;
+        if (unlikely(ip_hdr_len < sizeof(struct iphdr) || (void *)ip + ip_hdr_len > data_end)) {
+            increment_metric(METRIC_PASSED);
+            return XDP_PASS;
+        }
 
         // 0. Immutable Static Bypass for Private / Management / Loopback Networks (RFC 1918)
         __u32 saddr_host = bpf_ntohl(ip->saddr);
@@ -637,6 +680,7 @@ int copsec_xdp(struct xdp_md *ctx) {
                      (saddr_host & 0xFFFF0000) == 0xC0A80000 ||   // 192.168.0.0/16
                      (saddr_host & 0xFF000000) == 0x7F000000)) {   // 127.0.0.0/8
             increment_counter(COPSEC_PACKETS_WHITELISTED);
+            increment_metric(METRIC_PASSED);
             return XDP_PASS;
         }
 
@@ -644,20 +688,25 @@ int copsec_xdp(struct xdp_md *ctx) {
         __u32* is_whitelisted = bpf_map_lookup_elem(&whitelisted_ips, &ip->saddr);
         if (unlikely(is_whitelisted && *is_whitelisted == 1)) {
             increment_counter(COPSEC_PACKETS_WHITELISTED);
+            increment_metric(METRIC_PASSED);
             return XDP_PASS;
         }
 
-        // 1a. In-Kernel LPM Trie CIDR Blocklist Evaluation (BPF_MAP_TYPE_LPM_TRIE)
+        // 1a. In-Kernel LPM Trie CIDR Blocklist Evaluation (block_lpm_map / lpm_blocklist)
         struct lpm_v4_key lpm_k = {
             .prefixlen = 32,
             .data = ip->saddr,
         };
-        __u32* is_lpm_blocked = bpf_map_lookup_elem(&lpm_blocklist, &lpm_k);
+        __u32* is_lpm_blocked = bpf_map_lookup_elem(&block_lpm_map, &lpm_k);
+        if (!is_lpm_blocked) {
+            is_lpm_blocked = bpf_map_lookup_elem(&lpm_blocklist, &lpm_k);
+        }
         if (unlikely(is_lpm_blocked && *is_lpm_blocked == 1)) {
             __u64 now_ns = bpf_ktime_get_ns();
             emit_drop_event(ip, data_end, DROP_REASON_RATE_LIMIT, now_ns);
             emit_packet_sample(data, data_end, DROP_REASON_RATE_LIMIT, 4, now_ns);
             increment_counter(COPSEC_PACKETS_DROPPED);
+            increment_metric(METRIC_DROPPED);
             return XDP_DROP;
         }
 
@@ -680,30 +729,41 @@ int copsec_xdp(struct xdp_md *ctx) {
                 emit_drop_event(ip, data_end, reason, now_ns);
                 emit_packet_sample(data, data_end, reason, 4, now_ns);
                 increment_counter(COPSEC_PACKETS_DROPPED);
+                increment_metric(METRIC_DROPPED);
                 return XDP_DROP;
             }
         }
 
-        // 3. TCP-Specific Active Defenses: Asymmetric Zero-Window Tarpit & Stateful SYN-Proxy
+        // 3. TCP/UDP-Specific Active Defenses & Boundary Checks
         if (ip->protocol == IPPROTO_TCP) {
             struct tcphdr *tcp = (void *)ip + ip_hdr_len;
-            if (likely((void *)(tcp + 1) <= data_end)) {
-                __u32* is_tarpitted = bpf_map_lookup_elem(&tarpit_ips, &ip->saddr);
-                if (unlikely(is_tarpitted && *is_tarpitted == 1)) {
-                    return tarpit_process(eth, ip, tcp, data_end);
-                }
+            if (unlikely((void *)(tcp + 1) > data_end)) {
+                increment_metric(METRIC_PASSED);
+                return XDP_PASS;
+            }
 
-                __u32 cfg_key = 0;
-                __u32 *syn_proxy_on = bpf_map_lookup_elem(&syn_proxy_config, &cfg_key);
-                if (unlikely(syn_proxy_on && *syn_proxy_on == 1)) {
-                    int syn_res = syn_proxy_process(eth, ip, tcp, data_end);
-                    if (syn_res != XDP_PASS) {
-                        return syn_res;
-                    }
+            __u32* is_tarpitted = bpf_map_lookup_elem(&tarpit_ips, &ip->saddr);
+            if (unlikely(is_tarpitted && *is_tarpitted == 1)) {
+                return tarpit_process(eth, ip, tcp, data_end);
+            }
+
+            __u32 cfg_key = 0;
+            __u32 *syn_proxy_on = bpf_map_lookup_elem(&syn_proxy_config, &cfg_key);
+            if (unlikely(syn_proxy_on && *syn_proxy_on == 1)) {
+                int syn_res = syn_proxy_process(eth, ip, tcp, data_end);
+                if (syn_res != XDP_PASS) {
+                    return syn_res;
                 }
+            }
+        } else if (ip->protocol == IPPROTO_UDP) {
+            struct udphdr *udp = (void *)ip + ip_hdr_len;
+            if (unlikely((void *)(udp + 1) > data_end)) {
+                increment_metric(METRIC_PASSED);
+                return XDP_PASS;
             }
         }
 
+        increment_metric(METRIC_PASSED);
         return XDP_PASS;
     }
 
@@ -712,7 +772,10 @@ int copsec_xdp(struct xdp_md *ctx) {
     // =========================================================================
     else if (proto == ETH_P_IPV6) {
         struct ipv6hdr* ip6 = (void *)(eth + 1);
-        if (unlikely((void *)(ip6 + 1) > data_end)) return XDP_PASS;
+        if (unlikely((void *)(ip6 + 1) > data_end)) {
+            increment_metric(METRIC_PASSED);
+            return XDP_PASS;
+        }
 
         // 1. Neighbor Discovery Protocol (NDP) Safeguard:
         // NEVER drop ICMPv6 Neighbor Solicitation/Advertisement or Router Solicitation/Advertisement
@@ -721,6 +784,7 @@ int copsec_xdp(struct xdp_md *ctx) {
             struct icmp6hdr *icmp6 = (void *)(ip6 + 1);
             if ((void *)(icmp6 + 1) <= data_end) {
                 if (icmp6->icmp6_type >= 133 && icmp6->icmp6_type <= 136) {
+                    increment_metric(METRIC_PASSED);
                     return XDP_PASS;
                 }
             }
@@ -731,6 +795,7 @@ int copsec_xdp(struct xdp_md *ctx) {
         if (unlikely((s6[0] & 0xFE) == 0xFC || // RFC 4193 ULA fc00::/7
                      (s6[0] == 0xFE && (s6[1] & 0xC0) == 0x80))) { // fe80::/10
             increment_counter(COPSEC_PACKETS_WHITELISTED);
+            increment_metric(METRIC_PASSED);
             return XDP_PASS;
         }
 
@@ -741,6 +806,7 @@ int copsec_xdp(struct xdp_md *ctx) {
         __u32* is_whitelisted_v6 = bpf_map_lookup_elem(&whitelisted_ips_v6, &v6_key);
         if (unlikely(is_whitelisted_v6 && *is_whitelisted_v6 == 1)) {
             increment_counter(COPSEC_PACKETS_WHITELISTED);
+            increment_metric(METRIC_PASSED);
             return XDP_PASS;
         }
 
@@ -763,6 +829,7 @@ int copsec_xdp(struct xdp_md *ctx) {
                 emit_drop_event_v6(ip6, data_end, reason, now_ns);
                 emit_packet_sample(data, data_end, reason, 6, now_ns);
                 increment_counter(COPSEC_PACKETS_DROPPED);
+                increment_metric(METRIC_DROPPED);
                 return XDP_DROP;
             }
         }
@@ -787,9 +854,11 @@ int copsec_xdp(struct xdp_md *ctx) {
             }
         }
 
+        increment_metric(METRIC_PASSED);
         return XDP_PASS;
     }
 
+    increment_metric(METRIC_PASSED);
     return XDP_PASS;
 }
 

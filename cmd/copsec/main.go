@@ -3,15 +3,19 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -62,17 +66,112 @@ func init() {
 // Global CLI options
 type Config struct {
 	BaseURL   string
+	APIKey    string
 	RulesPath string
 	BPFMap    string
 }
 
-func resolveConfig() Config {
-	baseURL := strings.TrimRight(os.Getenv("COPSEC_CONTROLLER_URL"), "/")
+func readAPIKeyFromEnvFile(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "COPSEC_API_KEY=") {
+			val := strings.TrimPrefix(line, "COPSEC_API_KEY=")
+			val = strings.Trim(val, `"' `)
+			if val != "" {
+				return val
+			}
+		}
+	}
+	return ""
+}
+
+func readControllerEndpointFromEnvFile(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "COPSEC_CONTROLLER_ENDPOINT=") {
+			val := strings.TrimPrefix(line, "COPSEC_CONTROLLER_ENDPOINT=")
+			val = strings.Trim(val, `"' `)
+			if val != "" {
+				host, _, err := net.SplitHostPort(val)
+				if err == nil && host != "" && host != "127.0.0.1" && host != "0.0.0.0" {
+					return "http://" + host + ":8080"
+				}
+			}
+		}
+	}
+	return ""
+}
+
+func readControllerURL() string {
+	if data, err := os.ReadFile("/etc/copsec/controller_url"); err == nil {
+		u := strings.TrimSpace(string(data))
+		if u != "" {
+			return strings.TrimRight(u, "/")
+		}
+	}
+	if ep := readControllerEndpointFromEnvFile("/etc/copsec/copsec.env"); ep != "" {
+		return ep
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		if data, err := os.ReadFile(filepath.Join(home, ".config", "copsec", "controller_url")); err == nil {
+			u := strings.TrimSpace(string(data))
+			if u != "" {
+				return strings.TrimRight(u, "/")
+			}
+		}
+	}
+	return ""
+}
+
+func resolveConfig(flagURL, flagKey, flagRules, flagBPFMap string) Config {
+	// 1. API Key resolution
+	apiKey := strings.TrimSpace(flagKey)
+	if apiKey == "" {
+		apiKey = strings.TrimSpace(os.Getenv("COPSEC_API_KEY"))
+	}
+	if apiKey == "" {
+		if data, err := os.ReadFile("/etc/copsec/api_key"); err == nil {
+			apiKey = strings.TrimSpace(string(data))
+		}
+	}
+	if apiKey == "" {
+		apiKey = readAPIKeyFromEnvFile("/etc/copsec/copsec.env")
+	}
+	if apiKey == "" {
+		if home, err := os.UserHomeDir(); err == nil {
+			if data, err := os.ReadFile(filepath.Join(home, ".config", "copsec", "api_key")); err == nil {
+				apiKey = strings.TrimSpace(string(data))
+			}
+		}
+	}
+
+	// 2. BaseURL resolution
+	baseURL := strings.TrimRight(strings.TrimSpace(flagURL), "/")
+	if baseURL == "" {
+		baseURL = strings.TrimRight(strings.TrimSpace(os.Getenv("COPSEC_CONTROLLER_URL")), "/")
+	}
+	if baseURL == "" {
+		baseURL = readControllerURL()
+	}
 	if baseURL == "" {
 		baseURL = DefaultURL
 	}
 
-	rulesPath := strings.TrimSpace(os.Getenv("COPSEC_RULES_PATH"))
+	// 3. RulesPath resolution
+	rulesPath := strings.TrimSpace(flagRules)
+	if rulesPath == "" {
+		rulesPath = strings.TrimSpace(os.Getenv("COPSEC_RULES_PATH"))
+	}
 	if rulesPath == "" {
 		candidates := []string{
 			"/etc/copsec/rules.yaml",
@@ -91,132 +190,114 @@ func resolveConfig() Config {
 		rulesPath = "/etc/copsec/rules.yaml"
 	}
 
+	// 4. BPFMap resolution
+	bpfMap := strings.TrimSpace(flagBPFMap)
+	if bpfMap == "" {
+		bpfMap = strings.TrimSpace(os.Getenv("COPSEC_BPF_MAP"))
+	}
+	if bpfMap == "" {
+		bpfMap = "/sys/fs/bpf/copsec/lpm_blocklist"
+	}
+
 	return Config{
 		BaseURL:   baseURL,
+		APIKey:    apiKey,
 		RulesPath: rulesPath,
-		BPFMap:    "/sys/fs/bpf/copsec/lpm_blocklist",
+		BPFMap:    bpfMap,
 	}
 }
 
-func main() {
-	args := os.Args[1:]
-	if len(args) == 0 {
-		printHelp()
-		return
-	}
-
-	cfg := resolveConfig()
-	listenAddr := ":8080"
-	isDaemon := false
-
-	// Parse global flags if provided at the start
-	for len(args) > 0 && strings.HasPrefix(args[0], "-") {
-		if args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
-			printHelp()
-			return
-		}
-		if args[0] == "-v" || args[0] == "--version" || args[0] == "version" {
-			printVersion()
-			return
-		}
-		if strings.HasPrefix(args[0], "--url=") {
-			cfg.BaseURL = strings.TrimRight(strings.TrimPrefix(args[0], "--url="), "/")
-			args = args[1:]
-			continue
-		}
-		if args[0] == "-u" || args[0] == "--url" {
-			if len(args) > 1 {
-				cfg.BaseURL = strings.TrimRight(args[1], "/")
-				args = args[2:]
+func parseGlobalArgs(rawArgs []string) (cleaned []string, flagURL, flagKey, flagRules, flagBPFMap, flagListen string, isDaemon, isHelp, isVersion bool) {
+	for i := 0; i < len(rawArgs); i++ {
+		arg := rawArgs[i]
+		if arg == "-h" || arg == "--help" || arg == "help" {
+			if len(rawArgs) == 1 || i == 0 {
+				isHelp = true
 				continue
 			}
 		}
-		if strings.HasPrefix(args[0], "--rules=") {
-			cfg.RulesPath = strings.TrimPrefix(args[0], "--rules=")
-			args = args[1:]
-			continue
-		}
-		if args[0] == "-r" || args[0] == "--rules" {
-			if len(args) > 1 {
-				cfg.RulesPath = args[1]
-				args = args[2:]
+		if arg == "-v" || arg == "--version" || arg == "version" {
+			if len(rawArgs) == 1 || i == 0 {
+				isVersion = true
 				continue
 			}
 		}
-		if strings.HasPrefix(args[0], "--bpf-map=") {
-			cfg.BPFMap = strings.TrimPrefix(args[0], "--bpf-map=")
-			args = args[1:]
-			continue
-		}
-		if args[0] == "-m" || args[0] == "--bpf-map" {
-			if len(args) > 1 {
-				cfg.BPFMap = args[1]
-				args = args[2:]
-				continue
-			}
-		}
-		if strings.HasPrefix(args[0], "--listen=") {
-			listenAddr = strings.TrimPrefix(args[0], "--listen=")
-			args = args[1:]
-			continue
-		}
-		if args[0] == "--listen" {
-			if len(args) > 1 {
-				listenAddr = args[1]
-				args = args[2:]
-				continue
-			}
-		}
-		if args[0] == "--daemon" || args[0] == "-d" {
+		if arg == "-d" || arg == "--daemon" {
 			isDaemon = true
-			args = args[1:]
 			continue
 		}
-		break
-	}
-
-	if isDaemon || (len(args) > 0 && (args[0] == "daemon" || args[0] == "run" || args[0] == "serve" || args[0] == "gateway")) {
-		subArgs := args
-		if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
-			subArgs = args[1:]
+		if strings.HasPrefix(arg, "--url=") {
+			flagURL = strings.TrimPrefix(arg, "--url=")
+			continue
 		}
-		for i := 0; i < len(subArgs); i++ {
-			arg := subArgs[i]
-			if strings.HasPrefix(arg, "--listen=") {
-				listenAddr = strings.TrimPrefix(arg, "--listen=")
-			} else if arg == "--listen" && i+1 < len(subArgs) {
-				listenAddr = subArgs[i+1]
-				i++
-			} else if strings.HasPrefix(arg, "--rules=") {
-				cfg.RulesPath = strings.TrimPrefix(arg, "--rules=")
-			} else if (arg == "--rules" || arg == "-r") && i+1 < len(subArgs) {
-				cfg.RulesPath = subArgs[i+1]
-				i++
-			} else if strings.HasPrefix(arg, "--bpf-map=") {
-				cfg.BPFMap = strings.TrimPrefix(arg, "--bpf-map=")
-			} else if (arg == "--bpf-map" || arg == "-m") && i+1 < len(subArgs) {
-				cfg.BPFMap = subArgs[i+1]
-				i++
-			}
+		if (arg == "-u" || arg == "--url") && i+1 < len(rawArgs) {
+			flagURL = rawArgs[i+1]
+			i++
+			continue
 		}
-		runDaemon(cfg.RulesPath, cfg.BPFMap, listenAddr)
-		return
+		if strings.HasPrefix(arg, "--api-key=") {
+			flagKey = strings.TrimPrefix(arg, "--api-key=")
+			continue
+		}
+		if (arg == "-k" || arg == "--api-key" || arg == "--key") && i+1 < len(rawArgs) {
+			flagKey = rawArgs[i+1]
+			i++
+			continue
+		}
+		if strings.HasPrefix(arg, "--rules=") {
+			flagRules = strings.TrimPrefix(arg, "--rules=")
+			continue
+		}
+		if (arg == "-r" || arg == "--rules") && i+1 < len(rawArgs) {
+			flagRules = rawArgs[i+1]
+			i++
+			continue
+		}
+		if strings.HasPrefix(arg, "--bpf-map=") {
+			flagBPFMap = strings.TrimPrefix(arg, "--bpf-map=")
+			continue
+		}
+		if (arg == "-m" || arg == "--bpf-map") && i+1 < len(rawArgs) {
+			flagBPFMap = rawArgs[i+1]
+			i++
+			continue
+		}
+		if strings.HasPrefix(arg, "--listen=") {
+			flagListen = strings.TrimPrefix(arg, "--listen=")
+			continue
+		}
+		if arg == "--listen" && i+1 < len(rawArgs) {
+			flagListen = rawArgs[i+1]
+			i++
+			continue
+		}
+		cleaned = append(cleaned, arg)
 	}
+	return
+}
 
-	if len(args) == 0 {
+func main() {
+	cleaned, flagURL, flagKey, flagRules, flagBPFMap, flagListen, isDaemon, isHelp, isVersion := parseGlobalArgs(os.Args[1:])
+
+	if isHelp || len(cleaned) == 0 {
 		printHelp()
 		return
 	}
-
-	cmd := strings.ToLower(args[0])
-	cmdArgs := args[1:]
-
-	switch cmd {
-	case "help", "-h", "--help":
-		printHelp()
-	case "version", "-v", "--version":
+	if isVersion {
 		printVersion()
-	case "daemon", "run", "serve", "gateway":
+		return
+	}
+
+	cfg := resolveConfig(flagURL, flagKey, flagRules, flagBPFMap)
+	listenAddr := ":8080"
+	if flagListen != "" {
+		listenAddr = flagListen
+	}
+
+	cmd := strings.ToLower(cleaned[0])
+	cmdArgs := cleaned[1:]
+
+	if isDaemon || cmd == "daemon" || cmd == "run" || cmd == "serve" || cmd == "gateway" {
 		for i := 0; i < len(cmdArgs); i++ {
 			arg := cmdArgs[i]
 			if strings.HasPrefix(arg, "--listen=") {
@@ -237,6 +318,20 @@ func main() {
 			}
 		}
 		runDaemon(cfg.RulesPath, cfg.BPFMap, listenAddr)
+		return
+	}
+
+	switch cmd {
+	case "help", "-h", "--help":
+		printHelp()
+	case "version", "-v", "--version":
+		printVersion()
+	case "apikey", "api-key", "key":
+		handleAPIKey(cfg, cmdArgs)
+	case "whitelist", "allow":
+		handleWhitelist(cfg, cmdArgs)
+	case "lookup", "inspect", "whois":
+		handleLookup(cfg, cmdArgs)
 	case "block":
 		handleBlock(cfg, cmdArgs)
 	case "unblock":
@@ -313,19 +408,22 @@ func printHelp() {
 	fmt.Fprintf(w, "  %sban <ip> [ttl] [reason]%s\tInstantly quarantine IP in kernel XDP (e.g. copsec ban 1.2.3.4 1h)\n", cYellow, cReset)
 	fmt.Fprintf(w, "  %sunban <ip>%s\tEvict IP from kernel quarantine list\n", cYellow, cReset)
 	fmt.Fprintf(w, "  %sbans%s (quarantine)\tList all active kernel quarantine bans & TTLs\n", cYellow, cReset)
+	fmt.Fprintf(w, "  %swhitelist%s (allow)\tManage trusted IPs & CIDRs (list, add, remove)\n", cYellow, cReset)
 	fmt.Fprintf(w, "  %semergency-flush%s\tEmergency panic flush of all active quarantines\n", cRed, cReset)
 	w.Flush()
 
 	fmt.Printf("\n%sTELEMETRY & INTELLIGENCE:%s\n", cBold+cWhite, cReset)
 	w = tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
+	fmt.Fprintf(w, "  %slookup <ip>%s\tQuery threat intelligence, GeoIP, ASN & mitigation state\n", cCyan, cReset)
 	fmt.Fprintf(w, "  %salerts [limit]%s\tDisplay latest security alerts & mitigation status\n", cCyan, cReset)
 	fmt.Fprintf(w, "  %sfleet%s (nodes)\tList enrolled autonomous edge sensor nodes & status\n", cCyan, cReset)
 	fmt.Fprintf(w, "  %srules%s (sigma)\tList active Sigma & eBPF detection rules\n", cCyan, cReset)
 	fmt.Fprintf(w, "  %scanary%s\tInspect canary deception breadcrumbs and honeytokens\n", cCyan, cReset)
 	w.Flush()
 
-	fmt.Printf("\n%sSYSTEM & DAEMON MANAGEMENT:%s\n", cBold+cWhite, cReset)
+	fmt.Printf("\n%sCREDENTIALS & DAEMON MANAGEMENT:%s\n", cBold+cWhite, cReset)
 	w = tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
+	fmt.Fprintf(w, "  %sapikey%s [show|set|gen]\tInspect, configure, or generate operator API key\n", cGreen, cReset)
 	fmt.Fprintf(w, "  %sdaemon%s (run, serve)\tBootstrap CoPSeC standalone daemon with web dashboard\n", cGreen, cReset)
 	fmt.Fprintf(w, "  %slogs [svc] [-f] [n]%s\tView service logs (controller, collector, cockpit)\n", cWhite, cReset)
 	fmt.Fprintf(w, "  %srestart [svc]%s\tRestart CoPSeC service(s) (all, controller, collector)\n", cWhite, cReset)
@@ -337,20 +435,22 @@ func printHelp() {
 
 	fmt.Printf("\n%sOPTIONS:%s\n", cBold+cWhite, cReset)
 	fmt.Printf("  %s-u, --url <url>%s        Controller base address (Default: http://127.0.0.1:8080)\n", cGray, cReset)
+	fmt.Printf("  %s-k, --api-key <key>%s    Operator API authentication key\n", cGray, cReset)
 	fmt.Printf("  %s-r, --rules <path>%s     Path to rules.yaml/json (Default: /etc/copsec/rules.yaml)\n", cGray, cReset)
 	fmt.Printf("  %s-m, --bpf-map <path>%s   Path to pinned BPF LPM trie map\n", cGray, cReset)
 	fmt.Printf("  %s--listen <addr>%s        Web dashboard listen address (Default: :8080)\n", cGray, cReset)
 	fmt.Printf("  %s-d, --daemon%s           Run in standalone daemon mode\n", cGray, cReset)
 	fmt.Printf("\n%sEXAMPLES:%s\n", cBold+cWhite, cReset)
 	fmt.Printf("  copsec status\n")
+	fmt.Printf("  copsec apikey show\n")
 	fmt.Printf("  copsec block 192.0.2.0/24 \"Malicious subnet\"\n")
 	fmt.Printf("  copsec unblock 192.0.2.0/24\n")
-	fmt.Printf("  copsec list\n")
-	fmt.Printf("  copsec reload-rules /etc/copsec/rules.yaml\n")
-	fmt.Printf("  copsec daemon --listen :8080\n")
 	fmt.Printf("  copsec ban 198.51.100.4 2h \"brute-force attempt\"\n")
 	fmt.Printf("  copsec unban 198.51.100.4\n")
-	fmt.Printf("  copsec bans\n")
+	fmt.Printf("  copsec ban list\n")
+	fmt.Printf("  copsec whitelist add 192.168.1.0/24 \"Management subnet\"\n")
+	fmt.Printf("  copsec whitelist list\n")
+	fmt.Printf("  copsec lookup 198.51.100.4\n")
 	fmt.Printf("  copsec logs controller -f\n\n")
 }
 
@@ -378,6 +478,12 @@ func apiRequest(cfg Config, method, endpoint string, body interface{}) (*http.Re
 
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
+	}
+
+	// Attach authentication headers if key is present
+	if cfg.APIKey != "" {
+		req.Header.Set("X-API-Key", cfg.APIKey)
+		req.Header.Set("Authorization", "Bearer "+cfg.APIKey)
 	}
 
 	client := &http.Client{Timeout: DefaultTimeout}
@@ -437,46 +543,77 @@ func checkServiceActive(svc string) string {
 func handleStatus(cfg Config) {
 	fmt.Printf("%s=== CoPSeC Enterprise Cluster Status ===%s\n", cBold+cCyan, cReset)
 
-	// 1. Host Services
-	fmt.Printf("%s[HOST SERVICES]%s\n", cBold+cWhite, cReset)
+	// 1. Host Services & Role
+	controllerActive := isServiceActive("copsec-controller")
+	collectorActive := isServiceActive("copsec-collector")
+
+	role := "Standalone / Edge Node"
+	if controllerActive && collectorActive {
+		role = "Autonomous All-In-One (Controller + Edge Sensor)"
+	} else if controllerActive {
+		role = "Central Controller & Vault Hub"
+	} else if collectorActive {
+		role = "Autonomous Edge Sensor (eBPF/XDP Protection Active)"
+	}
+
+	fmt.Printf("%s[HOST ARCHITECTURE]%s\n", cBold+cWhite, cReset)
+	fmt.Printf("  • Assigned Role     : %s%s%s\n", cBold+cGreen, role, cReset)
 	fmt.Printf("  • copsec-controller : %s\n", checkServiceActive("copsec-controller"))
 	fmt.Printf("  • copsec-collector  : %s\n", checkServiceActive("copsec-collector"))
 	fmt.Printf("  • copsec-cockpit    : %s\n", checkServiceActive("copsec-cockpit"))
 
-	// 2. Web Management
-	fmt.Printf("\n%s[MANAGEMENT & DASHBOARD]%s\n", cBold+cWhite, cReset)
+	// 2. Management & Key
+	fmt.Printf("\n%s[MANAGEMENT & CONTROL PLANE]%s\n", cBold+cWhite, cReset)
 	ip := getServerIP()
-	fmt.Printf("  • Web SOC Cockpit   : %shttp://%s:8080%s (or http://127.0.0.1:8080)\n", cCyan, ip, cReset)
+	fmt.Printf("  • Controller Target : %s%s%s\n", cCyan, cfg.BaseURL, cReset)
+	if controllerActive {
+		fmt.Printf("  • Web SOC Cockpit   : %shttp://%s:8080%s (or http://127.0.0.1:8080)\n", cCyan, ip, cReset)
+	}
+	maskedKey := "[NOT CONFIGURED]"
+	if cfg.APIKey != "" {
+		if len(cfg.APIKey) > 12 {
+			maskedKey = cfg.APIKey[:6] + "..." + cfg.APIKey[len(cfg.APIKey)-6:]
+		} else {
+			maskedKey = cfg.APIKey
+		}
+	}
+	fmt.Printf("  • Active API Key    : %s%s%s\n", cYellow, maskedKey, cReset)
 	fmt.Printf("  • Local Rules File  : %s%s%s\n", cWhite, cfg.RulesPath, cReset)
 
 	// 3. Query Controller Health & Stats
-	fmt.Printf("\n%s[REAL-TIME TELEMETRY]%s\n", cBold+cWhite, cReset)
+	fmt.Printf("\n%s[REAL-TIME CLUSTER TELEMETRY]%s\n", cBold+cWhite, cReset)
 	resp, body, err := apiRequest(cfg, "GET", "/api/stats", nil)
 	if err != nil {
 		fmt.Printf("  %s[!] Could not connect to controller API (%s): %v%s\n", cYellow, cfg.BaseURL, err, cReset)
-		fmt.Printf("  Hint: Ensure 'copsec-controller' service is running ('copsec start controller').\n")
+		if collectorActive && !controllerActive {
+			fmt.Printf("  Tip: On sensor nodes, specify controller target via: 'copsec status -u http://<controller-ip>:8080'\n")
+			fmt.Printf("       or set COPSEC_CONTROLLER_URL=\"http://<controller-ip>:8080\"\n")
+		} else {
+			fmt.Printf("  Hint: Ensure 'copsec-controller' service is running ('copsec start controller').\n")
+		}
+		fmt.Println()
 		return
 	}
 	if resp.StatusCode == 401 {
 		fmt.Printf("  %s[!] API Authentication Failed (401 Unauthorized)%s\n", cRed, cReset)
-		fmt.Printf("  Hint: Active API key does not match controller. Update using 'copsec apikey set <key>'.\n")
+		fmt.Printf("  Hint: Active API key does not match controller. Update using 'copsec apikey set <key>'.\n\n")
 		return
 	}
 	if resp.StatusCode != 200 {
-		fmt.Printf("  %s[!] Controller returned HTTP %d: %s%s\n", cRed, resp.StatusCode, string(body), cReset)
+		fmt.Printf("  %s[!] Controller returned HTTP %d: %s%s\n\n", cRed, resp.StatusCode, string(body), cReset)
 		return
 	}
 
 	var stats struct {
-		EPS            uint64 `json:"eps"`
-		TotalEvents    uint64 `json:"total_events"`
-		NodesCount     int    `json:"nodes_count"`
-		ActiveBans     int    `json:"active_bans"`
-		ActiveAlerts   int    `json:"active_alerts"`
-		ArchiveAlerts  int    `json:"archive_alerts"`
+		EPS           uint64 `json:"eps"`
+		TotalEvents   uint64 `json:"total_events"`
+		NodesCount    int    `json:"nodes_count"`
+		ActiveBans    int    `json:"active_bans"`
+		ActiveAlerts  int    `json:"active_alerts"`
+		ArchiveAlerts int    `json:"archive_alerts"`
 	}
 	if err := json.Unmarshal(body, &stats); err != nil {
-		fmt.Printf("  [!] Failed to parse telemetry stats: %v\n", err)
+		fmt.Printf("  [!] Failed to parse telemetry stats: %v\n\n", err)
 		return
 	}
 
@@ -485,6 +622,340 @@ func handleStatus(cfg Config) {
 	fmt.Printf("  • Active Bans (XDP) : %s%d quarantined%s\n", cYellow, stats.ActiveBans, cReset)
 	fmt.Printf("  • Active Alerts     : %s%d unmitigated%s\n", cRed, stats.ActiveAlerts, cReset)
 	fmt.Printf("  • Fleet Nodes       : %s%d sensors connected%s\n", cCyan, stats.NodesCount, cReset)
+	fmt.Println()
+}
+
+func handleAPIKey(cfg Config, args []string) {
+	sub := "show"
+	if len(args) > 0 {
+		sub = strings.ToLower(args[0])
+	}
+
+	switch sub {
+	case "show", "get", "status":
+		fmt.Printf("%s=== CoPSeC API Key Credentials ===%s\n\n", cBold+cCyan, cReset)
+		if cfg.APIKey == "" {
+			fmt.Printf("  • Status : %s[NO KEY CONFIGURED]%s\n", cRed, cReset)
+			fmt.Printf("  • Hint   : Run '%scopsec apikey set <key>%s' or '%scopsec apikey generate%s'\n\n", cCyan, cReset, cCyan, cReset)
+			return
+		}
+		masked := cfg.APIKey
+		showFull := false
+		for _, a := range args {
+			if a == "--full" || a == "-f" {
+				showFull = true
+			}
+		}
+		if !showFull && len(masked) > 12 {
+			masked = masked[:6] + "..." + masked[len(masked)-6:]
+		}
+		fmt.Printf("  • Active Key : %s%s%s\n", cGreen, masked, cReset)
+		if !showFull && len(cfg.APIKey) > 12 {
+			fmt.Printf("    (Use '--full' or '-f' to reveal complete token)\n")
+		}
+		source := "environment (COPSEC_API_KEY)"
+		if _, err := os.Stat("/etc/copsec/api_key"); err == nil {
+			source = "/etc/copsec/api_key"
+		} else if _, err := os.Stat("/etc/copsec/copsec.env"); err == nil {
+			source = "/etc/copsec/copsec.env"
+		}
+		fmt.Printf("  • Source     : %s\n\n", source)
+
+	case "set":
+		if len(args) < 2 {
+			fmt.Printf("%s[!] Error:%s Missing API key value. Usage: %scopsec apikey set <key>%s\n", cRed, cReset, cCyan, cReset)
+			os.Exit(1)
+		}
+		newKey := strings.TrimSpace(args[1])
+		if len(newKey) < 8 {
+			fmt.Printf("%s[!] Error:%s API key must be at least 8 characters long.\n", cRed, cReset)
+			os.Exit(1)
+		}
+
+		saved := false
+		if os.Geteuid() == 0 || os.Getenv("USER") == "root" {
+			_ = os.MkdirAll("/etc/copsec", 0755)
+			if err := os.WriteFile("/etc/copsec/api_key", []byte(newKey+"\n"), 0644); err == nil {
+				saved = true
+				fmt.Printf("%s[[OK]] Saved API key to /etc/copsec/api_key (permissions: 0644)%s\n", cGreen, cReset)
+			}
+			if envData, err := os.ReadFile("/etc/copsec/copsec.env"); err == nil {
+				lines := strings.Split(string(envData), "\n")
+				found := false
+				for i, l := range lines {
+					if strings.HasPrefix(strings.TrimSpace(l), "COPSEC_API_KEY=") {
+						lines[i] = fmt.Sprintf("COPSEC_API_KEY=\"%s\"", newKey)
+						found = true
+						break
+					}
+				}
+				if !found {
+					lines = append(lines, fmt.Sprintf("COPSEC_API_KEY=\"%s\"", newKey))
+				}
+				_ = os.WriteFile("/etc/copsec/copsec.env", []byte(strings.Join(lines, "\n")), 0600)
+			}
+		}
+
+		if !saved {
+			home, err := os.UserHomeDir()
+			if err == nil {
+				cfgDir := filepath.Join(home, ".config", "copsec")
+				_ = os.MkdirAll(cfgDir, 0700)
+				filePath := filepath.Join(cfgDir, "api_key")
+				if err := os.WriteFile(filePath, []byte(newKey+"\n"), 0600); err == nil {
+					saved = true
+					fmt.Printf("%s[[OK]] Saved API key to %s%s\n", cGreen, filePath, cReset)
+				}
+			}
+		}
+
+		if !saved {
+			fmt.Printf("%s[!] Failed to save API key to disk. You can set it via: export COPSEC_API_KEY=\"%s\"%s\n", cYellow, newKey, cReset)
+		}
+
+	case "generate", "gen":
+		b := make([]byte, 32)
+		if _, err := rand.Read(b); err != nil {
+			fmt.Printf("%s[!] Failed to generate random key: %v%s\n", cRed, err, cReset)
+			os.Exit(1)
+		}
+		key := hex.EncodeToString(b)
+		fmt.Printf("%s=== Generated Cryptographic API Key ===%s\n\n", cBold+cCyan, cReset)
+		fmt.Printf("  %s%s%s\n\n", cBold+cGreen, key, cReset)
+		fmt.Printf("  To activate this key:\n")
+		fmt.Printf("    %scopsec apikey set %s%s\n\n", cCyan, key, cReset)
+
+	default:
+		fmt.Printf("%s[!] Unknown apikey action: '%s'%s\n", cRed, sub, cReset)
+		fmt.Printf("Usage: copsec apikey [show|set <key>|generate]\n")
+		os.Exit(1)
+	}
+}
+
+func handleWhitelist(cfg Config, args []string) {
+	sub := "list"
+	subArgs := args
+	if len(args) > 0 {
+		first := strings.ToLower(args[0])
+		if first == "list" || first == "ls" {
+			sub = "list"
+			subArgs = args[1:]
+		} else if first == "add" {
+			sub = "add"
+			subArgs = args[1:]
+		} else if first == "remove" || first == "rm" || first == "del" || first == "delete" {
+			sub = "remove"
+			subArgs = args[1:]
+		} else if net.ParseIP(args[0]) != nil || strings.Contains(args[0], "/") {
+			sub = "add"
+			subArgs = args
+		}
+	}
+
+	switch sub {
+	case "list":
+		resp, body, err := apiRequest(cfg, "GET", "/api/whitelist", nil)
+		if err != nil {
+			fmt.Printf("%s[!] Connection error:%s %v\n", cRed, cReset, err)
+			os.Exit(1)
+		}
+		if resp.StatusCode == 401 {
+			fmt.Printf("%s[!] Authentication Failed (401 Unauthorized)%s\n", cRed, cReset)
+			fmt.Printf("Hint: Set API key using 'copsec apikey set <key>'\n")
+			os.Exit(1)
+		}
+		if resp.StatusCode != 200 {
+			fmt.Printf("%s[!] Failed to query whitelist (HTTP %d):%s %s\n", cRed, resp.StatusCode, cReset, string(body))
+			os.Exit(1)
+		}
+
+		var res struct {
+			Success bool `json:"success"`
+			Entries []struct {
+				ID          int64  `json:"id"`
+				CIDROrIP    string `json:"cidr_or_ip"`
+				Description string `json:"description"`
+				CreatedBy   string `json:"created_by"`
+				CreatedAt   int64  `json:"created_at"`
+			} `json:"entries"`
+			Subnets   []string `json:"subnets"`
+			Resolvers []string `json:"resolvers"`
+		}
+
+		if err := json.Unmarshal(body, &res); err != nil {
+			fmt.Printf("%s[!] Failed to parse response: %v%s\n", cRed, err, cReset)
+			return
+		}
+
+		fmt.Printf("%s=== Active Whitelist & Trusted Networks (%d entries) ===%s\n\n", cBold+cGreen, len(res.Entries), cReset)
+		if len(res.Entries) == 0 {
+			fmt.Printf("  %sNo custom whitelisted CIDRs. Default safeguards active.%s\n\n", cGray, cReset)
+			return
+		}
+
+		w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
+		fmt.Fprintf(w, "%sCIDR / IP\tORIGIN\tDESCRIPTION%s\n", cBold+cWhite, cReset)
+		for _, e := range res.Entries {
+			desc := e.Description
+			if desc == "" {
+				desc = "-"
+			}
+			fmt.Fprintf(w, "%s%s%s\t%s\t%s\n", cGreen, e.CIDROrIP, cReset, e.CreatedBy, desc)
+		}
+		w.Flush()
+		fmt.Println()
+
+	case "add":
+		if len(subArgs) == 0 {
+			fmt.Printf("%s[!] Error:%s Missing target IP or CIDR prefix. Usage: %scopsec whitelist add <ip/cidr> [reason]%s\n", cRed, cReset, cCyan, cReset)
+			os.Exit(1)
+		}
+		target := strings.TrimSpace(subArgs[0])
+		desc := "Manual CLI Whitelist"
+		if len(subArgs) > 1 {
+			desc = strings.Join(subArgs[1:], " ")
+		}
+
+		payload := map[string]string{
+			"cidr_or_ip":  target,
+			"description": desc,
+		}
+
+		resp, respBody, err := apiRequest(cfg, "POST", "/api/whitelist", payload)
+		if err != nil {
+			fmt.Printf("%s[!] Connection error:%s %v\n", cRed, cReset, err)
+			os.Exit(1)
+		}
+		if resp.StatusCode == 401 {
+			fmt.Printf("%s[!] Authentication Failed (401 Unauthorized)%s\n", cRed, cReset)
+			fmt.Printf("Hint: Set API key using 'copsec apikey set <key>'\n")
+			os.Exit(1)
+		}
+		if resp.StatusCode != 200 && resp.StatusCode != 201 {
+			fmt.Printf("%s[!] Whitelist add failed (HTTP %d):%s %s\n", cRed, resp.StatusCode, cReset, string(respBody))
+			os.Exit(1)
+		}
+
+		fmt.Printf("%s[[OK]] Target %s successfully added to active whitelist!%s\n", cGreen, target, cReset)
+		fmt.Printf("    Reason : %s\n\n", desc)
+
+	case "remove":
+		if len(subArgs) == 0 {
+			fmt.Printf("%s[!] Error:%s Missing target IP or CIDR. Usage: %scopsec whitelist remove <ip/cidr>%s\n", cRed, cReset, cCyan, cReset)
+			os.Exit(1)
+		}
+		target := strings.TrimSpace(subArgs[0])
+		endpoint := fmt.Sprintf("/api/whitelist?cidr_or_ip=%s", url.QueryEscape(target))
+
+		resp, respBody, err := apiRequest(cfg, "DELETE", endpoint, nil)
+		if err != nil {
+			fmt.Printf("%s[!] Connection error:%s %v\n", cRed, cReset, err)
+			os.Exit(1)
+		}
+		if resp.StatusCode == 401 {
+			fmt.Printf("%s[!] Authentication Failed (401 Unauthorized)%s\n", cRed, cReset)
+			fmt.Printf("Hint: Set API key using 'copsec apikey set <key>'\n")
+			os.Exit(1)
+		}
+		if resp.StatusCode != 200 {
+			fmt.Printf("%s[!] Whitelist remove failed (HTTP %d):%s %s\n", cRed, resp.StatusCode, cReset, string(respBody))
+			os.Exit(1)
+		}
+
+		fmt.Printf("%s[[OK]] Target %s successfully evicted from whitelist.%s\n\n", cGreen, target, cReset)
+	}
+}
+
+func handleLookup(cfg Config, args []string) {
+	if len(args) == 0 {
+		fmt.Printf("%s[!] Error:%s Missing target IP. Usage: %scopsec lookup <ip>%s\n", cRed, cReset, cCyan, cReset)
+		os.Exit(1)
+	}
+	targetIP := strings.TrimSpace(args[0])
+	if net.ParseIP(targetIP) == nil {
+		fmt.Printf("%s[!] Error:%s Invalid IP address: '%s'\n", cRed, cReset, targetIP)
+		os.Exit(1)
+	}
+
+	fmt.Printf("%s=== CoPSeC Threat Intelligence Lookup: %s ===%s\n\n", cBold+cCyan, targetIP, cReset)
+
+	// 1. GeoIP lookup
+	resp, body, err := apiRequest(cfg, "GET", "/api/geoip/lookup?ip="+url.QueryEscape(targetIP), nil)
+	if err == nil && resp.StatusCode == 200 {
+		var geo struct {
+			IP          string `json:"ip"`
+			Country     string `json:"country"`
+			CountryCode string `json:"country_code"`
+			City        string `json:"city"`
+			ASN         string `json:"asn"`
+			Org         string `json:"org"`
+			ThreatScore int    `json:"threat_score"`
+			Flag        string `json:"flag"`
+		}
+		if json.Unmarshal(body, &geo) == nil && geo.Country != "" {
+			fmt.Printf("  • Country      : %s %s (%s)\n", geo.Flag, geo.Country, geo.CountryCode)
+			if geo.City != "" {
+				fmt.Printf("  • City         : %s\n", geo.City)
+			}
+			if geo.ASN != "" {
+				fmt.Printf("  • ASN          : %s\n", geo.ASN)
+			}
+			if geo.Org != "" {
+				fmt.Printf("  • Organization : %s\n", geo.Org)
+			}
+			scoreColor := cGreen
+			if geo.ThreatScore >= 80 {
+				scoreColor = cBold + cRed
+			} else if geo.ThreatScore >= 50 {
+				scoreColor = cYellow
+			}
+			fmt.Printf("  • Threat Score : %s%d / 100%s\n", scoreColor, geo.ThreatScore, cReset)
+		}
+	}
+
+	// 2. Quarantine Status lookup
+	qResp, qBody, qErr := apiRequest(cfg, "GET", "/api/quarantine", nil)
+	isBanned := false
+	if qErr == nil && qResp.StatusCode == 200 {
+		var bans []struct {
+			IP           string `json:"ip"`
+			Reason       string `json:"reason"`
+			RemainingSec int64  `json:"remaining_sec"`
+		}
+		if json.Unmarshal(qBody, &bans) == nil {
+			for _, b := range bans {
+				if b.IP == targetIP {
+					isBanned = true
+					fmt.Printf("  • Mitigation   : %sQUARANTINED (Active eBPF/XDP Drop)%s\n", cBold+cRed, cReset)
+					fmt.Printf("  • Reason       : %s\n", b.Reason)
+					fmt.Printf("  • Remaining    : %d seconds\n", b.RemainingSec)
+					break
+				}
+			}
+		}
+	}
+	if !isBanned {
+		fmt.Printf("  • Mitigation   : %sNOT BANNED (Normal Traffic Flow)%s\n", cGreen, cReset)
+	}
+
+	// 3. Whitelist check
+	wlResp, wlBody, wlErr := apiRequest(cfg, "GET", "/api/whitelist", nil)
+	if wlErr == nil && wlResp.StatusCode == 200 {
+		var wl struct {
+			Entries []struct {
+				CIDROrIP    string `json:"cidr_or_ip"`
+				Description string `json:"description"`
+			} `json:"entries"`
+		}
+		if json.Unmarshal(wlBody, &wl) == nil {
+			for _, e := range wl.Entries {
+				if e.CIDROrIP == targetIP || strings.HasPrefix(e.CIDROrIP, targetIP+"/") {
+					fmt.Printf("  • Whitelist    : %sPROTECTED (%s)%s\n", cGreen, e.Description, cReset)
+					break
+				}
+			}
+		}
+	}
 	fmt.Println()
 }
 
@@ -518,7 +989,6 @@ func ensureSudo(reason string) {
 
 	var cmd *exec.Cmd
 	if strings.HasSuffix(sudoPath, "sudo") {
-		// -k invalidates cached credentials, forcing sudo to prompt for the password
 		cmdArgs := append([]string{"-k", selfPath}, os.Args[1:]...)
 		cmd = exec.Command(sudoPath, cmdArgs...)
 	} else {
@@ -552,6 +1022,9 @@ func parseDurationSeconds(durStr string) int64 {
 	if durStr == "" {
 		return 3600 // default 1 hour
 	}
+	if durStr == "permanent" || durStr == "indefinite" || durStr == "0" || durStr == "-1" {
+		return 86400 * 365 // 1 year
+	}
 	if sec, err := strconv.ParseInt(durStr, 10, 64); err == nil {
 		return sec
 	}
@@ -576,12 +1049,43 @@ func parseDurationSeconds(durStr string) int64 {
 func handleBan(cfg Config, args []string) {
 	if len(args) == 0 {
 		fmt.Printf("%s[!] Error:%s Missing target IP. Usage: %scopsec ban <ip> [duration] [reason]%s\n", cRed, cReset, cCyan, cReset)
+		fmt.Printf("    Or list bans: %scopsec ban list%s\n", cCyan, cReset)
 		os.Exit(1)
 	}
 
-	ip := strings.TrimSpace(args[0])
-	if net.ParseIP(ip) == nil {
-		fmt.Printf("%s[!] Error:%s Invalid IP format: '%s'\n", cRed, cReset, ip)
+	first := strings.ToLower(args[0])
+	if first == "list" || first == "ls" {
+		handleListBans(cfg)
+		return
+	}
+	if first == "clear" || first == "flush" || first == "clear-list" {
+		handleEmergencyFlush(cfg)
+		return
+	}
+	if first == "remove" || first == "rm" || first == "del" || first == "delete" {
+		handleUnban(cfg, args[1:])
+		return
+	}
+	if first == "add" {
+		args = args[1:]
+		if len(args) == 0 {
+			fmt.Printf("%s[!] Error:%s Missing target IP after 'add'. Usage: %scopsec ban add <ip> [duration] [reason]%s\n", cRed, cReset, cCyan, cReset)
+			os.Exit(1)
+		}
+	}
+
+	target := strings.TrimSpace(args[0])
+
+	// If user passed a CIDR (e.g. 192.168.1.0/24), automatically dispatch to handleBlock
+	if strings.Contains(target, "/") {
+		if _, _, err := net.ParseCIDR(target); err == nil {
+			handleBlock(cfg, args)
+			return
+		}
+	}
+
+	if net.ParseIP(target) == nil {
+		fmt.Printf("%s[!] Error:%s Invalid IP format: '%s'\n", cRed, cReset, target)
 		os.Exit(1)
 	}
 
@@ -596,7 +1100,7 @@ func handleBan(cfg Config, args []string) {
 	}
 
 	payload := map[string]interface{}{
-		"ip":               ip,
+		"ip":               target,
 		"reason":           reason,
 		"duration_seconds": durationSec,
 	}
@@ -606,13 +1110,26 @@ func handleBan(cfg Config, args []string) {
 		fmt.Printf("%s[!] Connection error:%s %v\n", cRed, cReset, err)
 		os.Exit(1)
 	}
+	if resp.StatusCode == 401 {
+		fmt.Printf("%s[!] Authentication Failed (401 Unauthorized)%s\n", cRed, cReset)
+		fmt.Printf("Hint: Set API key using 'copsec apikey set <key>'\n")
+		os.Exit(1)
+	}
+	if resp.StatusCode == 409 {
+		fmt.Printf("%s[!] Ban Rejected: Target IP is protected by an active whitelist rule.%s\n", cYellow, cReset)
+		os.Exit(1)
+	}
 	if resp.StatusCode != 200 {
 		fmt.Printf("%s[!] Ban failed (HTTP %d):%s %s\n", cRed, resp.StatusCode, cReset, string(respBody))
 		os.Exit(1)
 	}
 
-	fmt.Printf("%s[[OK]] IP %s successfully quarantined in kernel eBPF/XDP map!%s\n", cGreen, ip, cReset)
-	fmt.Printf("    Duration : %d seconds (~%s)\n", durationSec, time.Duration(durationSec)*time.Second)
+	durDesc := fmt.Sprintf("%d seconds (~%s)", durationSec, time.Duration(durationSec)*time.Second)
+	if durationSec <= 0 || durationSec >= 86400*365 {
+		durDesc = "PERMANENT"
+	}
+	fmt.Printf("%s[[OK]] IP %s successfully quarantined in kernel eBPF/XDP map!%s\n", cGreen, target, cReset)
+	fmt.Printf("    Duration : %s\n", durDesc)
 	fmt.Printf("    Reason   : %s\n", reason)
 }
 
@@ -622,7 +1139,19 @@ func handleUnban(cfg Config, args []string) {
 		os.Exit(1)
 	}
 
+	first := strings.ToLower(args[0])
+	if first == "remove" || first == "rm" || first == "del" || first == "delete" {
+		args = args[1:]
+		if len(args) == 0 {
+			fmt.Printf("%s[!] Error:%s Missing target IP. Usage: %scopsec unban <ip>%s\n", cRed, cReset, cCyan, cReset)
+			os.Exit(1)
+		}
+	}
+
 	ip := strings.TrimSpace(args[0])
+	if strings.Contains(ip, "/") {
+		ip = strings.TrimSuffix(ip, "/32")
+	}
 	if net.ParseIP(ip) == nil {
 		fmt.Printf("%s[!] Error:%s Invalid IP format: '%s'\n", cRed, cReset, ip)
 		os.Exit(1)
@@ -637,6 +1166,11 @@ func handleUnban(cfg Config, args []string) {
 		fmt.Printf("%s[!] Connection error:%s %v\n", cRed, cReset, err)
 		os.Exit(1)
 	}
+	if resp.StatusCode == 401 {
+		fmt.Printf("%s[!] Authentication Failed (401 Unauthorized)%s\n", cRed, cReset)
+		fmt.Printf("Hint: Set API key using 'copsec apikey set <key>'\n")
+		os.Exit(1)
+	}
 	if resp.StatusCode != 200 {
 		fmt.Printf("%s[!] Unban failed (HTTP %d):%s %s\n", cRed, resp.StatusCode, cReset, string(respBody))
 		os.Exit(1)
@@ -649,6 +1183,11 @@ func handleListBans(cfg Config) {
 	resp, body, err := apiRequest(cfg, "GET", "/api/quarantine", nil)
 	if err != nil {
 		fmt.Printf("%s[!] Connection error:%s %v\n", cRed, cReset, err)
+		os.Exit(1)
+	}
+	if resp.StatusCode == 401 {
+		fmt.Printf("%s[!] Authentication Failed (401 Unauthorized)%s\n", cRed, cReset)
+		fmt.Printf("Hint: Set API key using 'copsec apikey set <key>'\n")
 		os.Exit(1)
 	}
 	if resp.StatusCode != 200 {
@@ -1305,7 +1844,29 @@ func handleBlock(cfg Config, args []string) {
 		os.Exit(1)
 	}
 
+	first := strings.ToLower(args[0])
+	if first == "list" || first == "ls" {
+		handleListBlocks(cfg)
+		return
+	}
+	if first == "add" {
+		args = args[1:]
+		if len(args) == 0 {
+			fmt.Printf("%s[!] Error: CIDR prefix required after 'add'%s\n", cRed, cReset)
+			os.Exit(1)
+		}
+	}
+	if first == "remove" || first == "rm" || first == "del" || first == "delete" {
+		handleUnblock(cfg, args[1:])
+		return
+	}
+
 	cidr := strings.TrimSpace(args[0])
+	// Auto-append /32 if single IPv4 address
+	if net.ParseIP(cidr) != nil && !strings.Contains(cidr, "/") {
+		cidr = cidr + "/32"
+	}
+
 	desc := "Manual CLI block"
 	if len(args) > 1 {
 		desc = strings.Join(args[1:], " ")
@@ -1316,10 +1877,22 @@ func handleBlock(cfg Config, args []string) {
 		"cidr":        cidr,
 		"description": desc,
 	}
-	resp, _, err := apiRequest(cfg, "POST", "/api/v1/blocks", reqBody)
+	resp, respBody, err := apiRequest(cfg, "POST", "/api/v1/blocks", reqBody)
 	if err == nil && (resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusCreated) {
 		fmt.Printf("%s[+] Successfully blocked %s in kernel LPM trie (via active controller)%s\n", cGreen, cidr, cReset)
 		return
+	}
+	if resp != nil && resp.StatusCode == 401 {
+		fmt.Printf("%s[!] Authentication Failed (401 Unauthorized)%s\n", cRed, cReset)
+		fmt.Printf("Hint: Set API key using 'copsec apikey set <key>'\n")
+		os.Exit(1)
+	}
+	if resp != nil && resp.StatusCode == 409 {
+		fmt.Printf("%s[!] Block Rejected: Target %s is protected by active whitelist rule.%s\n", cYellow, cidr, cReset)
+		os.Exit(1)
+	}
+	if resp != nil && resp.StatusCode != 404 && resp.StatusCode != 200 && resp.StatusCode != 201 {
+		fmt.Printf("%s[!] Controller returned HTTP %d: %s%s\n", cRed, resp.StatusCode, string(respBody), cReset)
 	}
 
 	// 2. Offline / Standalone direct execution via pkg/rules
@@ -1356,10 +1929,22 @@ func handleUnblock(cfg Config, args []string) {
 		os.Exit(1)
 	}
 
+	first := strings.ToLower(args[0])
+	if first == "remove" || first == "rm" || first == "del" || first == "delete" {
+		args = args[1:]
+		if len(args) == 0 {
+			fmt.Printf("%s[!] Error: CIDR prefix required%s\n", cRed, cReset)
+			os.Exit(1)
+		}
+	}
+
 	cidr := strings.TrimSpace(args[0])
+	if net.ParseIP(cidr) != nil && !strings.Contains(cidr, "/") {
+		cidr = cidr + "/32"
+	}
 
 	// 1. Attempt to notify running controller via REST API
-	endpoint := fmt.Sprintf("/api/v1/blocks?cidr=%s", cidr)
+	endpoint := fmt.Sprintf("/api/v1/blocks?cidr=%s", url.QueryEscape(cidr))
 	resp, _, err := apiRequest(cfg, "DELETE", endpoint, nil)
 	if err == nil && resp.StatusCode == http.StatusOK {
 		fmt.Printf("%s[+] Successfully evicted prefix %s from kernel LPM trie (via active controller)%s\n", cGreen, cidr, cReset)

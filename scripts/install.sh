@@ -498,7 +498,7 @@ fi
 
 # Persist Master API Key
 echo "$API_KEY" > "${CONF_DIR}/api_key"
-chmod 600 "${CONF_DIR}/api_key"
+chmod 644 "${CONF_DIR}/api_key"
 
 cat << ENV_EOF > "${CONF_DIR}/copsec.env"
 COPSEC_API_KEY="${API_KEY}"

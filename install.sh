@@ -347,21 +347,39 @@ deploy_binaries_and_configs() {
     cp -f "${script_dir}/collector/copsec-collector" "${collector_binary}" || true
   fi
 
-  # Set binary permissions (0750 root:copsec)
+  # Locate or compile copsec unified CLI
+  local cli_binary="${COPSEC_INSTALL_DIR}/bin/copsec"
+  if command -v go >/dev/null 2>&1 && [ -d "${script_dir}/cmd/copsec" ]; then
+    echo -e "  ${CLR_BLUE}• Building copsec unified CLI from source...${CLR_RESET}"
+    (cd "${script_dir}/cmd/copsec" && go build -ldflags="-s -w" -o "${cli_binary}" .) || true
+  elif [ -f "${script_dir}/bin/copsec" ]; then
+    cp -f "${script_dir}/bin/copsec" "${cli_binary}" || true
+  fi
+
+  # Set binary permissions (0755 root:copsec)
   chmod 0755 "${controller_binary}"
   chown root:"${COPSEC_USER}" "${controller_binary}"
   if [ -f "${collector_binary}" ]; then
     chmod 0755 "${collector_binary}"
     chown root:"${COPSEC_USER}" "${collector_binary}"
   fi
+  if [ -f "${cli_binary}" ]; then
+    chmod 0755 "${cli_binary}"
+    chown root:"${COPSEC_USER}" "${cli_binary}"
+  fi
 
-  # Symlink to /usr/local/bin for immediate CLI access
+  # Symlink to /usr/local/bin and /usr/bin for immediate CLI access
   ln -sf "${controller_binary}" /usr/local/bin/copsec-controller
-  ln -sf "${controller_binary}" /usr/local/bin/copsec
   if [ -f "${collector_binary}" ]; then
     ln -sf "${collector_binary}" /usr/local/bin/copsec-collector
   fi
-  echo -e "  ${CLR_GREEN}[OK] Installed binaries linked to /usr/local/bin/copsec-controller${CLR_RESET}"
+  if [ -f "${cli_binary}" ]; then
+    ln -sf "${cli_binary}" /usr/local/bin/copsec
+    ln -sf "${cli_binary}" /usr/bin/copsec 2>/dev/null || true
+  else
+    ln -sf "${controller_binary}" /usr/local/bin/copsec
+  fi
+  echo -e "  ${CLR_GREEN}[OK] Installed binaries linked to /usr/local/bin and /usr/bin${CLR_RESET}"
 
   # Deploy Default Config Files if missing or forced
   if [ ! -f "${COPSEC_CONF_DIR}/rules.json" ] || [ "$FORCE_REINSTALL" = true ]; then
@@ -455,7 +473,13 @@ ENV_EOF
   # Lock down environment file permissions to 0600 (owner read/write only)
   chown "${COPSEC_USER}":"${COPSEC_USER}" "$env_file"
   chmod 0600 "$env_file"
-  echo -e "  ${CLR_GREEN}[OK] Configured environment file with strict permissions (0600 ${COPSEC_USER}:${COPSEC_USER})${CLR_RESET}"
+
+  # Write dedicated api_key file with 0644 permissions for CLI client tool access
+  echo "${COPSEC_API_KEY}" > "${COPSEC_CONF_DIR}/api_key"
+  chmod 0644 "${COPSEC_CONF_DIR}/api_key"
+  echo "http://127.0.0.1:${COPSEC_WEB_PORT:-8080}" > "${COPSEC_CONF_DIR}/controller_url"
+  chmod 0644 "${COPSEC_CONF_DIR}/controller_url"
+  echo -e "  ${CLR_GREEN}[OK] Configured environment file (0600), CLI api_key token (0644), and controller_url (0644)${CLR_RESET}"
 }
 
 # ------------------------------------------------------------------------------

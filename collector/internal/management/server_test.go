@@ -127,7 +127,7 @@ type mockManagementServer struct {
 func (m *mockManagementServer) GetEngineStatus(ctx context.Context, req *managementproto.EngineStatusRequest) (*managementproto.EngineStatusResponse, error) {
 	return &managementproto.EngineStatusResponse{
 		ActiveRulesCount: 42,
-		EngineVersion:    "2.0.0-poc",
+		EngineVersion:    2,
 	}, nil
 }
 
